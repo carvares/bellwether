@@ -21,6 +21,10 @@ Window {
     // and again only when the agent goes to a different group, so the person can close or change the group.
     property string failedShownIn: ""
     property Item hoverRow: null
+    // The refresh rate of the screen of the window, in Hz. The program sets it (QML does not have it). 0: unknown.
+    property real refreshRate: 0
+    // The shortest time between two moves of a drag: one frame of the screen, from 4 ms to 20 ms.
+    readonly property real minMoveMs: refreshRate > 0 ? Math.min(20, Math.max(4, 1000 / refreshRate)) : 16
     readonly property int edge: 16
     readonly property int statusRowHeight: 32
     readonly property int agentRowHeight: 28
@@ -609,8 +613,8 @@ Window {
             property real startX: 0
             property real startY: 0
             property bool moved: false
-            // Time of the last margin change. At most one change in each 16 ms, so that a pointer event
-            // that comes before the compositor applies the last margin does not count the motion twice.
+            // Time of the last margin change. At most one change in each frame of the screen (minMoveMs), so that
+            // a pointer event that comes before the compositor applies the last margin does not count the motion twice.
             // A dropped event loses nothing: the next one uses the absolute pointer position again.
             property double lastMoveMs: 0
             // The row or the list under the pointer. The search starts below this handler, in the column.
@@ -631,7 +635,7 @@ Window {
                 moved = true
                 root.hoverRow = null
                 var now = Date.now()
-                if (now - lastMoveMs < 16)
+                if (now - lastMoveMs < root.minMoveMs)
                     return
                 lastMoveMs = now
                 root.atDefault = false

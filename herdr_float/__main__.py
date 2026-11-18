@@ -42,6 +42,17 @@ def take_single_instance_lock():
     return handle
 
 
+def follow_refresh_rate(window) -> None:
+    """Give the QML the refresh rate of the screen of the window, now and when the window changes its screen."""
+
+    def update(*_args) -> None:
+        screen = window.screen()
+        window.setProperty("refreshRate", screen.refreshRate() if screen is not None else 0.0)
+
+    window.screenChanged.connect(update)
+    update()
+
+
 def main() -> int:
     setup_logging()
     lock = take_single_instance_lock()
@@ -72,6 +83,9 @@ def main() -> int:
             "the QML interface did not load: it needs the QML module org.kde.layershell (package layer-shell-qt)"
         )
         return 1
+
+    follow_refresh_rate(engine.rootObjects()[0])
+    logging.getLogger("herdr_float").info("screen refresh rate: %.0f Hz", engine.rootObjects()[0].property("refreshRate"))
 
     tray = None
     if QSystemTrayIcon.isSystemTrayAvailable():

@@ -10,7 +10,7 @@ from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickWindow
 from PySide6.QtTest import QTest
 
-from herdr_float.__main__ import IMPORT_PATH, UI_PATH
+from herdr_float.__main__ import IMPORT_PATH, UI_PATH, follow_refresh_rate
 from herdr_float.backend import Backend
 from herdr_float.icons import Icons
 from herdr_float.state import Agent
@@ -534,3 +534,35 @@ def test_the_rows_have_names_for_a_screen_reader(app, window):
         names.append(attached.property("name"))
     assert names == ["Blocked, 1 agent", "Done, 0 agents", "Working, 2 agents", "Idle, 0 agents",
                             "Go to ana in api / 1", "Go to bob"]
+
+
+def test_a_drag_moves_one_time_in_each_frame_of_the_screen(app, window):
+    root, backend, messages = window
+    assert root.property("refreshRate") == 0 and root.property("minMoveMs") == 16  # not known yet
+    follow_refresh_rate(root)  # as the program does at start
+    assert root.property("refreshRate") == root.screen().refreshRate() > 0
+    assert root.property("minMoveMs") == pytest.approx(1000 / root.screen().refreshRate())
+    for rate, step in ((60, 16.667), (120, 8.333), (144, 6.944), (0, 16), (-1, 16), (1000, 4), (30, 20)):
+        root.setProperty("refreshRate", rate)
+        assert root.property("minMoveMs") == pytest.approx(step, abs=0.001)
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def test_two_moves_in_one_frame_of_the_screen_count_one_time(app, window):
+    root, backend, messages = window
+    backend.apply(AGENTS)
+    settle(app)
+    root.setProperty("refreshRate", 50)  # a step of 20 ms
+    left, none = Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier
+    start = QPoint(160, 100)
+    before = (root.property("posX"), root.property("posY"))
+    QTest.mousePress(root, left, none, start)
+    QTest.mouseMove(root, start + QPoint(-10, 0), 0)  # the first move after a press always counts
+    QTest.mouseMove(root, start + QPoint(-12, 0), 0)  # the same frame: the compositor did not move the window yet
+    assert root.property("posX") == before[0] - 10
+    time.sleep(0.03)
+    QTest.mouseMove(root, start + QPoint(-11, 0), 0)  # a later frame: it counts
+    assert root.property("posX") == before[0] - 21
+    QTest.mouseRelease(root, left, none, start + QPoint(-11, 0))
+    settle(app)
+    assert backend.saves == [(before[0] - 21, before[1])]
