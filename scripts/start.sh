@@ -1,6 +1,6 @@
 #!/bin/sh
 # Start herdr-float as an independent background process and return immediately.
-# readlink -f follows a linked plugin folder back to the repository.
+# readlink -f follows a link to this script (for example from the Herdr mod folder) back to the repository.
 root="$(dirname "$(dirname "$(readlink -f "$0")")")"
 cd "$root" || exit 1
 [ -x "$root/.venv/bin/python" ] || { echo "herdr-float: $root/.venv/bin/python not found, run uv sync in $root" >&2; exit 1; }
