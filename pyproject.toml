@@ -1,0 +1,15 @@
+[project]
+name = "herdr-float"
+version = "0.1.0"
+description = "Floating status widget for Herdr agents"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.uv]
+package = false

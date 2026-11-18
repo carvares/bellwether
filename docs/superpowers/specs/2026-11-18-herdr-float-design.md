@@ -43,11 +43,21 @@ Source: `herdr api schema`, Herdr 0.9.5, protocol 22.
 - `agent.focus` focuses the pane of an agent. It also marks a `done` agent as viewed.
 - A read (`agent.list`) does not change the viewed state.
 
+## Verified on 2026-11-18
+
+Tested against Herdr 0.9.5 (protocol 22) with `spike/wire.py` and a structure-only probe.
+
+1. The socket wire format.
+   - Request: one JSON object and `\n`: `{"id", "method", "params"}`.
+   - Reply: one line of JSON that ends with `\n`. No bytes follow the `\n`. Envelope: `{"id", "result"}`. For `agent.list`, `result` is `{"type": "agent_list", "agents": [...]}`.
+   - The server closes the connection after the reply. A second read gets 0 bytes at once. A second request on the same connection fails with a broken pipe. So use one connection for each request.
+   - `agent.list` does not return panes that have no agent. In the test, `pane.list` gave 17 panes, all with `agent_status` `unknown` and no `agent` field. `agent.list` gave 0 rows.
+   - Agent rows: no live row was available in the test. The bundled schema (`herdr api schema --json`, `AgentInfo`) gives `agent`, `display_agent` and `name` as string or null. They are not in the required list. In `pane.list` rows the server leaves out `agent` and `display_agent` when there is no agent, and does not send `null`. So read these three fields as optional: missing or `null` means "no value".
+
 ## Not verified
 
 Step 1 of the build order tests these. The design changes if a test fails.
 
-1. The socket wire format (message framing, request and response envelope).
 2. The layer-shell overlay on this KDE desktop with PySide6.
 3. A method to raise the terminal window after a jump.
 
