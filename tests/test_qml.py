@@ -80,7 +80,7 @@ def window(app, fake_client, tmp_path):
 
 def rows(root, kind):
     """The visible rows of one kind ("status" or "agent"), in the order on the screen."""
-    return [i for i in walk(root.contentItem()) if i.property("rowKind") == kind and i.isVisible()]
+    return [i for i in walk(root.contentItem()) if i.property("hitRole") == kind and i.isVisible()]
 
 
 def visible_texts(root):
@@ -228,7 +228,7 @@ def test_the_scroll_indicator_does_not_take_clicks_or_the_wheel(app, window):
     click(app, root, rows(root, "status")[3])
     row = rows(root, "agent")[1]
     edge = row.mapToScene(QPointF(row.width() - 1, row.height() / 2))  # on the 3 px of the indicator
-    flick = next(i for i in walk(root.contentItem()) if i.property("scrolls"))
+    flick = next(i for i in walk(root.contentItem()) if i.property("hitRole") == "scroll" and i.isVisible())
     wheel = QWheelEvent(edge, edge, QPoint(0, 0), QPoint(0, -120), Qt.MouseButton.NoButton,
                         Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False)
     app.sendEvent(root, wheel)
@@ -528,7 +528,7 @@ def test_a_long_group_shows_8_rows_with_a_scroll_hint_and_keeps_its_place_with_n
     settle(app)
     click(app, root, rows(root, "status")[3])
     assert root.height() == CLOSED + 8 * AGENT_ROW + 20  # 8 rows and the line of the hint
-    flick = next(i for i in walk(root.contentItem()) if i.property("scrolls"))
+    flick = next(i for i in walk(root.contentItem()) if i.property("hitRole") == "scroll" and i.isVisible())
     assert flick.height() == 8 * AGENT_ROW and flick.property("contentHeight") == 12 * AGENT_ROW
     hint = next(i for i in walk(root.contentItem()) if i.property("isScrollHint") and i.isVisible())
     assert hint.isVisible() and hint.property("text") == "ROWS 01–08 / 12  ▼ SCROLL"

@@ -227,12 +227,12 @@ Window {
         }
     }
 
-    // The first item at (x, y) of `item`, from the outside in, where the property `name` is set:
-    // a row ("rowKind"), or a list that scrolls ("scrolls").
-    function findAt(item, x, y, name) {
+    // The first item at (x, y) of `item`, from the outside in, whose hitRole is one of `roles`: "status" (a
+    // status row, with stateName), "agent" (an agent row, with key) or "scroll" (a list that scrolls).
+    function hitAt(item, x, y, roles) {
         var child = item.childAt(x, y)
         while (child) {
-            if (child[name])
+            if (roles.indexOf(child.hitRole) >= 0)
                 return child
             var point = child.mapFromItem(item, x, y)
             item = child
@@ -427,7 +427,7 @@ Window {
 
                     Item {
                         id: statusRow
-                        readonly property string rowKind: "status"
+                        readonly property string hitRole: "status"
                         readonly property string stateName: groupItem.group.state
                         width: parent.width
                         height: root.statusRowHeight
@@ -499,166 +499,136 @@ Window {
                     }
 
                     Item {
-                        id: listBox
-                        readonly property int shown: Math.min(groupItem.group.count, root.panel.maxAgentRows)
-                        // More rows than fit: the list scrolls, and a line under it says so.
-                        readonly property bool longer: groupItem.group.count > root.panel.maxAgentRows
                         visible: groupItem.open
                         width: parent.width
-                        height: shown * root.agentRowHeight + (longer ? 20 : 4)
+                        // More rows than fit: a line under the list says so.
+                        height: agentList.height + (agentList.longer ? 20 : 4)
 
-                        Flickable {
+                        AgentList {
                             id: agentList
-                            // True when the group has more rows than fit. The pointer handler of the panel
-                            // then scrolls this list with the wheel.
-                            readonly property bool scrolls: contentHeight > height
-                            // The number of the first row on the screen, from 0.
-                            readonly property int first: Math.round(contentY / root.agentRowHeight)
+                            panel: root.panel
+                            stateName: groupItem.group.state
+                            rowHeight: root.agentRowHeight
                             width: parent.width
-                            height: listBox.shown * root.agentRowHeight
-                            contentWidth: width
-                            contentHeight: agentRows.height
-                            interactive: false
-                            clip: true
-                            onContentHeightChanged: contentY = Math.max(0, Math.min(contentY, contentHeight - height))
 
-                            Column {
-                                id: agentRows
-                                width: agentList.width
+                            delegate: AgentRow {
+                                id: agentRow
+                                view: agentList
 
-                                Repeater {
-                                    model: groupItem.open ? groupItem.group.agents : []
+                                Rectangle {
+                                    visible: agentRow.hovered
+                                    x: 14; y: 2
+                                    width: parent.width - 14 + 6
+                                    height: parent.height - 4
+                                    color: "#14e3e9ee"
+                                }
+                                // Tree lines from the status marker to each agent.
+                                Rectangle {
+                                    x: 5; width: 1
+                                    height: agentRow.last ? parent.height / 2 : parent.height
+                                    color: "#3a444d"
+                                }
+                                Rectangle { x: 5; y: parent.height / 2; width: 9; height: 1; color: "#3a444d" }
+                                // The icon that the Herdr app shows for the program of the agent.
+                                Image {
+                                    id: programIcon
+                                    readonly property bool isProgramIcon: true
+                                    // An icon that does not load is not shown: the row has no gap.
+                                    visible: agentRow.modelData.icon !== "" && status !== Image.Error
+                                    x: 20
+                                    width: 16
+                                    height: 16
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    sourceSize: Qt.size(16, 16)
+                                    source: agentRow.modelData.icon
+                                }
+                                Text {
+                                    id: label
+                                    x: programIcon.visible ? 44 : 20
+                                    width: Math.min(implicitWidth, detail.x - 8 - x
+                                        - (address.visible ? address.width + 6 : 0))
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: agentRow.modelData.label
+                                    color: root.ink
+                                    elide: Text.ElideRight
+                                    font { family: root.mono; pixelSize: 12 }
+                                }
+                                // The terminal address, only for rows that look the same without it.
+                                Text {
+                                    id: address
+                                    // The failure message needs the width.
+                                    visible: agentRow.modelData.address !== "" && !agentRow.failed
+                                    anchors.left: label.right
+                                    anchors.leftMargin: 6
+                                    anchors.baseline: label.baseline
+                                    text: "[" + agentRow.modelData.address + "]"
+                                    color: "#68727c"
+                                    font { family: root.mono; pixelSize: 11 }
+                                }
+                                Text {
+                                    id: detail
+                                    anchors.right: parent.right
+                                    anchors.rightMargin: agentList.longer ? 10 : 0
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: Math.min(implicitWidth, agentRow.failed ? 200 : 120)
+                                    elide: Text.ElideRight
+                                    text: agentRow.failed ? "! " + root.panel.failedMessage
+                                        : agentRow.opening ? "> opening…"
+                                        : agentRow.modelData.detail
+                                    color: agentRow.failed ? "#f28b82" : agentRow.opening ? "#8ab4f8" : root.dim
+                                    font { family: root.mono; pixelSize: 11 }
+                                }
+                            }
 
-                                    Item {
-                                        id: agentRow
-                                        required property var modelData
-                                        required property int index
-                                        readonly property string rowKind: "agent"
-                                        readonly property string key: modelData.key
-                                        readonly property bool failed: root.panel.failedKey === key
-                                        readonly property bool opening: root.panel.opening === key
-                                        readonly property bool last: index === groupItem.group.agents.length - 1
-                                        width: agentRows.width
-                                        height: root.agentRowHeight
-                                        Accessible.role: Accessible.Button
-                                        Accessible.name: modelData.spoken
-                                        Accessible.onPressAction: root.panel.jump(key)
+                            // Scroll track.
+                            overlay: Component {
+                            Item {
+                                id: track
+                                readonly property int count: agentList.count
+                                readonly property real span: agentList.height - 8
+                                // One tick for each agent while a tick is 1 px or more. One bar for a longer list.
+                                readonly property bool ticks: track.count <= (track.span + 2) / 3
+                                visible: agentList.longer
+                                x: agentList.width - 3
+                                y: 4
 
+                                Column {
+                                    spacing: 2
+                                    Repeater {
+                                        model: track.visible && track.ticks ? track.count : 0
                                         Rectangle {
-                                            visible: root.panel.hoverItem === agentRow
-                                            x: 14; y: 2
-                                            width: parent.width - 14 + 6
-                                            height: parent.height - 4
-                                            color: "#14e3e9ee"
-                                        }
-                                        // Tree lines from the status marker to each agent.
-                                        Rectangle {
-                                            x: 5; width: 1
-                                            height: agentRow.last ? parent.height / 2 : parent.height
-                                            color: "#3a444d"
-                                        }
-                                        Rectangle { x: 5; y: parent.height / 2; width: 9; height: 1; color: "#3a444d" }
-                                        // The icon that the Herdr app shows for the program of the agent.
-                                        Image {
-                                            id: programIcon
-                                            readonly property bool isProgramIcon: true
-                                            // An icon that does not load is not shown: the row has no gap.
-                                            visible: agentRow.modelData.icon !== "" && status !== Image.Error
-                                            x: 20
-                                            width: 16
-                                            height: 16
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            sourceSize: Qt.size(16, 16)
-                                            source: agentRow.modelData.icon
-                                        }
-                                        Text {
-                                            id: label
-                                            x: programIcon.visible ? 44 : 20
-                                            width: Math.min(implicitWidth, detail.x - 8 - x
-                                                - (address.visible ? address.width + 6 : 0))
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            text: agentRow.modelData.label
-                                            color: root.ink
-                                            elide: Text.ElideRight
-                                            font { family: root.mono; pixelSize: 12 }
-                                        }
-                                        // The terminal address, only for rows that look the same without it.
-                                        Text {
-                                            id: address
-                                            // The failure message needs the width.
-                                            visible: agentRow.modelData.address !== "" && !agentRow.failed
-                                            anchors.left: label.right
-                                            anchors.leftMargin: 6
-                                            anchors.baseline: label.baseline
-                                            text: "[" + agentRow.modelData.address + "]"
-                                            color: "#68727c"
-                                            font { family: root.mono; pixelSize: 11 }
-                                        }
-                                        Text {
-                                            id: detail
-                                            anchors.right: parent.right
-                                            anchors.rightMargin: listBox.longer ? 10 : 0
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            width: Math.min(implicitWidth, agentRow.failed ? 200 : 120)
-                                            elide: Text.ElideRight
-                                            text: agentRow.failed ? "! " + root.panel.failedMessage
-                                                : agentRow.opening ? "> opening…"
-                                                : agentRow.modelData.detail
-                                            color: agentRow.failed ? "#f28b82" : agentRow.opening ? "#8ab4f8" : root.dim
-                                            font { family: root.mono; pixelSize: 11 }
+                                            required property int index
+                                            readonly property bool isScrollTick: true
+                                            // Bright for the rows on the screen.
+                                            readonly property bool lit: index >= agentList.first
+                                                && index < agentList.first + agentList.shown
+                                            width: 3
+                                            height: (track.span - 2 * (track.count - 1)) / track.count
+                                            color: lit ? "#8a949e" : "#2b333b"
                                         }
                                     }
                                 }
-                            }
-                        }
-
-                        // Scroll track. Its parent has no size, so the pointer handler does not find it
-                        // (findAt uses childAt): a click or a wheel turn on it goes to the row below it.
-                        Item {
-                            id: track
-                            readonly property int count: groupItem.group.count
-                            readonly property real span: agentList.height - 8
-                            // One tick for each agent while a tick is 1 px or more. One bar for a longer list.
-                            readonly property bool ticks: track.count <= (track.span + 2) / 3
-                            visible: listBox.longer
-                            x: listBox.width - 3
-                            y: 4
-
-                            Column {
-                                spacing: 2
-                                Repeater {
-                                    model: track.visible && track.ticks ? track.count : 0
-                                    Rectangle {
-                                        required property int index
-                                        readonly property bool isScrollTick: true
-                                        // Bright for the rows on the screen.
-                                        readonly property bool lit: index >= agentList.first
-                                            && index < agentList.first + listBox.shown
-                                        width: 3
-                                        height: (track.span - 2 * (track.count - 1)) / track.count
-                                        color: lit ? "#8a949e" : "#2b333b"
-                                    }
+                                Rectangle { visible: !track.ticks; width: 3; height: track.span; color: "#2b333b" }
+                                Rectangle {
+                                    visible: !track.ticks
+                                    width: 3
+                                    height: Math.max(8, track.span * agentList.height / Math.max(1, agentList.contentHeight))
+                                    y: (track.span - height) * agentList.contentY
+                                        / Math.max(1, agentList.contentHeight - agentList.height)
+                                    color: "#8a949e"
                                 }
                             }
-                            Rectangle { visible: !track.ticks; width: 3; height: track.span; color: "#2b333b" }
-                            Rectangle {
-                                visible: !track.ticks
-                                width: 3
-                                height: Math.max(8, track.span * agentList.height / Math.max(1, agentList.contentHeight))
-                                y: (track.span - height) * agentList.contentY
-                                    / Math.max(1, agentList.contentHeight - agentList.height)
-                                color: "#8a949e"
                             }
                         }
+
                         // Scroll hint: the rows on the screen and the direction in which more rows are.
                         Text {
                             readonly property bool isScrollHint: true
-                            readonly property bool atEnd: agentList.contentY >= agentList.contentHeight - agentList.height
-                            visible: listBox.longer
+                            visible: agentList.longer
                             x: 20
                             y: agentList.height + 2
-                            text: "ROWS " + root.panel.pad2(agentList.first + 1) + "–" + root.panel.pad2(agentList.first + listBox.shown)
-                                + " / " + root.panel.pad2(groupItem.group.count) + (atEnd ? "  ▲ SCROLL" : "  ▼ SCROLL")
+                            text: "ROWS " + root.panel.pad2(agentList.first + 1) + "–" + root.panel.pad2(agentList.first + agentList.shown)
+                                + " / " + root.panel.pad2(agentList.count) + (agentList.atEnd ? "  ▲ SCROLL" : "  ▼ SCROLL")
                             color: "#68727c"
                             font { family: root.mono; pixelSize: 10; letterSpacing: 1 }
                         }
@@ -694,14 +664,14 @@ Window {
             // A dropped event loses nothing: the next one uses the absolute pointer position again.
             property double lastMoveMs: 0
             // The row or the list under the pointer. The search starts below this handler, in the column.
-            function under(point, name) {
-                return root.findAt(column, point.x - column.x, point.y - column.y, name)
+            function under(point, roles) {
+                return root.hitAt(column, point.x - column.x, point.y - column.y, roles)
             }
             // lastMoveMs starts again at each press: a clock that went back must not block the drag.
             onPressed: (mouse) => { startX = mouse.x; startY = mouse.y; moved = false; lastMoveMs = 0 }
             onPositionChanged: (mouse) => {
                 if (!pressed) {
-                    root.panel.hoverItem = under(mouse, "rowKind")
+                    root.panel.hoverItem = under(mouse, ["status", "agent"])
                     return
                 }
                 var dx = mouse.x - startX
@@ -727,20 +697,17 @@ Window {
                     root.settle()
                     return
                 }
-                var row = under(mouse, "rowKind")
-                if (row && row.rowKind === "status")
+                var row = under(mouse, ["status", "agent"])
+                if (row && row.hitRole === "status")
                     root.panel.toggle(row.stateName)
                 else if (row)
                     root.panel.jump(row.key)
             }
             onExited: root.panel.hoverItem = null
             onWheel: (wheel) => {
-                var list = under(wheel, "scrolls")
-                if (!list)
-                    return
-                var step = wheel.pixelDelta.y !== 0 ? wheel.pixelDelta.y
-                    : wheel.angleDelta.y / 120 * 2 * root.agentRowHeight
-                list.contentY = Math.max(0, Math.min(list.contentY - step, list.contentHeight - list.height))
+                var list = under(wheel, ["scroll"])
+                if (list)
+                    list.scrollBy(wheel.pixelDelta.y, wheel.angleDelta.y)
             }
         }
     }
