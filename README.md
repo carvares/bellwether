@@ -90,7 +90,12 @@ If the empty block stays in the window after that, remove it from your layout in
 - "Done" means that an agent finished while you did not look at it. It becomes "Idle" after you look at it in the app.
 - A terminal that runs no agent (a plain shell) is not counted.
 - Click a row to show its agents below it. Click the row again to hide them. Only one row is open at a time. A row with 0 agents does not open.
-- Each agent line shows the agent and its space (with the tab name when the space has more than one tab).
+- Each agent line starts with the icon that the Herdr app shows for the program of the agent (for example Claude Code). The program name is not shown as text.
+  - If the terminal has a name, the line shows the name, and the space at the right (with the tab name when the space has more than one tab).
+  - If the terminal has no name, the line shows the space.
+  - If two lines look the same, each one also shows its terminal address (for example `t1c`).
+  - A program that has no icon in the app gets the generic agent icon. If the widget cannot find the icons of the app, the line shows the program name as text.
+- The border of the panel has the colour of the most important state that has agents. The order is: blocked (red), done (yellow), idle (green), working (blue). Idle is above working here, so a green border tells you that an agent waits for you. With no agents, or offline, the border is grey.
 - An open row shows 8 agents at most. Turn the mouse wheel on the list to see the others.
 - Click an agent to go to it. The Herdr app window comes to the front and shows that agent:
   - If the window is behind other windows or minimized, the widget brings it to the front.
@@ -100,14 +105,14 @@ If the empty block stays in the window after that, remove it from your layout in
 - Drag the panel to move it. You can start the drag on any row. The widget saves the position.
 - Click the tray icon to hide or show the widget.
 - Right-click the tray icon to open the menu with "Quit".
-- The colour of the tray icon shows the most important state that has agents.
+- The tray icon has the same colour as the border of the panel.
 
 ### When the Herdr app window is closed
 
 Your agents continue to run in herdr-core. The widget then reads herdr-core:
 
 - The counts can be different from the counts of the app. A "done" agent that you looked at before stays "done". Terminals that the app does not show are counted too.
-- The agent lines show the program name only, with no space name.
+- The agent lines show the program icon and the terminal address, with no terminal name and no space name.
 - A click on an agent starts the Herdr app and shows that agent.
 
 The panel shows "offline" when the app and herdr-core do not answer.
@@ -126,6 +131,7 @@ An open row closes when the widget goes offline.
 - Position: `~/.config/herdr-float/state.json`
 - Log: `~/.local/state/herdr-float/herdr-float.log`
 - Start log (output of `scripts/start.sh` starts): `~/.local/state/herdr-float/start.log`
+- Icon copies: `~/.cache/herdr-float/icons/`. The widget reads the icons from the folder of the app (`~/.config/herdr-app/icons/`, or `$HERDR_APP_HOME/icons/`) and does not change them. A one-colour icon is black, so the widget writes a light copy of it here. You can delete this folder.
 
 ## Tests
 
@@ -135,6 +141,8 @@ An open row closes when the widget goes offline.
 
 - The widget reads the Herdr app that uses the default folder `~/.config/herdr-app`, and the default herdr-core.
 - The widget looks for `herdr-app` and `herdr-core` one time, at its start. If you install one of them later, start the widget again.
+- The widget finds the icon of a program by the file name: `icons/<program>.svg`, else the part before the first `-` (`claude-code` gives `claude.svg`), else a short list of other names from the program table of the app, else `agent.svg`. The app does not give its program table to other programs, so the widget does not read `programs.json`: an icon that you changed there does not show in the widget.
+- The widget reads each icon one time. After an update of the app that changes icons, start the widget again.
 - The widget reads a new list one time each second. One read takes 3 to 14 ms.
 - The widget works on KDE Plasma on Wayland only.
 - The jump was tested on 2026-11-18 on this machine (one virtual desktop): window behind a different window, window minimized, app closed. A window on a different virtual desktop was not tested.

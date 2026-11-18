@@ -1,7 +1,7 @@
 # herdr-float: design
 
 Date: 2026-11-18
-Status: built. The data source changed on 2026-11-18. The layout and the jump changed on 2026-11-18 (see the next two sections).
+Status: built. The data source changed on 2026-11-18. The layout and the jump changed on 2026-11-18. Program icons and the status border were added on 2026-11-18 (see the next three sections; the newest is the last of the three).
 
 ## Change on 2026-11-18: data source is the Herdr desktop app
 
@@ -66,6 +66,22 @@ Request of the user: a larger interface with a vertical list of the states and t
 
 The sections below are the first design. Lines that the change made false are corrected.
 Sections that describe the `herdr` 0.9 program are kept as history and say so.
+
+## Change on 2026-11-18: program icons and status border
+
+Request of the user: the icon that Herdr shows for the program in the place of the program word, and a panel border in the colour of the most important state, in the order blocked, done, idle, working.
+
+- **What the app documents.** `~/.config/herdr-app/AGENTS.md` ("Programs: `programs.json`") and the `Program` type in `herdr.d.ts`: each terminal has a `program` from one table with `icon` (a path in the app folder, for example `icons/nvim.svg`) and `tint` (true: a one-colour glyph drawn in the text colour; false: a picture drawn as it is). `match` lists other names, also the `app` words of agents. The agent list of the app (`mods/agents/main.js`, function `icon`) draws it that way. The built-in table has 124 programs. `programs.json` changes entries; this machine has no such file.
+- **What is not available from outside.** `herdr-app ls` and `herdr-core ls --json` give only the program word (`app` / `agent`, for example `claude-code`). No command and no file gives the table. The table is only inside the program file of the app.
+- **Rule of the widget (inferred, then compared with the table).** `herdr_float/icons.py`, `find_icon`: a word that is not a plain program word (letters, digits, `.`, `_`, `+`, `-`) gets the generic icon. Else the first file that exists: the alias of the word (`ALIASES`: 5 agent words from the `match` lists that the next two steps do not find), `icons/<word>.svg`, `icons/<part before the first "-">.svg`, `icons/agent.svg`. No file: no icon, and the row shows the text of before. On 2026-11-18 the rule was compared with the table read from the program file (`strings`, read-only): the same file for all 124 keys and for all `match` words of agents, except the word `agent` (the table has both a key `agent` and a `match` of Cursor; the widget uses the key, the generic icon). 75 `match` words of programs that are not agents (for example `python3`) get the generic icon; such programs are not agent rows.
+- **Glyph or picture (inferred, then compared).** `is_glyph`: an SVG whose `fill`, `stroke` and `stop-color` values are only `none`, `currentColor`, black or white is a glyph. The result is equal to the `tint` flag of the table for all 124 entries (8 pictures: amp, antigravity, claude, codex, crush, kimi, kiro, pig).
+- **Colour of a glyph.** The Qt of the PyPI wheel reads SVG (`imageformats/libqsvg.so` is in the wheel), and `QtQuick.Effects` (`MultiEffect`) is there too. `MultiEffect` was not used: the software renderer (the off-screen tests and images) does not draw it, so it cannot be checked. The widget writes a copy of the glyph with the text colour `#e8eaed` in the place of `currentColor`, black and white (`tinted`) to `~/.cache/herdr-float/icons/<name>-<hash of the content>.svg` and gives QML that file. All 116 glyph files of the app were drawn from their copies: each one draws, and only in the text colour. A picture is given to QML as the file of the app. The files of the app are not copied into the repository and not changed.
+- **Agent row.** `Agent` has a new field `app` (the program word); `name` is now only the name of the terminal. The backend builds each row: `icon` (file URL or ""), `label`, `detail`, `address`, `spoken`. With an icon: label = the terminal name, else the workspace text, else the address; detail (right) = the workspace text only when the row has a name. Without an icon: label = name, else program word, else address; detail = workspace (as before). Rows of one group with the same icon, label and detail get the address in a dim colour. The accessibility name says the program in words: "Go to claude-code in <workspace>", or "Go to <name>, claude-code in <workspace>".
+- **Icon in QML.** An `Image` of 16 x 16 px at the left of the row, `sourceSize` 16 x 16 (Qt draws the SVG at the scale of the screen; checked at scale 1 and 2).
+- **Border.** `state.py` has `PRIORITY = ("blocked", "done", "idle", "working")` and `top_state(online, counts)`: "offline", "none", or the first state of `PRIORITY` with an agent. Idle is above working: the user chose it. `STATES` (blocked, done, working, idle) is still the order of the rows. `Backend.topState` gives it to QML. The panel border is 2 px, drawn inside the panel (the panel size is the same: 240 x 136 closed), in the colour of `STATE_COLORS[topState]`; "none" and "offline" keep the grey `#3c4043`. The change has no animation.
+- **Tray.** The tray dot uses `Backend.topState` too, so it has the colour of the border. The tooltip lists the counts in the order of `PRIORITY`.
+- **Log.** One INFO line for each program word that has no icon of its own ("no icon for program 'x': the generic icon is used" or "...: the row shows text"). No paths.
+- **Not done.** `programs.json` is not read. The icons are read one time for each word in the life of the process. A person did not yet look at the icons and the border on the screen: the checks used images of the widget's own window (off screen, software renderer).
 
 ## Goal
 
