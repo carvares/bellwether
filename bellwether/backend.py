@@ -163,6 +163,17 @@ class Backend(QObject):
         """The skin file of the layout."""
         return QUrl.fromLocalFile(str(self._skins[self._layout])) if self._layout in self._skins else QUrl()
 
+    @Property(QUrl, notify=layoutChanged)
+    def themeSource(self) -> QUrl:
+        """The theme tokens of the layout, for the options window: the file <letter>Theme.qml next to the skin.
+        A skin with no theme file gets the tokens of the default layout. Empty when that has none too."""
+        for letter in (self._layout, layouts.DEFAULT):
+            if letter in self._skins:
+                theme = layouts.theme_file(self._skins[letter])
+                if theme.is_file():
+                    return QUrl.fromLocalFile(str(theme))
+        return QUrl()
+
     @Property("QVariantList", constant=True)
     def layouts(self) -> list[dict]:
         """The five designs for the options window. `built` False: the design cannot be chosen yet."""

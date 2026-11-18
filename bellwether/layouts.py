@@ -22,3 +22,17 @@ def built_skins(folder: Path = SKINS_PATH) -> dict[str, Path]:
     """The skin file of each design that is built. A design is built when its file <letter>.qml is there."""
     files = {letter: Path(folder) / f"{letter}.qml" for letter, _, _ in LAYOUTS}
     return {letter: path for letter, path in files.items() if path.is_file()}
+
+
+def theme_file(skin: Path) -> Path:
+    """The file with the theme tokens of a skin: <letter>Theme.qml next to <letter>.qml."""
+    skin = Path(skin)
+    return skin.with_name(f"{skin.stem}Theme.qml")
+
+
+# The theme tokens that every <letter>Theme.qml must have: the options window reads them, and the skin uses them.
+THEME_TOKENS = (
+    "panelColor", "frameColor", "frameWidth", "radius", "itemRadius", "lineColor", "textColor", "dimColor",
+    "faintColor", "accentColor", "selectedColor", "hoverColor", "fontFamily", "titleSize", "bodySize", "smallSize",
+    "letterSpacing", "uppercaseTitles", "decoration",
+)
