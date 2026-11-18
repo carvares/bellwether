@@ -65,7 +65,7 @@ Do not move the repository after this, or make the link again.
 What is known and not known about the mod:
 
 - `herdr-app check` passes for `mod/`.
-- A mod starts only when the app shows it. So the app puts the mod into the window as a block at the bottom, 1 pixel high, with nothing in it.
+- A mod starts only when the app shows it. The documentation of the app says that the app then puts a new mod into the window. `mod.json` asks for a block at the bottom, 1 pixel high. The mod draws nothing in it.
 - A person has not yet installed the mod. These things are not checked: how the block looks, if the app accepts a linked mod folder, and if the app starts the mod again at each start.
 
 Remove the automatic start:
