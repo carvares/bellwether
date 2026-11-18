@@ -428,9 +428,11 @@ Window {
                     Item {
                         id: listBox
                         readonly property int shown: Math.min(groupItem.group.count, root.maxAgentRows)
+                        // More rows than fit: the list scrolls, and a line under it says so.
+                        readonly property bool longer: groupItem.group.count > root.maxAgentRows
                         visible: groupItem.open
                         width: parent.width
-                        height: shown * root.agentRowHeight + (agentList.scrolls ? 20 : 4)
+                        height: shown * root.agentRowHeight + (longer ? 20 : 4)
 
                         Flickable {
                             id: agentList
@@ -522,7 +524,7 @@ Window {
                                         Text {
                                             id: detail
                                             anchors.right: parent.right
-                                            anchors.rightMargin: agentList.scrolls ? 10 : 0
+                                            anchors.rightMargin: listBox.longer ? 10 : 0
                                             anchors.verticalCenter: parent.verticalCenter
                                             width: Math.min(implicitWidth, agentRow.failed ? 200 : 120)
                                             elide: Text.ElideRight
@@ -545,7 +547,7 @@ Window {
                             readonly property real span: agentList.height - 8
                             // One tick for each agent while a tick is 1 px or more. One bar for a longer list.
                             readonly property bool ticks: track.count <= (track.span + 2) / 3
-                            visible: agentList.scrolls
+                            visible: listBox.longer
                             x: listBox.width - 3
                             y: 4
 
@@ -579,7 +581,7 @@ Window {
                         Text {
                             readonly property bool isScrollHint: true
                             readonly property bool atEnd: agentList.contentY >= agentList.contentHeight - agentList.height
-                            visible: agentList.scrolls
+                            visible: listBox.longer
                             x: 20
                             y: agentList.height + 2
                             text: "ROWS " + root.pad2(agentList.first + 1) + "–" + root.pad2(agentList.first + listBox.shown)
