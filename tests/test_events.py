@@ -220,6 +220,33 @@ def test_retries_use_the_backoff_and_a_new_stream_starts_a_read_at_once(source_o
     ]
 
 
+def test_a_later_stream_that_lives_and_ends_with_no_other_line_is_still_announced(source_of, caplog):
+    """After an early end, "connected" waits until the stream lived for MIN_LIFE. A stream that then ends before
+    its next line (or is silent until it is ended) must be announced too: the log has "lost" for it."""
+    caplog.set_level(logging.INFO, logger="bellwether")
+    early, lives, pauses, now = FakeChild(), FakeChild(), Pauses(), [100.0]
+    early.write(b'{"error":{"kind":"x"}}\n')
+    early.exit(1)
+    factory = Factory(early, lives)
+    source = source_of(factory, pause=pauses, clock=lambda: now[0])
+    source.start()
+    assert until(lambda: len(pauses.seconds) == 1)
+    now[0] += 1.0
+    pauses.go.release()
+    assert until(lambda: len(factory.calls) == 2)
+    lives.write(LINE)
+    assert until(lambda: source.healthy())
+    assert [r.getMessage() for r in caplog.records].count("events: connected") == 1  # not yet: it can end at once
+    now[0] += MIN_LIFE + 1.0  # the stream lives, and writes no other line
+    lives.exit(0)
+    assert until(lambda: len(pauses.seconds) == 2)
+    assert pauses.seconds == [1.0, 1.0]  # it lived: the backoff starts again
+    assert [r.getMessage() for r in caplog.records] == [
+        "events: connected", "events: lost (exit code 1)", "events: retry in 1s",
+        "events: connected", "events: lost (exit code 0)", "events: retry in 1s",
+    ]
+
+
 def test_children_that_write_one_line_and_end_do_not_reset_the_backoff_or_fill_the_log(source_of, caplog):
     """For example herdr-core that is not reachable and writes one error line at each start."""
     caplog.set_level(logging.INFO, logger="bellwether")

@@ -141,8 +141,17 @@ class EventSource:
         child comes after one that ended early, so "connected" is logged only when it lived for MIN_LIFE."""
         descriptor = child.stdout.fileno()
         connected = False
+
+        def lived() -> bool:
+            """True one time: for a stream that was not announced and now lived for MIN_LIFE."""
+            return not announce and connected and self._clock() - began >= MIN_LIFE
+
         while not self._stop.is_set():
             ready, _, _ = select.select([descriptor, self._stop_pipe[0]], [], [], self._quiet)
+            # Here and not only at a line: the stream can end, or be silent, before its next line.
+            if lived():
+                announce = True
+                log.info("events: connected")
             if descriptor not in ready:
                 break  # stop(), or nothing for too long
             data = os.read(descriptor, 65536)
@@ -150,9 +159,6 @@ class EventSource:
                 break  # the child closed its output
             if b"\n" not in data:
                 continue  # a part of a long line
-            if not announce and connected and self._clock() - began >= MIN_LIFE:
-                announce = True
-                log.info("events: connected")
             if not connected:
                 connected = True
                 self._healthy.set()
