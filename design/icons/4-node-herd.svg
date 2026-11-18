@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <title>herdr-float icon 4: node herd</title>
+  <title>Bellwether icon 4: node herd</title>
   <desc>A herd as a node graph: one hub with circuit traces to four agent nodes, one in each status colour.</desc>
   <defs>
     <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">

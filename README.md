@@ -1,6 +1,6 @@
-# herdr-float
+# Bellwether
 
-A small always-on-top window that shows how many agents of the Herdr desktop app are in each state.
+Bellwether is a small always-on-top window that shows how many agents of the Herdr desktop app are in each state.
 For KDE Plasma 6 on Wayland only.
 
 The widget reads the Herdr desktop app (`herdr-app`) and its `herdr-core`.
@@ -43,11 +43,11 @@ A second start does not open a second widget.
 Stop the widget: right-click the tray icon, then click "Quit".
 If there is no tray icon, stop the widget with this command:
 
-    pkill -f -x '(.*/)?python[0-9.]* -m herdr_float'
+    pkill -f -x '(.*/)?python[0-9.]* -m bellwether'
 
 To run the widget in the foreground:
 
-    uv run python -m herdr_float
+    uv run python -m bellwether
 
 ## Start with the Herdr app (optional)
 
@@ -59,8 +59,8 @@ The mod runs a program on your machine (`start.sh`). It does not use the network
 
 Install it. Run this in the repository folder:
 
-    ln -s "$PWD/mod" ~/.config/herdr-app/mods/herdr-float
-    herdr-app check ~/.config/herdr-app/mods/herdr-float
+    ln -s "$PWD/mod" ~/.config/herdr-app/mods/bellwether
+    herdr-app check ~/.config/herdr-app/mods/bellwether
 
 The link must stay a link: the mod finds the repository through it.
 Do not move the repository after this, or make the link again.
@@ -73,21 +73,21 @@ What is known and not known about the mod:
 
 Remove the automatic start:
 
-    rm ~/.config/herdr-app/mods/herdr-float
+    rm ~/.config/herdr-app/mods/bellwether
 
 If the empty block stays in the window after that, remove it from your layout in the app.
 
 ## Nothing shows?
 
-- Read the log file `~/.local/state/herdr-float/herdr-float.log`. The line `source: app`, `source: core` or `source: none` shows where the counts come from.
-- Read the start log `~/.local/state/herdr-float/start.log`. It holds the output of the widget process that `scripts/start.sh` starts, for example a Qt error before the log file opens.
+- Read the log file `~/.local/state/bellwether/bellwether.log`. The line `source: app`, `source: core` or `source: none` shows where the counts come from.
+- Read the start log `~/.local/state/bellwether/start.log`. It holds the output of the widget process that `scripts/start.sh` starts, for example a Qt error before the log file opens.
 - `scripts/start.sh` stops with exit code 1 and a message when `.venv/bin/python` does not exist. Then run `uv sync` in the repository folder.
 - If the mod does not start the widget, run `herdr-app status` and read its `errors`.
 
 ## Use
 
 - The panel is a dark box, 320 px wide, with text in a monospace font (Hack, or a different monospace font if Hack is not installed).
-- The top line shows the number of all agents ("AGENTS 10") and, at the right, the most important state that has agents (for example "BLOCKED").
+- The top line shows the name "BELLWETHER", the number of all agents ("AGENTS 10") and, at the right, the most important state that has agents (for example "BLOCKED").
 - The bar below it has one cell for each agent, in the colour of the state of the agent. The cells fill the width of the bar: 2 agents give 2 wide cells. With no agents, and offline, the bar is one empty outline. With more than 60 agents, the 60 cells show the share of each state, and a state with an agent keeps one cell or more.
 - The panel shows four rows: Blocked, Done, Working, Idle. Each row shows the number of agents in that state with two digits ("03"). They are the states that the Herdr app shows. A row with 0 agents is dim.
 - "Done" means that an agent finished while you did not look at it. It becomes "Idle" after you look at it in the app.
@@ -141,10 +141,14 @@ The widget follows the changes of herdr-core with one child process, `herdr-core
 
 ## Files
 
-- Position: `~/.config/herdr-float/state.json` (`x` and `y` from the top-left corner of a monitor, and `screen`, the name of that monitor)
-- Log: `~/.local/state/herdr-float/herdr-float.log`
-- Start log (output of `scripts/start.sh` starts): `~/.local/state/herdr-float/start.log`
-- Icon copies: `~/.cache/herdr-float/icons/`. The widget reads the icons from the folder of the app (`~/.config/herdr-app/icons/`, or `$HERDR_APP_HOME/icons/`) and does not change them. A one-colour icon is black, so the widget writes a light copy of it here. You can delete this folder.
+- Position: `~/.config/bellwether/state.json` (`x` and `y` from the top-left corner of a monitor, and `screen`, the name of that monitor)
+- Log: `~/.local/state/bellwether/bellwether.log`
+- Start log (output of `scripts/start.sh` starts): `~/.local/state/bellwether/start.log`
+- Icon copies: `~/.cache/bellwether/icons/`. The widget reads the icons from the folder of the app (`~/.config/herdr-app/icons/`, or `$HERDR_APP_HOME/icons/`) and does not change them. A one-colour icon is black, so the widget writes a light copy of it here. You can delete this folder.
+
+The widget uses `$XDG_CONFIG_HOME`, `$XDG_STATE_HOME` and `$XDG_CACHE_HOME` in place of `~/.config`, `~/.local/state` and `~/.cache` when you set them.
+
+The widget had the name herdr-float before 2026-11-18. At its first start with the new name, it moves each folder `herdr-float` in these three places to the new name `bellwether`, with all files in it. It does not move a folder when a `bellwether` folder is already there. If a move fails, the widget starts with its default position and writes one line about it in the log. The old log files stay in the moved folder with their old names. While a widget of the old name runs, a new widget does not start.
 
 ## Tests
 

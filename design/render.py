@@ -28,7 +28,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from bellwether.icons import Icons  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
-OUT = HERE / "out"
+OUT = HERE / "out"  # The image names keep the old name herdr-float: they are the frames that the user approved.
 SCALE = 2
 PROGRAMS = ["claude-code", "codex", "gemini", "opencode", "pi"]
 LAYOUTS = [
@@ -225,7 +225,7 @@ def both(cells: list[tuple[QImage, str]], side_by_side: bool, title: str = "") -
 
 
 def render_layouts(only: str = "") -> None:
-    cache = Path(tempfile.mkdtemp(prefix="herdr-float-design-"))
+    cache = Path(tempfile.mkdtemp(prefix="bellwether-design-"))
     urls = icon_urls(cache)
     closed, opened = [], []
     for letter, slug, name in LAYOUTS:
