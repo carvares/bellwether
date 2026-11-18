@@ -34,12 +34,18 @@ Request of the user: a larger interface with a vertical list of the states and t
 
 **Jump (`client.py`, `window.py`).** A click on an agent row does these steps on a worker thread:
 
-1. `herdr-app ls`. If it does not answer, the app is closed: start it and ask again each 0.25 s, for 6 s at most. Failure: "Herdr app did not start".
-2. `herdr-app do agent.focus`. A window that just started answers `ls` before it has its terminals, so after a start this step is tried for 2 s. The reply `no running terminal` gives "agent is gone".
+1. `herdr-app ls`. If it does not answer, the app is closed: start it and ask again each 0.25 s, until it answers or the time of the jump ends. Failure: "Herdr app did not start".
+2. `herdr-app do agent.focus`. A window that just started answers `ls` before it has its terminals, so after a start this step is tried 8 times (2 s of pauses), inside the time of the jump. The reply `no running terminal` gives "agent is gone".
 3. Raise the window. Failure: "could not raise the window".
 
+- **Time limit.** A jump has a deadline 8 s after the click (`JUMP_SECONDS`, monotonic clock). Each command gets the smaller of 2 s and the time that is left, and each pause is cut at the deadline. So a jump ends 8 s after the click at the latest, with the error of the step in progress: "Herdr app did not start", "agent is gone" (the last answer of a new window) or "Herdr is offline" (the show command gave no answer), "could not raise the window". Before fix round 1 the limit counted tries, and the worst case was about 90 s.
 - **Start.** `systemd-run --user --quiet --collect --slice=app.slice -- <herdr-app>`. Plasma starts the app the same way (a unit of the user's systemd in `app.slice`, Exec `herdr-app` from `herdr-app.desktop`). The app gets the environment of the session and not that of the widget (a widget that was started from a Herdr terminal has `HC_*` variables). The app is not a child of the widget and has none of its files.
-- **Raise.** KWin has the window runner of KRunner on D-Bus (`org.kde.KWin`, `/WindowsRunner`, `org.kde.krunner1`). `Match "herdr-app"` gives the windows; `getWindowInfo` (path `/KWin`) confirms the exact class `herdr-app`; `Run "0_<window id>"` restores the window from minimized, goes to its desktop and activates it; a second `getWindowInfo` confirms `minimized: false`. The widget calls it with `busctl --user --json=short`. No KWin script and no file are necessary.
+- **Raise.** KWin has the window runner of KRunner on D-Bus (`org.kde.KWin`, `/WindowsRunner`, `org.kde.krunner1`). `Match "herdr-app"` gives the windows; `getWindowInfo` (path `/KWin`) confirms the exact class `herdr-app`; `Run "0_<window id>"` restores the window from minimized and activates it (KWin possibly also goes to the desktop of the window: not tested, this machine has one desktop); a second `getWindowInfo` confirms `minimized: false`. The widget calls it with `busctl --user --json=short`. No KWin script and no file are necessary.
+- A match that is not a window of the app, or that KWin cannot give, is skipped; the next match is tried.
+- When the widget starts the app, the output of the app goes to the user journal, as when Plasma starts it.
+- An error of a different kind in a jump shows "jump failed"; the log holds the class name of the error only.
+- A failure message opens the group of its agent one time. After that the group follows the agent only when the agent goes to a different group, so the person can close or change the group.
+- Known, not fixed: a failed agent in a group with more than 8 agents is not scrolled into view. A jump that races a start of the app by hand (the app does not answer yet) can start a second copy of the app.
 - **Fallback for the raise.** If KWin did not raise the window, the widget runs plain `herdr-app` (the same start command). The app documentation says that this "opens or raises the window".
 - While a jump runs, the backend property `opening` holds its terminal address. The row shows "opening…". More clicks on agents are ignored until the jump ends, so the app cannot start two times.
 - A failed jump shows its message for 3 seconds in the agent row. If the agent changed its state, its new group opens. If the agent has no row (gone, or offline), the message shows in a line at the bottom of the panel.

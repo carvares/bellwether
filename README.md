@@ -116,8 +116,10 @@ An open row closes when the widget goes offline.
 ### How the widget opens the app window
 
 - The widget asks KWin (the window manager of Plasma) to restore and activate the window. It uses the program `busctl` for this.
-- If KWin does not do it, the widget runs plain `herdr-app`. The app then raises its own window.
-- The widget starts a closed app with `systemd-run --user`, as the desktop does. The app does not stop when the widget stops.
+- If KWin does not do it (for example, `busctl` is not installed), the widget runs plain `herdr-app`. The app then raises its own window. On this machine that worked with the default focus rules of KWin.
+- The widget starts a closed app, and runs plain `herdr-app`, with `systemd-run --user`, as the desktop does. The app does not stop when the widget stops.
+- When the widget starts the app, the output of the app goes to the user journal (`journalctl --user`), as when Plasma starts it.
+- A jump ends 8 seconds after the click at the latest, with one of the messages above. During that time the line shows "opening…".
 
 ## Files
 
@@ -136,7 +138,9 @@ An open row closes when the widget goes offline.
 - The widget reads a new list one time each second. One read takes 3 to 14 ms.
 - The widget works on KDE Plasma on Wayland only.
 - The jump was tested on 2026-11-18 on this machine (one virtual desktop): window behind a different window, window minimized, app closed. A window on a different virtual desktop was not tested.
-- The jump needs `busctl` and `systemd-run` (parts of systemd) and KWin. Without `systemd-run` the widget cannot start a closed app.
+- The jump needs `systemd-run` (a part of systemd). Without it the widget cannot start a closed app and has no second method to raise the window. `busctl` and KWin are the first method to raise the window; the jump also works without them (see "How the widget opens the app window").
+- Known, not fixed: a failed agent in a group with more than 8 agents is not scrolled into view, so its message can be out of sight.
+- Known, not fixed: if you start the app by hand and click an agent before the app answers, the widget can start a second copy of the app.
 - A jump to a "done" agent changes it to "idle", because you then look at it.
 - Sub-agents (terminals that an agent starts with `hc run`) are read as the documentation of the app describes them. This was not checked with real data: no real sub-agent was available. If the real data has a different shape, sub-agents are not counted.
 - An agent that reports "error" is counted as blocked, as in the agent list of the app.
