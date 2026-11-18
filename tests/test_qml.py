@@ -1029,11 +1029,11 @@ def test_the_window_finds_the_rows_of_a_second_skin_by_their_role(app, window):
     """The test skin has no pointer code: the click, the jump, the wheel and the rules come from the shared parts."""
     root, backend, messages = window
     backend.setLayout("T")
-    backend.apply(many(blocked=1, working=2, idle=12))
+    backend.apply(many(blocked=1, working=10, idle=12))
     settle(app)
     status = rows(root, "status")
     click(app, root, status[2])
-    assert root.property("openState") == "working" and root.height() == 4 * T_ROW + 2 * T_ROW
+    assert root.property("openState") == "working" and root.height() == 4 * T_ROW + 8 * T_ROW
     click(app, root, status[1])  # a group without agents does not open
     assert root.property("openState") == "working"
     click(app, root, status[3])  # one list for the open group: it shows the new group from its first row
@@ -1052,8 +1052,9 @@ def test_the_window_finds_the_rows_of_a_second_skin_by_their_role(app, window):
         if backend._client.focused and backend.opening == "":
             break
     assert backend._client.focused == ["i004"]  # the row at that place after the scroll of 2 rows
-    click(app, root, status[2])  # a different group in the same list starts at its first row
-    assert flick.property("contentY") == 0 and [r.property("key") for r in rows(root, "agent")] == ["w000", "w001"]
+    click(app, root, status[2])  # a different long group in the same list starts at its first row
+    assert flick.property("contentY") == 0 and flick.property("contentHeight") == 10 * T_ROW
+    assert [r.property("key") for r in rows(root, "agent")][:2] == ["w000", "w001"]
     backend.focusFailed.emit("i003", "could not raise the window")  # the failure rule opens the group of the agent
     settle(app)
     assert root.property("openState") == "idle"
