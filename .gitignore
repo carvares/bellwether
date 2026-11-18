@@ -2,3 +2,6 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+# Written by `herdr-app check`.
+mod/*.d.ts
+mod/jsconfig.json
