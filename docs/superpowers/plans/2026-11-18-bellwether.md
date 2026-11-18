@@ -26,7 +26,7 @@ Renamed from herdr-float to Bellwether on 2026-11-18. The task text below (Tasks
 - Commits: use the configured git identity. No AI attribution in commit messages. Do not push unless the user asks.
 - The widget starts with Herdr (plugin). It stays on the screen after the Herdr window closes. No systemd service.
 - Do not run `herdr server stop`. Do not close panes, tabs or workspaces.
-- All commands run from `/home/carvares/Projects/Personal/herdr-float`.
+- All commands run from `/home/carvares/Projects/Personal/bellwether`.
 
 ## Verified facts (Herdr 0.9.5, protocol 22, from `herdr api schema`)
 
