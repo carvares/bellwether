@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>herdr-float icon 1: horn spiral</title>
+  <desc>A ram horn drawn as one spiral trace of half circles. Four pads sit on it, one for each agent status.</desc>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1a2028"/>
+      <stop offset="1" stop-color="#0c0f13"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="56" height="56" rx="13" fill="url(#tile)"/>
+  <rect x="4.75" y="4.75" width="54.5" height="54.5" rx="12.25" fill="none" stroke="#3a444e" stroke-width="1.5"/>
+  <!-- centre lines, as on a technical drawing -->
+  <path d="M8 33H56M32 9V57" stroke="#232a32" stroke-width="1" stroke-dasharray="2 2.5"/>
+  <!-- the horn: a spiral of four half circles that ends in the centre -->
+  <path d="M12 33A20 20 0 0 1 52 33A15.5 15.5 0 0 1 21 33A11 11 0 0 1 43 33A6.5 6.5 0 0 1 30 33"
+        fill="none" stroke="#e3e9ee" stroke-width="4" stroke-linecap="round"/>
+  <!-- status pads on the horn, from the outside in: blocked, done, working, idle -->
+  <g stroke="#12161b" stroke-width="1.6">
+    <circle cx="17.9" cy="18.9" r="4.6" fill="#f28b82"/>
+    <circle cx="47.5" cy="44" r="4.2" fill="#fdd663"/>
+    <circle cx="39.8" cy="25.2" r="3.8" fill="#8ab4f8"/>
+    <circle cx="31.9" cy="37.6" r="3.4" fill="#81c995"/>
+  </g>
+</svg>
