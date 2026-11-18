@@ -200,6 +200,39 @@ QtObject {
         return out
     }
 
+    // The arcs of a share ring, one for each of the four groups in their order, as {start, sweep} in radians;
+    // `start` is from the top of the ring, clockwise. A gap of `gap` radians is between two arcs (no gap with
+    // one arc: it is the full circle). The arc of a group is its share of the circle less the gap, but a group
+    // with an agent is never shorter than `minimum`: the longest arcs give that space. The sweeps and the gaps
+    // fill the circle. A group with no agents has the sweep 0. All sweeps are 0 with no agents and offline.
+    function ring(gap, minimum) {
+        var list = groups
+        var full = 2 * Math.PI
+        var space = parts > 1 ? gap : 0
+        var sweeps = []
+        var i
+        for (i = 0; i < list.length; i++)
+            sweeps.push(list[i].count === 0 ? 0 : list[i].share * full - space)
+        for (i = 0; i < list.length; i++) {
+            if (list[i].count === 0 || sweeps[i] >= minimum)
+                continue
+            var big = 0
+            for (var k = 1; k < sweeps.length; k++)
+                if (sweeps[k] > sweeps[big])
+                    big = k
+            sweeps[big] -= minimum - sweeps[i]
+            sweeps[i] = minimum
+        }
+        var out = []
+        var at = space / 2
+        for (i = 0; i < list.length; i++) {
+            out.push({start: at, sweep: sweeps[i]})
+            if (sweeps[i] > 0)
+                at += sweeps[i] + space
+        }
+        return out
+    }
+
     // The name of a status row for a screen reader: "Blocked, 1 agent".
     function spokenStatus(group) {
         return group.label + ", " + group.count + (group.count === 1 ? " agent" : " agents")

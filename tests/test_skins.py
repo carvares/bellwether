@@ -119,7 +119,7 @@ def test_a_status_with_no_agents_and_every_status_while_offline_is_inert(app, sh
     backend.apply(None)  # offline closes the group
     settle(app)
     assert root.property("openState") == "" and rows(root, "agent") == []
-    assert count_text(root, "offline") >= 1  # the skin says that Herdr is offline
+    assert count_text(root, "off") >= 1  # the skin says that Herdr is offline ("Offline", "off", "NO LINK")
     for item in rows(root, "status"):  # a skin can show its status items while offline: they do nothing
         click(app, root, item)
         assert root.property("openState") == "" and root.property("hoverRow") is None
@@ -526,3 +526,105 @@ def test_layout_d_with_no_agents_and_offline_and_the_footer_of_a_long_list(app, 
     assert hint.property("text") == "2 more  ↓"
     wheel(app, root, flick.mapToScene(QPointF(100, 100)).toPoint())
     assert hint.property("text") == "4 above  ↑"
+
+
+# ----- Layout E: Ring -----
+
+def ring(root, gap=0.07, minimum=0.10):
+    import json
+    return [(p["start"], p["sweep"]) for p in json.loads(js(root, f"JSON.stringify(root.panel.ring({gap}, {minimum}))"))]
+
+
+def test_the_arcs_of_a_share_ring_fill_the_circle_and_a_state_with_an_agent_has_a_minimum_arc(app, window):
+    import math
+    root, backend, messages = window
+    full = 2 * math.pi
+    backend.apply(many(blocked=1, done=2, working=3, idle=4))
+    settle(app)
+    arcs = ring(root)
+    assert [sweep for _, sweep in arcs] == pytest.approx([full * share - 0.07 for share in (0.1, 0.2, 0.3, 0.4)])
+    assert [start for start, _ in arcs] == pytest.approx([0.035 + full * before for before in (0, 0.1, 0.3, 0.6)])
+    assert sum(sweep for _, sweep in arcs) + 4 * 0.07 == pytest.approx(full)  # the arcs and the gaps: the full circle
+    backend.apply(many(blocked=1, done=1, working=300, idle=200))  # two shares are less than the gap
+    settle(app)
+    arcs = ring(root)
+    assert [sweep for _, sweep in arcs][:2] == pytest.approx([0.10, 0.10]) and all(sweep > 0 for _, sweep in arcs)
+    assert sum(sweep for _, sweep in arcs) + 4 * 0.07 == pytest.approx(full)
+    for (start, sweep), (next_start, _) in zip(arcs, arcs[1:]):
+        assert next_start == pytest.approx(start + sweep + 0.07)  # no arc is over the next one
+    backend.apply(many(done=1, idle=3))  # states with no agents have no arc and no gap
+    settle(app)
+    arcs = ring(root)
+    assert [sweep for _, sweep in arcs] == pytest.approx([0, full / 4 - 0.07, 0, full * 3 / 4 - 0.07])
+    backend.apply(many(working=5))  # one state: the full circle with no gap
+    settle(app)
+    assert ring(root)[2] == pytest.approx((0, full)) and sum(sweep for _, sweep in ring(root)) == pytest.approx(full)
+    for agents in ([], None):
+        backend.apply(agents)
+        settle(app)
+        assert [sweep for _, sweep in ring(root)] == [0, 0, 0, 0]
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def ring_colours(root, angles):
+    """The colour of the ring at each angle in degrees, clockwise from the top."""
+    import math
+    (canvas,) = marked(root, "isRing")
+    image = root.grabWindow()
+    out = []
+    for angle in angles:
+        a = math.radians(angle - 90)
+        out.append(image.pixelColor(canvas.mapToScene(QPointF(50 + 40 * math.cos(a), 50 + 40 * math.sin(a))).toPoint()).name())
+    return out
+
+
+@only("E")
+def test_layout_e_shows_the_shares_as_a_ring_with_the_total_in_its_centre_and_a_legend(app, layout):
+    root, backend, messages = layout
+    backend.apply(many(blocked=1, done=2, working=3, idle=4))
+    settle(app)
+    assert (root.width(), root.height()) == (312, 128) and frame_colour(root) == STATE_COLORS["blocked"]
+    (total,) = marked(root, "isTotal")
+    assert total.property("text") == "10" and "agents" in visible_texts(root)
+    # The middle of each share: 10 %, 20 %, 30 % and 40 % of the circle, clockwise from the top.
+    assert ring_colours(root, [18, 72, 162, 288]) == [STATE_COLORS[s] for s in ORDER]
+    legend = status_items(root)
+    assert [(i.x(), i.width(), i.height()) for i in legend] == [(0, 174, 25)] * 4
+    assert [i.y() for i in legend] == [0, 25, 50, 75]
+    assert visible_texts(root)[2:] == ["Blocked", "1", "Done", "2", "Working", "3", "Idle", "4"]
+    click(app, root, legend[2])
+    assert root.height() == 128 + 1 + 3 * 30 + 14
+    colours = ring_colours(root, [18, 72, 162, 288])
+    assert colours[2] == STATE_COLORS["working"] and STATE_COLORS["blocked"] not in colours  # the others go dim
+    click(app, root, legend[2])
+    backend.apply(many(working=1))
+    settle(app)
+    assert total.property("text") == "1" and "agent" in visible_texts(root)
+    assert set(ring_colours(root, [0, 90, 180, 270])) == {STATE_COLORS["working"]}  # one state: the full circle
+    backend.apply(many(blocked=1, working=3000))
+    settle(app)
+    assert total.property("text") == "3001" and total.width() < 62  # the numeral stays inside the ring
+    assert ring_colours(root, [5])[0] == STATE_COLORS["blocked"]  # 1 of 3001 can still be seen
+
+
+@only("E")
+def test_layout_e_with_no_agents_and_offline(app, layout):
+    root, backend, messages = layout
+    backend.apply([])
+    settle(app)
+    assert set(ring_colours(root, [0, 45, 90, 180, 270])) == {"#3c4043"} and frame_colour(root) == "#3c4043"  # one neutral track
+    assert marked(root, "isTotal")[0].property("text") == "0"
+    backend.apply(None)
+    settle(app)
+    assert (root.width(), root.height()) == (312, 128)
+    assert visible_texts(root) == ["off", "Blocked", "–", "Done", "–", "Working", "–", "Idle", "–"]
+    dashes = ring_colours(root, [x * 3.75 for x in range(96)])  # a ring of 24 dashes
+    assert 30 <= dashes.count("#3c4043") <= 60 and dashes[1] == "#3c4043" and dashes[3] != "#3c4043"
+    backend.apply(many(blocked=1, idle=12))
+    settle(app)
+    click(app, root, status_items(root)[3])
+    assert root.height() == 128 + 1 + 8 * 30 + 14 and len(hints(root)) == 2  # a fade and a thumb, over the rows
+
+
+def test_the_five_designs_are_built():
+    assert sorted(layouts.built_skins()) == LETTERS
