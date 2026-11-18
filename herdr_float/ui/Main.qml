@@ -109,11 +109,94 @@ Window {
                 }
             }
 
-            Item {
+            Column {
                 id: list
-                visible: false
-                width: 1
-                height: 1
+                visible: root.expanded && backend.online
+                width: 280
+                spacing: 2
+
+                property string failedPane: ""
+                property string failedMessage: ""
+
+                Connections {
+                    target: backend
+                    function onFocusFailed(paneId, message) {
+                        list.failedPane = paneId
+                        list.failedMessage = message
+                        root.expanded = true
+                        failTimer.restart()
+                    }
+                }
+
+                Timer {
+                    id: failTimer
+                    interval: 3000
+                    onTriggered: { list.failedPane = ""; list.failedMessage = "" }
+                }
+
+                Text {
+                    visible: backend.agents.length === 0
+                    text: "No agents"
+                    color: "#9aa0a6"
+                    font.pixelSize: 13
+                }
+
+                Repeater {
+                    model: backend.agents
+                    Rectangle {
+                        id: rowItem
+                        required property var modelData
+                        readonly property bool failed: list.failedPane === modelData.paneId
+                        width: list.width
+                        height: 28
+                        radius: 6
+                        color: rowMouse.containsMouse ? "#3c4043" : "transparent"
+
+                        Rectangle {
+                            id: dot
+                            x: 6
+                            width: 10
+                            height: 10
+                            radius: 5
+                            anchors.verticalCenter: parent.verticalCenter
+                            color: root.stateColors[rowItem.modelData.status]
+                        }
+                        Text {
+                            anchors.left: dot.right
+                            anchors.leftMargin: 8
+                            anchors.right: detail.left
+                            anchors.rightMargin: 8
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: rowItem.modelData.name
+                            color: "#e8eaed"
+                            font.pixelSize: 13
+                            elide: Text.ElideRight
+                        }
+                        Text {
+                            id: detail
+                            anchors.right: parent.right
+                            anchors.rightMargin: 6
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: Math.min(implicitWidth, 150)
+                            elide: Text.ElideRight
+                            text: rowItem.failed
+                                ? list.failedMessage
+                                : rowItem.modelData.status + " · " + rowItem.modelData.workspace
+                            color: rowItem.failed ? "#f28b82" : "#9aa0a6"
+                            font.pixelSize: 12
+                        }
+                        MouseArea {
+                            id: rowMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            Accessible.name: "Go to " + rowItem.modelData.name
+                            onClicked: {
+                                root.expanded = false
+                                backend.focus(rowItem.modelData.paneId)
+                            }
+                        }
+                    }
+                }
             }
         }
 
