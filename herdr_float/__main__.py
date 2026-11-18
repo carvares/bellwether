@@ -9,6 +9,7 @@ import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+from PySide6.QtCore import QObject
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
@@ -43,14 +44,24 @@ def take_single_instance_lock():
 
 
 def follow_refresh_rate(window) -> None:
-    """Give the QML the refresh rate of the screen of the window, now and when the window changes its screen."""
+    """Give the QML the refresh rate of the screen of the window: now, when the window changes its screen, and
+    when that screen changes its rate. With no screen the rate is 0 (not known)."""
+    link = []  # The connection to the current screen. Not the screen: a monitor can go away.
 
     def update(*_args) -> None:
         screen = window.screen()
         window.setProperty("refreshRate", screen.refreshRate() if screen is not None else 0.0)
 
-    window.screenChanged.connect(update)
-    update()
+    def follow(*_args) -> None:
+        if link:
+            QObject.disconnect(link.pop())  # Does nothing when the old screen is gone.
+        screen = window.screen()
+        if screen is not None:
+            link.append(screen.refreshRateChanged.connect(update))
+        update()
+
+    window.screenChanged.connect(follow)
+    follow()
 
 
 def main() -> int:

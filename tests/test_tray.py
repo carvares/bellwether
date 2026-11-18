@@ -106,3 +106,111 @@ def test_a_tray_loads_the_app_icon_one_time(app, fake_client, tmp_path, monkeypa
     item.refresh()
     assert len(calls) == 1
     backend.changed.disconnect(item.refresh)
+
+
+def test_a_colour_that_cannot_be_drawn_gives_the_circle_and_one_log_line(app, monkeypatch, caplog):
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QImage
+
+    from herdr_float import tray
+
+    source = QImage(64, 64, QImage.Format.Format_ARGB32)
+    source.fill(Qt.GlobalColor.transparent)
+    for x in range(16, 48):
+        for y in range(16, 48):
+            source.setPixelColor(x, y, Qt.GlobalColor.black)
+    icons = tray.TrayIcons(source)
+    assert icons._shapes is not None
+
+    def broken(shape, color):
+        raise RuntimeError("text with /a/path")
+
+    monkeypatch.setattr(tray, "tint", broken)
+    circles = []
+    monkeypatch.setattr(tray, "make_icon", lambda color: circles.append(color) or f"circle {color}")
+    with caplog.at_level("INFO", logger="herdr_float"):
+        assert icons.icon("#f28b82") == "circle #f28b82"  # the start does not stop
+        assert icons.icon("#81c995") == "circle #81c995"
+        assert icons.icon("#f28b82") == "circle #f28b82"
+    assert circles == ["#f28b82", "#81c995"]  # made one time for each colour
+    assert [r.getMessage() for r in caplog.records] == [
+        "the Herdr app icon cannot be used (RuntimeError): the tray icon is a circle"
+    ]
+    assert "/a/path" not in caplog.text
+
+
+def make_tray(backend, window, tray_app, monkeypatch):
+    from herdr_float import appicon, tray
+
+    monkeypatch.setattr(appicon, "load_app_icon", lambda *args: None)  # no icon: the circle
+    monkeypatch.setattr(tray.QSystemTrayIcon, "show", lambda self: None)  # no item in a real tray
+    return tray.Tray(backend, window, tray_app)
+
+
+def test_the_menu_has_move_to_next_screen_only_with_more_than_one_screen(app, fake_client, tmp_path, monkeypatch):
+    from PySide6.QtCore import QObject, Signal
+    from PySide6.QtGui import QWindow
+
+    from herdr_float.backend import Backend
+
+    class FakeApp(QObject):
+        screenAdded = Signal(object)
+        screenRemoved = Signal(object)
+
+        def __init__(self, count):
+            super().__init__()
+            self.count = count
+
+        def screens(self):
+            return [object()] * self.count
+
+        def quit(self):
+            pass
+
+    def move_entries(item):
+        return [a.text() for a in item._menu.actions() if a.isVisible() and a.text() == "Move to next screen"]
+
+    backend = Backend(fake_client, settings_path=tmp_path / "state.json")
+    fake_app = FakeApp(1)
+    item = make_tray(backend, QWindow(), fake_app, monkeypatch)
+    assert move_entries(item) == []
+    assert [a.text() for a in item._menu.actions() if a.isVisible() and a.text()] == ["Show widget", "Quit"]  # the plain test window is not visible
+    fake_app.count = 2
+    fake_app.screenAdded.emit(None)  # a monitor is connected
+    assert move_entries(item) == ["Move to next screen"]
+    assert [a.text() for a in item._menu.actions() if a.isVisible() and a.text()] == [
+        "Show widget", "Move to next screen", "Quit"]
+    fake_app.count = 1
+    fake_app.screenRemoved.emit(None)
+    assert move_entries(item) == []
+    backend.changed.disconnect(item.refresh)
+    two = make_tray(backend, QWindow(), FakeApp(2), monkeypatch)
+    assert move_entries(two) == ["Move to next screen"]
+    backend.changed.disconnect(two.refresh)
+
+
+def test_move_to_next_screen_asks_the_panel_to_move(app, fake_client, tmp_path, monkeypatch):
+    from PySide6.QtCore import QObject, Signal, Slot
+
+    from herdr_float.backend import Backend
+
+    class Panel(QObject):
+        visibleChanged = Signal(bool)
+
+        def __init__(self):
+            super().__init__()
+            self.moves = 0
+
+        def isVisible(self):
+            return True
+
+        @Slot()
+        def moveToNextScreen(self):
+            self.moves += 1
+
+    backend = Backend(fake_client, settings_path=tmp_path / "state.json")
+    panel = Panel()
+    item = make_tray(backend, panel, app, monkeypatch)
+    item._move_action.trigger()
+    assert panel.moves == 1
+    backend.changed.disconnect(item.refresh)

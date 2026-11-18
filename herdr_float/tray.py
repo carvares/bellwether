@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import QObject, Qt
+from PySide6.QtCore import QMetaObject, QObject, Qt
 from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
@@ -60,14 +60,20 @@ class TrayIcons:
 
     def icon(self, color: str) -> QIcon:
         if color not in self._icons:
-            if self._shapes is None:
-                self._icons[color] = make_icon(color)
-            else:
-                icon = QIcon()
-                for shape in self._shapes:
-                    icon.addPixmap(QPixmap.fromImage(tint(shape, color)))
-                self._icons[color] = icon
+            self._icons[color] = self._tinted(color) if self._shapes is not None else make_icon(color)
         return self._icons[color]
+
+    def _tinted(self, color: str) -> QIcon:
+        """The app icon in one colour. Any failure gives the circle from now on: the widget must start."""
+        try:
+            icon = QIcon()
+            for shape in self._shapes:
+                icon.addPixmap(QPixmap.fromImage(tint(shape, color)))
+            return icon
+        except Exception as exc:  # The class name only: the text of an error can hold a path.
+            log.info("the Herdr app icon cannot be used (%s): the tray icon is a circle", type(exc).__name__)
+            self._shapes = None
+            return make_icon(color)
 
 
 class Tray(QObject):
@@ -81,6 +87,13 @@ class Tray(QObject):
         self._menu = QMenu()
         self._toggle_action = self._menu.addAction("Hide widget")
         self._toggle_action.triggered.connect(self.toggle)
+        # The way to a different monitor that needs no drag. Only with more than one screen.
+        self._move_action = self._menu.addAction("Move to next screen")
+        self._move_action.triggered.connect(self.move_to_next_screen)
+        app.screenAdded.connect(self._sync_screens)
+        app.screenRemoved.connect(self._sync_screens)
+        self._app = app
+        self._sync_screens()
         self._menu.addSeparator()
         self._menu.addAction("Quit").triggered.connect(app.quit)
 
@@ -98,6 +111,13 @@ class Tray(QObject):
         visible = not self._window.isVisible()
         self._window.setVisible(visible)
         log.info("widget %s from tray", "shown" if visible else "hidden")
+
+    def move_to_next_screen(self, *_args) -> None:
+        QMetaObject.invokeMethod(self._window, "moveToNextScreen")
+        log.info("widget moved to the next screen from tray")
+
+    def _sync_screens(self, *_args) -> None:
+        self._move_action.setVisible(len(self._app.screens()) > 1)
 
     def refresh(self) -> None:
         online, counters = self._backend.online, self._backend.counters

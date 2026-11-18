@@ -154,7 +154,19 @@ def test_position_is_saved_and_loaded(app, fake_client, tmp_path):
     assert (first.savedX, first.savedY) == (-1, -1)
     first.savePosition(300, 40)
     second = Backend(fake_client, settings_path=path)
-    assert (second.savedX, second.savedY) == (300, 40)
+    assert (second.savedX, second.savedY, second.savedScreen) == (300, 40, "")
+
+
+def test_the_screen_name_is_saved_with_the_position(app, fake_client, tmp_path):
+    path = tmp_path / "state.json"
+    first = Backend(fake_client, settings_path=path)
+    assert first.savedScreen == ""
+    first.savePosition(300, 40, "DP-1")
+    second = Backend(fake_client, settings_path=path)
+    assert (second.savedX, second.savedY, second.savedScreen) == (300, 40, "DP-1")
+    path.write_text('{"x": 7, "y": 8}')  # a file of an older version
+    third = Backend(fake_client, settings_path=path)
+    assert (third.savedX, third.savedY, third.savedScreen) == (7, 8, "")
 
 
 def wait_for(app, condition, timeout=2.0):

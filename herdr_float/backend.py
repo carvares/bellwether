@@ -40,7 +40,7 @@ class Backend(QObject):
         self._thread: threading.Thread | None = None
         self._last_failure: str | None = None
         self._opening = ""  # the key of the agent that a jump is going to; "" when no jump runs
-        self._saved = load_position(self._settings_path) or (-1, -1)
+        self._saved = load_position(self._settings_path) or (-1, -1, "")
         self._snapshot.connect(self.apply)
         self._focusDone.connect(self._set_opening)
 
@@ -108,6 +108,11 @@ class Backend(QObject):
     @Property(int, constant=True)
     def savedY(self) -> int:
         return self._saved[1]
+
+    @Property(str, constant=True)
+    def savedScreen(self) -> str:
+        """The name of the screen of the saved position. "" when the file has no screen (an older version)."""
+        return self._saved[2]
 
     # ----- state -----
 
@@ -192,8 +197,9 @@ class Backend(QObject):
             self._wake.set()
 
     @Slot(int, int)
-    def savePosition(self, x: int, y: int) -> None:
+    @Slot(int, int, str)
+    def savePosition(self, x: int, y: int, screen: str = "") -> None:
         try:
-            save_position(x, y, self._settings_path)
+            save_position(x, y, self._settings_path, screen)
         except OSError:
             log.warning("position was not saved")

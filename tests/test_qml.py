@@ -1,12 +1,13 @@
 """Smoke test of the real Main.qml, loaded the same way as herdr_float/__main__.py (off screen)."""
+import json
 import threading
 import time
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QPoint, QPointF, Qt, Slot, qInstallMessageHandler
+from PySide6.QtCore import QObject, QPoint, QPointF, Qt, Signal, Slot, qInstallMessageHandler
 from PySide6.QtGui import QWheelEvent
-from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtQml import QQmlApplicationEngine, QQmlExpression, qmlContext
 from PySide6.QtQuick import QQuickWindow
 from PySide6.QtTest import QTest
 
@@ -41,11 +42,13 @@ class RecordingBackend(Backend):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.saves = []
+        self.screens = []  # the screen name of each save
 
-    @Slot(int, int)
-    def savePosition(self, x, y):
+    @Slot(int, int, str)
+    def savePosition(self, x, y, screen=""):
         self.saves.append((x, y))
-        super().savePosition(x, y)
+        self.screens.append(screen)
+        super().savePosition(x, y, screen)
 
 
 @pytest.fixture
@@ -362,9 +365,9 @@ def test_the_header_total_is_the_sum_of_the_counts_and_the_counts_have_two_digit
     assert root.property("total") == sum(g["count"] for g in backend.groups) == 16
     numerals = {}
     for item in walk(root.contentItem()):
-        if item.property("countOf"):
+        if item.property("countFor"):
             row = item.parentItem()  # the zero at the front and the count
-            numerals[item.property("countOf")] = "".join(t.property("text") for t in row.childItems() if t.isVisible())
+            numerals[item.property("countFor")] = "".join(t.property("text") for t in row.childItems() if t.isVisible())
     assert numerals == {"blocked": "01", "done": "00", "working": "03", "idle": "12"}
     backend.apply(many(working=7))
     settle(app)
@@ -390,6 +393,12 @@ def cells(root):
         ({"blocked": 1, "done": 2, "working": 3, "idle": 12}, [1, 2, 3, 12]),
         ({"blocked": 1, "idle": 299}, [1, 0, 0, 59]),  # more agents than cells: a state with an agent keeps a cell
         ({"blocked": 100, "done": 1, "working": 100, "idle": 1}, [29, 1, 29, 1]),
+        ({"working": 61}, [0, 0, 60, 0]),  # one agent more than the cells
+        ({"done": 1, "working": 60}, [0, 1, 59, 0]),
+        # The shares are too many (62): the biggest state gives the extra cells back.
+        ({"blocked": 1, "done": 1, "working": 1, "idle": 500}, [1, 1, 1, 57]),
+        # The shares are too few (57): the biggest state gets the cells that are left.
+        ({"blocked": 7, "done": 7, "working": 7, "idle": 41}, [6, 6, 6, 42]),
     ],
 )
 def test_the_bar_shows_the_share_of_each_state_and_a_state_with_an_agent_is_never_invisible(app, window, counts, lit):
@@ -558,33 +567,392 @@ def test_the_rows_have_names_for_a_screen_reader(app, window):
                             "Go to ana in api / 1", "Go to bob"]
 
 
-def test_a_drag_moves_one_time_in_each_frame_of_the_screen(app, window):
+def test_the_step_of_a_drag_is_two_frames_of_the_screen(app, window):
     root, backend, messages = window
     assert root.property("refreshRate") == 0 and root.property("minMoveMs") == 16  # not known yet
     follow_refresh_rate(root)  # as the program does at start
     assert root.property("refreshRate") == root.screen().refreshRate() > 0
-    assert root.property("minMoveMs") == pytest.approx(1000 / root.screen().refreshRate())
-    for rate, step in ((60, 16.667), (120, 8.333), (144, 6.944), (0, 16), (-1, 16), (1000, 4), (30, 20)):
+    assert root.property("minMoveMs") == pytest.approx(min(20, 2000 / root.screen().refreshRate()))
+    for rate, step in ((240, 8.333), (144, 13.889), (120, 16.667), (60, 20), (0, 16), (-1, 16), (1000, 4), (30, 20)):
         root.setProperty("refreshRate", rate)
         assert root.property("minMoveMs") == pytest.approx(step, abs=0.001)
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
-def test_two_moves_in_one_frame_of_the_screen_count_one_time(app, window):
+class FakeScreen(QObject):
+    refreshRateChanged = Signal(float)
+
+    def __init__(self, rate):
+        super().__init__()
+        self.rate = rate
+
+    def refreshRate(self):
+        return self.rate
+
+
+class FakeWindow(QObject):
+    screenChanged = Signal(QObject)
+
+    def __init__(self, screen):
+        super().__init__()
+        self.now = screen
+        self.sets = 0
+
+    def setProperty(self, name, value):
+        self.sets += 1  # one for each time the program gives the rate to the window
+        return super().setProperty(name, value)
+
+    def screen(self):
+        return self.now
+
+    def move_to(self, screen):
+        self.now = screen
+        self.screenChanged.emit(screen)
+
+
+def test_the_refresh_rate_follows_the_screen_of_the_window_and_a_change_of_that_screen(app):
+    slow, fast = FakeScreen(144.0), FakeScreen(240.0)
+    panel = FakeWindow(slow)
+    follow_refresh_rate(panel)
+    assert panel.property("refreshRate") == 144.0
+    slow.rate = 60.0
+    slow.refreshRateChanged.emit(60.0)  # the same screen changes its mode
+    assert panel.property("refreshRate") == 60.0
+    panel.move_to(fast)
+    assert panel.property("refreshRate") == 240.0
+    slow.rate = 75.0
+    sets = panel.sets
+    slow.refreshRateChanged.emit(75.0)  # the old screen is not followed any more
+    assert panel.property("refreshRate") == 240.0 and panel.sets == sets
+    fast.rate = 120.0
+    fast.refreshRateChanged.emit(120.0)
+    assert panel.property("refreshRate") == 120.0
+    panel.move_to(None)  # no screen: the rate is not known
+    assert panel.property("refreshRate") == 0.0
+    fast.rate = 165.0
+    sets = panel.sets
+    fast.refreshRateChanged.emit(165.0)  # not followed after the window left it
+    assert panel.property("refreshRate") == 0.0 and panel.sets == sets
+    panel.move_to(slow)
+    assert panel.property("refreshRate") == 75.0
+
+
+def test_a_screen_that_goes_away_leaves_no_reference_to_it(app):
+    import gc
+    import weakref
+
+    gone, stays = FakeScreen(144.0), FakeScreen(60.0)
+    panel = FakeWindow(gone)
+    follow_refresh_rate(panel)
+    watch = weakref.ref(gone)
+    panel.now = stays
+    del gone  # the monitor is unplugged: Qt deletes the screen and then tells the window
+    gc.collect()
+    assert watch() is None
+    panel.screenChanged.emit(stays)
+    assert panel.property("refreshRate") == 60.0
+
+
+def pointer_area(root):
+    return next(i for i in walk(root.contentItem()) if i.property("lastMoveMs") is not None)
+
+
+def test_a_move_counts_only_when_one_step_passed_after_the_last_move(app, window):
     root, backend, messages = window
     backend.apply(AGENTS)
     settle(app)
-    root.setProperty("refreshRate", 50)  # a step of 20 ms
+    root.setProperty("refreshRate", 100)  # a step of 20 ms
+    assert root.property("minMoveMs") == 20
+    area = pointer_area(root)
     left, none = Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier
     start = QPoint(160, 100)
     before = (root.property("posX"), root.property("posY"))
+    area.setProperty("lastMoveMs", time.time() * 1000 + 60_000)  # a clock that went back must not block the drag
     QTest.mousePress(root, left, none, start)
+    assert area.property("lastMoveMs") == 0
+    pressed_at = time.time() * 1000
     QTest.mouseMove(root, start + QPoint(-10, 0), 0)  # the first move after a press always counts
-    QTest.mouseMove(root, start + QPoint(-12, 0), 0)  # the same frame: the compositor did not move the window yet
     assert root.property("posX") == before[0] - 10
-    time.sleep(0.03)
-    QTest.mouseMove(root, start + QPoint(-11, 0), 0)  # a later frame: it counts
+    assert pressed_at - 1 <= area.property("lastMoveMs") <= time.time() * 1000 + 1  # the time of this move
+    # The time of the last move is set here, so the test does not depend on the speed of the computer.
+    area.setProperty("lastMoveMs", time.time() * 1000 + 60_000)  # the last move was less than one step ago
+    QTest.mouseMove(root, start + QPoint(-12, 0), 0)  # the compositor did not move the window yet: no move
+    assert root.property("posX") == before[0] - 10
+    area.setProperty("lastMoveMs", time.time() * 1000 - 21)  # one step passed
+    QTest.mouseMove(root, start + QPoint(-11, 0), 0)
     assert root.property("posX") == before[0] - 21
     QTest.mouseRelease(root, left, none, start + QPoint(-11, 0))
     settle(app)
     assert backend.saves == [(before[0] - 21, before[1])]
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+# ----- more than one screen -----
+
+PANEL = (WIDTH, CLOSED)
+# Two screens of different sizes, as {name, virtualX, virtualY, width, height}. OFFSET: the small one is at the
+# right of the big one and starts 360 px lower.
+OFFSET = [("A", 0, 0, 2560, 1440), ("B", 2560, 360, 1920, 1080)]
+SIDE = [("L", 0, 0, 1920, 1080), ("R", 1920, 0, 1920, 1080)]
+STACKED = [("T", 0, 0, 1920, 1080), ("U", 0, 1080, 1920, 1080)]
+
+
+def js(root, text):
+    """The value of a JavaScript expression in Main.qml."""
+    expression = QQmlExpression(qmlContext(root), root, text)
+    value = expression.evaluate()
+    assert not expression.hasError(), expression.error().toString()
+    return value[0] if isinstance(value, tuple) else value
+
+
+def screen_list(screens):
+    return json.dumps([dict(zip(("name", "virtualX", "virtualY", "width", "height"), s)) for s in screens])
+
+
+def use_screens(root, screens, name, x, y):
+    """Give the panel made-up screens and put it on one of them. The real window stays where it is."""
+    js(root, f"root.screenSource = {screen_list(screens)}")
+    root.setProperty("screenName", name)
+    root.setProperty("atDefault", False)
+    root.setProperty("posX", x)
+    root.setProperty("posY", y)
+
+
+def place(root):
+    return root.property("screenName"), root.property("posX"), root.property("posY")
+
+
+@pytest.mark.parametrize(
+    "screens, wanted, result",
+    [
+        # Two screens side by side: across the edge that they share, and a stop at each outer edge.
+        (SIDE, (1800, 100), (1800, 100)),
+        (SIDE, (3700, 100), (3520, 100)),
+        (SIDE, (-50, 100), (0, 100)),
+        (SIDE, (1800, -30), (1800, 0)),
+        (SIDE, (1800, 1000), (1800, 888)),
+        (SIDE, (4000, 2000), (3520, 888)),
+        # One screen above the other.
+        (STACKED, (100, 1000), (100, 1000)),
+        (STACKED, (1700, 1000), (1600, 1000)),
+        (STACKED, (100, 2100), (100, 1968)),
+        (STACKED, (-5, -5), (0, 0)),
+        # The offset pair. Across where the two screens touch.
+        (OFFSET, (2400, 560), (2400, 560)),
+        (OFFSET, (2660, 560), (2660, 560)),
+        # Above the small screen is no screen: the panel stops at the edge of the big one.
+        (OFFSET, (2400, 100), (2240, 100)),
+        (OFFSET, (2300, 100), (2240, 100)),
+        # Near the corner the panel goes down a little and then across.
+        (OFFSET, (2400, 300), (2400, 360)),
+        (OFFSET, (2400, 1300), (2400, 1248)),
+        (OFFSET, (3000, 300), (3000, 360)),
+        (OFFSET, (4300, 700), (4160, 700)),
+        (OFFSET, (-10, 700), (0, 700)),
+        # One screen: the same as a clamp to that screen.
+        (SIDE[:1], (1800, -30), (1600, 0)),
+        (SIDE[:1], (500, 500), (500, 500)),
+    ],
+)
+def test_a_drag_goes_across_an_edge_that_two_screens_share_and_stops_at_an_outer_edge(app, window, screens, wanted, result):
+    root, backend, messages = window
+    listed = screen_list(screens).replace("virtualX", "x").replace("virtualY", "y")
+    found = json.loads(js(root, f"JSON.stringify(root.dragPlace({listed}, {wanted[0]}, {wanted[1]}, {PANEL[0]}, {PANEL[1]}))"))
+    assert (found["x"], found["y"]) == result
+
+
+def test_the_panel_is_kept_on_the_screen_that_holds_it(app, window):
+    root, backend, messages = window
+    assert root.property("screenName") == root.screen().name()  # at start: the screen of the window
+    backend.apply([])
+    settle(app)
+    use_screens(root, OFFSET, "B", 5000, 5000)
+    js(root, "root.clampPosition()")
+    assert place(root) == ("B", 1920 - WIDTH, 1080 - CLOSED)  # the size of B, not of A and not of the real screen
+    root.setProperty("screenName", "A")
+    root.setProperty("posX", 5000)
+    root.setProperty("posY", 5000)
+    js(root, "root.clampPosition()")
+    assert place(root) == ("A", 2560 - WIDTH, 1440 - CLOSED)
+    root.setProperty("atDefault", True)
+    js(root, "root.clampPosition()")
+    assert place(root) == ("A", 2560 - WIDTH - 16, 16)  # the default corner, 16 px from the edges
+    root.setProperty("screenName", "B")
+    settle(app)
+    assert place(root) == ("B", 1920 - WIDTH - 16, 16)  # a new screen moves the default corner by itself
+    # A group that opens at the bottom edge of B pushes the panel up.
+    backend.apply(AGENTS)
+    root.setProperty("atDefault", False)
+    root.setProperty("posY", 1080 - CLOSED)
+    click(app, root, rows(root, "status")[2])
+    assert root.height() == CLOSED + 2 * AGENT_ROW + LIST_END
+    assert place(root) == ("B", 1920 - WIDTH - 16, 1080 - root.height())
+    assert backend.saves == []
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def test_move_to_next_screen_keeps_the_distance_to_the_nearer_edges(app, window):
+    root, backend, messages = window
+    use_screens(root, OFFSET, "A", 2200, 40)  # 40 px from the right edge of A and 40 px from its top
+    js(root, "root.moveToNextScreen()")
+    assert place(root) == ("B", 1920 - WIDTH - 40, 40)
+    assert (backend.saves, backend.screens) == ([(1560, 40)], ["B"])
+    js(root, "root.moveToNextScreen()")  # the last screen: the next one is the first
+    assert place(root) == ("A", 2200, 40)
+    root.setProperty("posX", 30)
+    root.setProperty("posY", 1440 - CLOSED - 20)  # at the left, 20 px above the bottom edge
+    js(root, "root.moveToNextScreen()")
+    assert place(root) == ("B", 30, 1080 - CLOSED - 20)
+    # A place that does not exist on the smaller screen: the middle of the big one stays at the left and top
+    # distance, and the clamp keeps the panel on the screen.
+    root.setProperty("screenName", "A")
+    root.setProperty("posX", 1100)
+    root.setProperty("posY", 600)
+    js(root, "root.moveToNextScreen()")
+    assert place(root) == ("B", 1100, 600)
+    assert backend.screens == ["B", "A", "B", "B"]
+    # With one screen there is nothing to do.
+    saves = len(backend.saves)
+    use_screens(root, OFFSET[:1], "A", 100, 100)
+    js(root, "root.moveToNextScreen()")
+    assert place(root) == ("A", 100, 100) and len(backend.saves) == saves
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def test_move_to_next_screen_keeps_the_default_corner(app, window):
+    root, backend, messages = window
+    use_screens(root, OFFSET, "A", 0, 0)
+    root.setProperty("atDefault", True)
+    js(root, "root.clampPosition()")
+    js(root, "root.moveToNextScreen()")
+    assert place(root) == ("B", 1920 - WIDTH - 16, 16) and root.property("atDefault") is True
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def drag_by(app, root, steps):
+    """Press in the middle of the header and move to each step from there. The window stays off screen, so the
+    steps add up. Return the function that releases the button."""
+    left, none = Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier
+    start = QPoint(160, 20)
+    QTest.mouseMove(root, start)  # the pointer is there before the press
+    settle(app)
+    QTest.mousePress(root, left, none, start)
+    settle(app)
+    for step in steps:
+        QTest.mouseMove(root, start + step)
+        settle(app)
+    return lambda: (QTest.mouseRelease(root, left, none, start + steps[-1]), settle(app))
+
+
+def test_a_drag_to_the_other_screen_leaves_the_panel_there(app, window):
+    root, backend, messages = window
+    use_screens(root, OFFSET, "A", 2100, 600)
+    release = drag_by(app, root, [QPoint(90, 0), QPoint(110, 0)])
+    assert place(root) == ("A", 2300, 600)  # on the two screens: past the edge of A (2240), still a panel of A
+    release()
+    assert place(root) == ("A", 2240, 600)  # its centre is on A: it stays on A, all of it
+    assert (backend.saves, backend.screens) == ([(2240, 600)], ["A"])
+    release = drag_by(app, root, [QPoint(90, 10), QPoint(100, 9), QPoint(110, 11)])
+    assert place(root) == ("A", 2540, 630)
+    release()
+    assert place(root) == ("B", 0, 270)  # its centre is on B: the same place of the desktop, all of it on B
+    assert (backend.saves[-1], backend.screens[-1]) == ((0, 270), "B")
+    release = drag_by(app, root, [QPoint(-190, 0), QPoint(-210, 0)])  # and back, to the left
+    assert place(root) == ("B", -400, 270)
+    release()
+    assert place(root) == ("A", 2160, 630)
+    assert (backend.saves[-1], backend.screens[-1]) == ((2160, 630), "A")
+    assert root.property("atDefault") is False and root.property("openState") == ""
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def test_a_drag_stops_at_an_edge_with_no_screen_behind_it(app, window):
+    root, backend, messages = window
+    use_screens(root, OFFSET, "A", 2100, 50)  # at this height nothing is at the right of A
+    release = drag_by(app, root, [QPoint(90, 0), QPoint(100, 0), QPoint(110, 0)])
+    assert place(root) == ("A", 2240, 50)
+    release()
+    assert place(root) == ("A", 2240, 50)
+    assert (backend.saves, backend.screens) == ([(2240, 50)], ["A"])
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def test_a_group_that_changes_size_does_not_pull_a_drag_back_to_its_screen(app, window):
+    root, backend, messages = window
+    backend.apply(AGENTS)
+    settle(app)
+    use_screens(root, OFFSET, "A", 2150, 600)
+    release = drag_by(app, root, [QPoint(100, 0), QPoint(150, 0)])
+    assert place(root) == ("A", 2400, 600)
+    root.setProperty("openState", "working")  # the panel changes its height during the drag
+    settle(app)
+    assert place(root) == ("A", 2400, 600)
+    release()
+    assert place(root)[0] == "B"
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def wait_until(app, condition, timeout=2.0):
+    end = time.monotonic() + timeout
+    while time.monotonic() < end and not condition():
+        app.processEvents()
+        time.sleep(0.01)
+    return condition()
+
+
+def test_a_monitor_that_goes_away_leaves_the_panel_on_a_screen_that_stays(app, window):
+    root, backend, messages = window
+    backend.apply([])
+    use_screens(root, OFFSET, "B", 1500, 800)
+    settle(app)
+    js(root, f"root.screenSource = {screen_list(OFFSET + [('C', 4480, 0, 1280, 720)])}")  # a monitor is added
+    time.sleep(0.3)
+    settle(app)
+    assert place(root) == ("B", 1500, 800)  # nothing moves
+    js(root, f"root.screenSource = {screen_list([OFFSET[0], ('C', 4480, 0, 1280, 720)])}")  # B goes away
+    assert wait_until(app, lambda: root.property("screenName") != "B")
+    assert place(root) == ("A", 1500, 800) and root.isVisible()
+    js(root, f"root.screenSource = {screen_list([('C', 4480, 0, 1280, 720)])}")  # and A: only the small one stays
+    assert wait_until(app, lambda: root.property("screenName") == "C")
+    assert place(root) == ("C", 1280 - WIDTH, 720 - CLOSED)  # kept on the screen
+    assert backend.saves == []  # the saved place stays: the panel is on its monitor again at a later start
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def test_a_panel_that_the_compositor_closes_shows_again_and_a_hidden_panel_stays_hidden(app, window):
+    root, backend, messages = window
+    settle(app)
+    assert root.isVisible()
+    root.close()  # what layer-shell-qt does when the compositor closes the surface (its monitor went away)
+    assert not root.isVisible()
+    assert wait_until(app, root.isVisible)
+    assert root.property("closedByCompositor") is False
+    root.setVisible(False)  # the tray entry "Hide widget"
+    js(root, f"root.screenSource = {screen_list(OFFSET)}")  # the screens change while the panel is hidden
+    time.sleep(0.4)
+    settle(app)
+    assert not root.isVisible()
+    root.setVisible(True)
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+@pytest.mark.parametrize(
+    "saved, at_default, x, y",
+    [
+        ('{"x": 120, "y": 48, "screen": "%s"}', False, 120, 48),  # the saved screen is there
+        ('{"x": 120, "y": 48}', False, 120, 48),  # a file of an older version: the screen of the window
+        ('{"x": 120, "y": 48, "screen": "NOT-THERE"}', True, None, 16),  # the monitor is not connected: the default corner
+        ('{"x": 9000, "y": 48, "screen": "%s"}', True, None, 16),  # a place that is not on the screen
+    ],
+)
+def test_the_start_uses_the_saved_screen_and_place(app, tmp_path, request, saved, at_default, x, y):
+    name = app.primaryScreen().name()
+    (tmp_path / "state.json").write_text(saved % name if "%s" in saved else saved)
+    root, backend, messages = request.getfixturevalue("window")
+    settle(app)
+    default_x = root.screen().size().width() - WIDTH - 16
+    assert root.property("atDefault") is at_default
+    assert place(root) == (name, default_x if x is None else x, y)
+    assert root.property("surfaceScreen") == name and root.isVisible()
+    assert backend.saves == []
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
