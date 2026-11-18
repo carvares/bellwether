@@ -195,7 +195,12 @@ Window {
         var to = list[(index + 1) % list.length]
         var place = carried(home, to, posX, posY, width, height)
         rehome(to, place.x, place.y)
-        backend.savePosition(posX, posY, screenName)
+        // A panel at its default corner has no place of its own: with a saved place it would not be at the
+        // default corner at the next start, and would not follow the width of the screen any more.
+        if (atDefault)
+            backend.saveScreen(screenName)
+        else
+            backend.savePosition(posX, posY, screenName)
     }
 
     // After a change of the screens. When the monitor of the panel is gone, the panel goes to the screen that

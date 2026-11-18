@@ -55,6 +55,11 @@ class RecordingBackend(Backend):
         self.screens.append(screen)
         super().savePosition(x, y, screen)
 
+    @Slot(str)
+    def saveScreen(self, screen):
+        self.screens.append(screen)  # a screen with no place
+        super().saveScreen(screen)
+
 
 @pytest.fixture
 def window(app, fake_client, tmp_path):
@@ -838,13 +843,22 @@ def test_move_to_next_screen_keeps_the_distance_to_the_nearer_edges(app, window)
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
-def test_move_to_next_screen_keeps_the_default_corner(app, window):
+def test_move_to_next_screen_keeps_the_default_corner_and_saves_only_the_screen(app, window, tmp_path):
     root, backend, messages = window
+    (tmp_path / "state.json").write_text('{"x": 9, "y": 9, "screen": "A", "layout": "C"}')
     use_screens(root, OFFSET, "A", 0, 0)
     root.setProperty("atDefault", True)
     js(root, "root.clampPosition()")
     js(root, "root.moveToNextScreen()")
     assert place(root) == ("B", 1920 - WIDTH - 16, 16) and root.property("atDefault") is True
+    # No place in the file: at the next start the panel is at the default corner again, and it follows the
+    # width of the screen and of the layout.
+    assert (backend.saves, backend.screens) == ([], ["B"])
+    assert json.loads((tmp_path / "state.json").read_text()) == {"screen": "B", "layout": "C"}
+    root.setProperty("atDefault", False)  # a panel that the person moved saves its place
+    js(root, "root.moveToNextScreen()")
+    assert backend.screens == ["B", "A"] and len(backend.saves) == 1
+    assert json.loads((tmp_path / "state.json").read_text())["x"] == backend.saves[0][0]
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
@@ -962,6 +976,7 @@ def test_a_panel_that_the_compositor_closes_shows_again_and_a_hidden_panel_stays
         ('{"x": 120, "y": 48}', False, 120, 48),  # a file of an older version: the screen of the window
         ('{"x": 120, "y": 48, "screen": "NOT-THERE"}', True, None, 16),  # the monitor is not connected: the default corner
         ('{"x": 9000, "y": 48, "screen": "%s"}', True, None, 16),  # a place that is not on the screen
+        ('{"screen": "%s", "layout": "C"}', True, None, 16),  # only the screen: the default corner of that screen
     ],
 )
 def test_the_start_uses_the_saved_screen_and_place(app, tmp_path, request, saved, at_default, x, y):
