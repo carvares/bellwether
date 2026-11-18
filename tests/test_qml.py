@@ -113,12 +113,10 @@ def test_a_click_on_an_agent_row_jumps_one_time(app, window):
     settle(app)
     click(app, root, rows(root, "status")[2])
     click(app, root, rows(root, "agent")[1])
-    backend._focusDone.emit()  # no thread in this test: wait for nothing
-    for _ in range(200):
+    for _ in range(100):  # the jump runs on its own thread
         settle(app)
-        if backend._client.focused:
+        if backend._client.focused and backend.opening == "":
             break
-        time.sleep(0.005)
     assert backend._client.focused == ["t3"]
     assert root.property("openState") == "working"
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
