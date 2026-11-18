@@ -17,9 +17,10 @@ from .backend import Backend
 from .client import HerdrClient, find_executables
 from .events import EventSource
 from .icons import Icons
+from .paths import NAME, OLD_NAME, move_old_folders, runtime_dir, state_home
 from .tray import STATE_COLORS, Tray
 
-LOG_PATH = Path.home() / ".local" / "state" / "herdr-float" / "herdr-float.log"
+LOG_PATH = state_home() / NAME / f"{NAME}.log"
 UI_PATH = Path(__file__).parent / "ui"
 # Holds only a link to the system module org.kde.layershell. The Qt of the wheel does not find it alone.
 IMPORT_PATH = UI_PATH / "imports"
@@ -33,15 +34,19 @@ def setup_logging() -> None:
 
 
 def take_single_instance_lock():
-    """Return an open lock file, or None if a different widget process has the lock."""
-    runtime = Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp")
-    handle = open(runtime / "herdr-float.lock", "w")
-    try:
-        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        handle.close()
-        return None
-    return handle
+    """Return the open lock files, or None if a different widget process has one of them. The lock of the old name
+    is taken too: an old herdr-float widget and a new one never run together."""
+    handles = []
+    for name in (NAME, OLD_NAME):
+        handle = open(runtime_dir() / f"{name}.lock", "w")
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            for opened in [*handles, handle]:
+                opened.close()
+            return None
+        handles.append(handle)
+    return handles
 
 
 def follow_refresh_rate(window) -> None:
@@ -66,11 +71,18 @@ def follow_refresh_rate(window) -> None:
 
 
 def main() -> int:
-    setup_logging()
+    # The lock comes first: a widget that runs (of the old name too) still uses its folders.
     lock = take_single_instance_lock()
     if lock is None:
-        logging.getLogger("bellwether").info("a widget is already running, exit")
+        # Make no log folder here: it would stop the move of the old one at the next start.
+        if LOG_PATH.parent.is_dir():
+            setup_logging()
+            logging.getLogger("bellwether").info("a widget is already running, exit")
         return 0
+    moves = move_old_folders()  # before anything reads or makes the folders
+    setup_logging()
+    for level, line in moves:
+        logging.getLogger("bellwether").log(level, line)
 
     os.environ.setdefault("QT_QPA_PLATFORM", "wayland")
     app = QApplication(sys.argv)

@@ -7,9 +7,11 @@ import os
 import re
 from pathlib import Path
 
+from .paths import NAME, cache_home
+
 log = logging.getLogger("bellwether")
 
-CACHE_PATH = Path.home() / ".cache" / "herdr-float" / "icons"
+CACHE_PATH = cache_home() / NAME / "icons"
 TEXT_COLOR = "#e8eaed"  # The colour of the row text in Main.qml.
 GENERIC = "agent"
 # Program words of agents whose icon does not have the name of the word or of its first part.

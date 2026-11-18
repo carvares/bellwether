@@ -5,7 +5,9 @@ import json
 import os
 from pathlib import Path
 
-DEFAULT_PATH = Path.home() / ".config" / "herdr-float" / "state.json"
+from .paths import NAME, config_home
+
+DEFAULT_PATH = config_home() / NAME / "state.json"
 
 
 def load_position(path: Path = DEFAULT_PATH) -> tuple[int, int, str] | None:
