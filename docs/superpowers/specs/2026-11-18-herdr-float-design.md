@@ -84,6 +84,17 @@ Request of the user: the icon that Herdr shows for the program in the place of t
 - **Fix round 1 (2026-11-18).** The lookup accepts a program word of 64 characters at most and treats a file system error as "no such file" (the result is kept, so the error does not repeat each second). The rows of a group are sorted in the backend by the label that shows, then by the address; `state.py` sorts only by state and address. `Icons.url` checks that the file it gave still exists and finds or makes it again if not. An icon that does not load in QML is hidden, and the row uses the layout without an icon.
 - **Not done.** `programs.json` is not read. The icons are read one time for each word in the life of the process (and again when the file is gone). A person did not yet look at the icons and the border on the screen: the checks used images of the widget's own window (off screen, software renderer).
 
+## Change on 2026-11-18: tray icon is the Herdr icon
+
+Request of the user: the tray icon is the Herdr app icon, in the status colour, with the same behaviour as the tray dot.
+
+- **Where the icon comes from.** `herdr_float/appicon.py`, `find_app_icon`, at each start: the `Icon=` entry of the first `herdr-app.desktop` in the XDG `applications` folders, then that name in the XDG `icons/hicolor` folders (`scalable/apps/` SVG first, else the largest PNG of `<size>/apps/`) and in `pixmaps`. An absolute `Icon=` path is used as it is. On this machine: `herdr-app.svg` in `hicolor/scalable/apps` (package `herdr-app-desktop-bin`). The file is not copied into the repository.
+- **The icon.** An opaque ivory rounded tile with a charcoal ram (curled horn, a terminal prompt as the eye). Qt does not apply `clip-path`, so the widget clips the drawing with each used `clipPath` that is one `<rect>`. A plain silhouette is a blank rounded square, so `mark` keeps the plate (the most frequent tone in a thin band at the outer edge of the tile), cuts the picture out as transparent, and adds a thin outline (`max(1.5, size / 16)` px) that keeps the tile edge closed where the ram touches it. An icon that is a glyph on transparency gets its plain alpha silhouette.
+- **Chosen by eye at 22 px** on a dark and a light panel (off screen) from: plain silhouette, plate with ram cut out, the same with outline, ram only, plate with a dark ram. The outlined plate stays one colour and keeps the tile shape on both panels; on a dark panel it looks like the app icon. The plate with a dark ram was close, but it has two colours.
+- **Tray.** `TrayIcons` makes each shape one time (sizes 16, 22, 24, 32, 44, 48, 64) and each colour one time (at most 5 icons). `STATE_COLORS`, `PRIORITY`, the tooltip, the click, the menu and the rule for when the icon changes are the same.
+- **Fallback.** No icon or an icon that does not load: the circle of before, and one INFO line at start without a path.
+- **Not done.** A person did not yet look at the icon in the real panel.
+
 ## Goal
 
 A small window that floats above all other applications.

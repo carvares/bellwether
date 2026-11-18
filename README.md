@@ -104,6 +104,7 @@ If the empty block stays in the window after that, remove it from your layout in
   - During a jump, more clicks on agents do nothing.
 - If a jump fails, the line shows a short message for 3 seconds: "Herdr app did not start", "could not raise the window", "agent is gone", "Herdr is offline" or "jump failed" (an error that has no message of its own). If the agent has no line any more, the message shows at the bottom of the panel.
 - Drag the panel to move it. You can start the drag on any row. The widget saves the position.
+- The tray icon is the Herdr app icon in one colour (the tile in the status colour, the ram cut out). If the widget cannot find the Herdr app icon, the tray icon is a circle.
 - Click the tray icon to hide or show the widget.
 - Right-click the tray icon to open the menu with "Quit".
 - The tray icon has the same colour as the border of the panel when at least one agent exists. With no agents, or offline, the two are grey (the tray icon is a lighter grey than the border).

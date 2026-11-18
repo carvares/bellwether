@@ -35,6 +35,7 @@ def test_the_tray_dot_has_the_colour_of_the_top_state_of_the_backend(app, fake_c
     monkeypatch.setattr(tray, "make_icon", lambda color: made.append(color))
     item = tray.Tray.__new__(tray.Tray)  # no real tray item: only refresh() runs
     item._backend, item._shown_state, item._icon = backend, None, FakeIcon()
+    item._icons = tray.TrayIcons(None)  # no Herdr app icon: the circle
     item.refresh()
     backend.apply([Agent("t1", "idle", "a", ""), Agent("t2", "working", "b", ""), Agent("t3", "working", "c", "")])
     item.refresh()
