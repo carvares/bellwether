@@ -17,7 +17,9 @@ log = logging.getLogger("herdr_float")
 class Backend(QObject):
     changed = Signal()
     focusFailed = Signal(str, str)
+    openingChanged = Signal()
     _snapshot = Signal(object)
+    _focusDone = Signal()
 
     def __init__(self, client, interval: float = 1.0, settings_path: Path = DEFAULT_PATH) -> None:
         super().__init__()
@@ -30,8 +32,10 @@ class Backend(QObject):
         self._wake = threading.Event()
         self._thread: threading.Thread | None = None
         self._last_failure: str | None = None
+        self._opening = ""  # the key of the agent that a jump is going to; "" when no jump runs
         self._saved = load_position(self._settings_path) or (-1, -1)
         self._snapshot.connect(self.apply)
+        self._focusDone.connect(self._set_opening)
 
     # ----- properties for QML -----
 
@@ -45,11 +49,26 @@ class Backend(QObject):
         return [{"state": s, "count": counts[s], "attention": s in ATTENTION} for s in STATES]
 
     @Property("QVariantList", notify=changed)
-    def agents(self) -> list[dict]:
+    def groups(self) -> list[dict]:
+        """The four states in display order, each with its agents."""
         return [
-            {"key": a.key, "name": a.name, "status": a.status, "workspace": a.workspace}
-            for a in self._agents
+            {
+                "state": s,
+                "label": s.capitalize(),
+                "count": sum(a.status == s for a in self._agents),
+                "attention": s in ATTENTION,
+                "agents": [
+                    {"key": a.key, "name": a.name, "workspace": a.workspace}
+                    for a in self._agents
+                    if a.status == s
+                ],
+            }
+            for s in STATES
         ]
+
+    @Property(str, notify=openingChanged)
+    def opening(self) -> str:
+        return self._opening
 
     @Property(int, constant=True)
     def savedX(self) -> int:
@@ -112,9 +131,19 @@ class Backend(QObject):
 
     @Slot(str)
     def focus(self, key: str) -> None:
+        if self._opening:
+            return  # One jump at a time: a second click must not start the app a second time.
+        self._set_opening(key)
         threading.Thread(target=self.focus_now, args=(key,), daemon=True).start()
 
+    @Slot()
+    def _set_opening(self, key: str = "") -> None:
+        if key != self._opening:
+            self._opening = key
+            self.openingChanged.emit()
+
     def focus_now(self, key: str) -> None:
+        """Run one jump. Runs on its own thread: the start of the app can take some seconds."""
         try:
             self._client.focus_agent(key)
             log.info("focus ok agent=%s", key)
@@ -124,6 +153,8 @@ class Backend(QObject):
         except HerdrOffline:
             log.warning("focus failed agent=%s offline", key)
             self.focusFailed.emit(key, "Herdr is offline")
+        finally:
+            self._focusDone.emit()
         self._wake.set()
 
     @Slot(int, int)

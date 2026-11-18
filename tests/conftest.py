@@ -19,6 +19,7 @@ class FakeClient:
         self.list_error = None
         self.focus_error = None
         self.focused = []
+        self.focus_gate = None  # a threading.Event: focus_agent waits for it
 
     def list_agents(self):
         if self.list_error:
@@ -27,6 +28,8 @@ class FakeClient:
 
     def focus_agent(self, key):
         self.focused.append(key)
+        if self.focus_gate is not None:
+            self.focus_gate.wait(5)
         if self.focus_error:
             raise self.focus_error
 
