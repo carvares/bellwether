@@ -13,7 +13,8 @@ It lets the user jump to an agent.
 
 | Topic | Decision |
 |---|---|
-| Form | Standalone program. A thin Herdr plugin starts it. |
+| Form | Standalone program. A systemd user service starts it at desktop login. |
+| Run time | All the time, also when Herdr is closed. The widget does not need Herdr to start. |
 | Scope | The default local Herdr session only. |
 | States | Five counters, one for each Herdr state: `idle`, `working`, `blocked`, `done`, `unknown`. No state is merged into another. |
 | Attention | `blocked` and `done` use the attention colour. |
@@ -26,7 +27,8 @@ It lets the user jump to an agent.
 Herdr plugin panes have these placements: `overlay`, `popup`, `split`, `tab`, `zoomed`.
 All of them are inside the Herdr terminal.
 None is an operating-system window, so a plugin cannot float above other applications.
-A plugin can run a command at startup. The plugin uses that to start the widget.
+A plugin can run a command at startup, but only when the Herdr server starts.
+The widget must run all the time, so a systemd user service starts it. There is no plugin.
 
 ## Facts from the Herdr API schema
 
@@ -55,29 +57,33 @@ Each part has one job.
 | Part | Job | Depends on |
 |---|---|---|
 | `herdr_float/state.py` | Hold the agent table. Apply a snapshot or an event. Return the five counts and a sorted agent list. Pure logic, no I/O. | nothing |
-| `herdr_float/client.py` | Connect to the socket. Send requests. Receive pushed events. Reconnect. | socket |
-| `herdr_float/window.py` | Layer-shell overlay. Drag to move. Save and load the position. | Qt |
-| `herdr_float/ui/` | Compact pill and expanded list. | `state.py` |
+| `herdr_float/client.py` | Connect to the socket. Send one request. Return the reply or an error. | socket |
+| `herdr_float/settings.py` | Save and load the window position. | nothing |
+| `herdr_float/backend.py` | Qt object. Reads a snapshot each second. Gives counters and agents to the interface. | `client.py`, `state.py`, `settings.py` |
+| `herdr_float/ui/Main.qml` | Layer-shell overlay window, compact pill, expanded list, drag. | `backend.py` |
 | `herdr_float/__main__.py` | Connect the parts. Start the Qt application. | all parts |
-| `plugin/` | Herdr plugin manifest. Its startup command starts the widget. | Herdr |
+| `systemd/herdr-float.service` | systemd user service. Starts the widget at login and after a crash. | systemd |
 
 ## Data flow
 
-1. Connect to the socket.
-2. Call `agent.list`. Replace the agent table with the result.
-3. Subscribe to: agent detected, agent status changed, pane closed, pane exited.
-4. For each event, update or remove one row. Refresh the counters.
-5. On disconnect, retry with an increasing delay (maximum 10 seconds).
-6. After each reconnect, do steps 2 and 3 again.
+Changed on 2026-11-18 after a second read of the schema.
+The `pane.agent_status_changed` subscription needs a `pane_id`. There is no global status subscription.
+So version 1 reads a snapshot one time each second and does not use events.
+
+1. One time each second, open a connection and call `agent.list`.
+2. Replace the full agent table with the result. Refresh the counters.
+3. If the call fails, show "offline". The next read is 1 second later.
+4. After a jump, read immediately.
 
 Rules for `state.py`:
 
 - The key of a row is `pane_id`.
 - A pane with no agent is not a row.
 - A snapshot replaces the full table.
-- An event for an unknown `pane_id` adds a row.
-- A closed or exited pane removes its row.
-- If an event has no revision, the newest arrival wins.
+- A row that is not valid is skipped. The other rows stay.
+- A status that is not one of the five states counts as `unknown`.
+
+Push updates (one subscription for each pane) are a later option, only if the 1-second delay is a problem.
 
 ## Interface
 
@@ -108,10 +114,8 @@ Rules for `state.py`:
 
 | Case | Behaviour |
 |---|---|
-| Herdr is not running | The pill shows "offline" in grey. The widget retries. |
-| The connection drops | Same as above. After reconnect, the widget loads a new snapshot. |
-| A message is not valid | The widget ignores it and writes a log line. |
-| An event kind is unknown | The widget ignores it. |
+| Herdr is not running | The pill shows "offline" in grey. The widget reads again each second. |
+| A reply is not valid | The pill shows "offline". The widget writes one log line when the condition starts. |
 | `agent.focus` fails | The row shows a short error for 3 seconds. |
 | A second widget starts | The second process exits. One widget only. |
 
@@ -121,7 +125,7 @@ Logs contain IDs and states only. They do not contain pane text.
 
 ## Tests
 
-- `state.py`: pytest unit tests. Zero, one and many agents. Events before a snapshot. Closed panes. Unknown panes. Each of the five states.
+- `state.py`: pytest unit tests. Zero, one and many agents. Rows that are not valid. Sort order. Each of the five states.
 - `client.py`: pytest against a fake socket server. Normal flow, disconnect, invalid data, reconnect with a new snapshot.
 - Live check on the desktop with real agents: each state, expand, jump, drag, restart, Herdr stopped and started.
 
@@ -145,5 +149,5 @@ Logs contain IDs and states only. They do not contain pane text.
 3. `client.py` with tests.
 4. Window and compact pill.
 5. Expanded list and jump.
-6. Herdr plugin wrapper.
+6. systemd user service.
 7. Live check. Handoff notes in Obsidian.
