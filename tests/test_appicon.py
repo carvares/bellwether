@@ -239,13 +239,27 @@ def test_an_svg_is_clipped_by_the_rectangle_clip_path_it_uses(tmp_path, app):
     svg = tmp_path / "clip.svg"
     svg.write_text(
         '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">'
-        '<defs><clipPath id="tile"><rect x="8" y="8" width="16" height="16" rx="2"/></clipPath></defs>'
+        '<defs><clipPath id="tile"><rect x="4" y="4" width="24" height="24" rx="2"/></clipPath></defs>'
         '<g clip-path="url(#tile)"><rect width="32" height="32"/></g></svg>'
     )
     image = load_source(svg)
     side = image.width()
     assert alpha(image, side // 2, side // 2) == 255
-    assert alpha(image, side // 8, side // 2) == 0 and alpha(image, side - side // 8, side // 2) == 0
+    assert alpha(image, side // 16, side // 2) == 0 and alpha(image, side - side // 16, side // 2) == 0
+
+
+def test_a_clip_that_keeps_less_than_half_of_the_drawing_is_not_the_tile(tmp_path, app):
+    # The clip keeps a quarter of the drawing. A tile does not crop most of its icon, so the drawing stays whole.
+    svg = tmp_path / "crop.svg"
+    svg.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">'
+        '<defs><clipPath id="part"><rect x="8" y="8" width="16" height="16"/></clipPath></defs>'
+        '<g clip-path="url(#part)"><rect width="32" height="32"/></g></svg>'
+    )
+    assert appicon.CLIP_KEEPS == 0.5
+    image = load_source(svg)
+    side = image.width()
+    assert [alpha(image, x, side // 2) for x in (side // 16, side // 2, side - side // 16)] == [255] * 3
 
 
 def test_the_plate_is_the_tone_at_the_edge_even_when_the_picture_is_bigger(app):

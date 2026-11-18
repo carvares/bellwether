@@ -16,7 +16,7 @@ log = logging.getLogger("herdr_float")
 DESKTOP_FILE = "herdr-app.desktop"
 SIZES = (16, 22, 24, 32, 44, 48, 64)  # The tray takes the size it needs, at 1x and 2x.
 SOURCE_SIZE = 256  # An SVG is drawn at this size one time and a bigger PNG is scaled down to it.
-CLIP_KEEPS = 0.1  # A clip that keeps less than this part of the drawing is a clip for a detail, not for the tile.
+CLIP_KEEPS = 0.5  # A clip that keeps less than this part of the drawing is a clip for a detail, not for the tile.
 # A usable mark covers this part of its square: less is nearly empty, more is a plain square.
 MARK_COVER = (0.03, 0.97)
 MARK_HOLE = 0.02  # On a plate, the picture that is cut out is at least this part of the square.
