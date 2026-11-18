@@ -97,7 +97,7 @@ If the empty block stays in the window after that, remove it from your layout in
   - If the terminal has a name, the line shows the name, and the space at the right (with the tab name when the space has more than one tab).
   - If the terminal has no name, the line shows the space.
   - If two lines look the same, each one also shows its terminal address in brackets (for example `[t1c]`).
-  - The lines of one row are in the order of the text that they show (A to Z).
+  - In an open row, the agents whose terminal has a name are first, in the order of the name (A to Z). The agents with no name are below them, in the order of the text that they show. Lines with the same text are in the order of the terminal address (`t2` is before `t10`).
   - A program that has no icon in the app gets the generic agent icon. If the widget cannot find the icons of the app, the line shows the program name as text.
 - The four corner brackets of the panel and the word at the top right have the colour of the most important state that has agents. The order is: blocked (red), done (yellow), idle (green), working (blue). Idle is above working here, so green brackets tell you that an agent waits for you. With no agents ("NO AGENTS"), or offline, they are grey.
 - An open row shows 8 agents at most. Turn the mouse wheel on the list to see the others. A line below the list shows which rows you see ("ROWS 01–08 / 12"), and marks at the right edge show the place in the list.
@@ -135,6 +135,10 @@ An open row closes when the widget goes offline.
 - When the widget starts the app, the output of the app goes to the user journal (`journalctl --user`), as when Plasma starts it.
 - A jump ends 8 seconds after the click at the latest, with one of the messages above. During that time the line shows "opening…".
 
+### How the data stays fresh
+
+The widget follows the changes of herdr-core with one child process, `herdr-core events --json`. Each change starts a read of `herdr-app ls` at once, so a new status shows in less than 150 ms after the Herdr app has it. The app shows some changes up to 0.5 s after herdr-core tells of them, so the widget reads again some times in the 1.6 s after a change. While this stream works, the widget also reads one time each 5 seconds as a safety net. If herdr-core does not run, or the stream ends, the widget reads one time each second, as before, and tries to start the stream again after 1, 2, 5 and then each 10 seconds. The widget does not keep or log the text of a change. The child process ends with the widget, also when the widget is killed.
+
 ## Files
 
 - Position: `~/.config/herdr-float/state.json` (`x` and `y` from the top-left corner of a monitor, and `screen`, the name of that monitor)
@@ -152,7 +156,7 @@ An open row closes when the widget goes offline.
 - The widget looks for `herdr-app` and `herdr-core` one time, at its start. If you install one of them later, start the widget again.
 - The widget finds the icon of a program by the file name. It tries, in this order: a short list of other names from the program table of the app (for example `github-copilot` gives `copilot.svg`), `icons/<program>.svg`, the part before the first `-` (`claude-code` gives `claude.svg`), `agent.svg`. A program name longer than 64 characters gets `agent.svg`. The app does not give its program table to other programs, so the widget does not read `programs.json`: an icon that you changed there does not show in the widget.
 - The widget reads each icon one time. After an update of the app that changes an icon, start the widget again. If an icon file or the folder of icon copies is deleted, the widget finds or makes the file again at the next change of the list.
-- The widget reads a new list one time each second. One read takes 3 to 14 ms.
+- The widget reads a new list when herdr-core tells of a change (see "How the data stays fresh"). One read takes 3 to 14 ms.
 - The panel redraws at most one time for each frame of your screen, and only when something changes. A drag moves the panel at most one time in two frames of the screen that the panel is on (240 Hz: each 8.3 ms, 144 Hz: each 13.9 ms, 60 Hz: each 20 ms). The second frame gives the compositor time to apply the last move before the next one is calculated.
 - A drag across monitors: the panel goes only across an edge that two monitors share. Where a monitor has no neighbour (for example above a smaller monitor that starts lower), the panel stops at the edge. During the drag the panel can be on two monitors. At the release it goes fully to the monitor that holds its middle, and it can blink one time when it changes its monitor: the compositor needs a new surface for a different monitor.
 - If the monitor of the panel is disconnected while the widget runs, the panel shows on a monitor that stays. This was tested with made-up screens only, not with a real cable. The saved monitor does not change, so after a later start with that monitor the panel is there again.
