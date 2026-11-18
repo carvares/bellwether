@@ -6,7 +6,9 @@ from dataclasses import dataclass
 
 log = logging.getLogger("herdr_float")
 
-STATES: tuple[str, ...] = ("blocked", "done", "working", "idle")
+STATES: tuple[str, ...] = ("blocked", "done", "working", "idle")  # The order of the rows.
+# Which state the border and the tray dot show. The user chose idle above working.
+PRIORITY: tuple[str, ...] = ("blocked", "done", "idle", "working")
 ATTENTION: frozenset[str] = frozenset({"blocked", "done"})
 
 _logged_words: set[str] = set()
@@ -16,8 +18,9 @@ _logged_words: set[str] = set()
 class Agent:
     key: str  # The terminal address, for example "t11". The jump uses it.
     status: str
-    name: str
+    name: str  # The name of the terminal. "" when it has none.
     workspace: str
+    app: str = ""  # The program word, for example "claude-code". "" when Herdr gives none.
 
 
 def _status(word: object, sub_agent: bool = False) -> str | None:
@@ -36,8 +39,12 @@ def _status(word: object, sub_agent: bool = False) -> str | None:
     return None
 
 
+def _text(value: object) -> str:
+    return value if isinstance(value, str) else ""
+
+
 def _sorted(agents) -> list[Agent]:
-    return sorted(agents, key=lambda a: (STATES.index(a.status), a.name.lower(), a.key))
+    return sorted(agents, key=lambda a: (STATES.index(a.status), (a.name or a.app).lower(), a.key))
 
 
 def parse_app(spaces: list) -> list[Agent]:
@@ -69,8 +76,7 @@ def _add_terminals(agents: dict[str, Agent], rows: object, where: str, sub_agent
         status = _status(row.get("status"), sub_agent)
         # The app shows a terminal that is also a sub-agent below its parent, so that entry wins.
         if isinstance(key, str) and key and status and (sub_agent or key not in agents):
-            name = row.get("name") or row.get("app") or row.get("agent") or key
-            agents[key] = Agent(key, status, str(name), where)
+            agents[key] = Agent(key, status, _text(row.get("name")), where, _text(row.get("app") or row.get("agent")))
         _add_terminals(agents, row.get("sub_agents"), where, sub_agent=True)
 
 
@@ -83,7 +89,7 @@ def parse_core(terminals: list) -> list[Agent]:
         key = row.get("address")
         status = _status(row.get("status"), sub_agent=bool(row.get("parent")))
         if isinstance(key, str) and key and status:
-            agents.append(Agent(key, status, str(row.get("agent") or key), ""))
+            agents.append(Agent(key, status, "", "", _text(row.get("agent"))))
     return _sorted(agents)
 
 
@@ -92,3 +98,10 @@ def count_states(agents: list[Agent]) -> dict[str, int]:
     for agent in agents:
         counts[agent.status] += 1
     return counts
+
+
+def top_state(online: bool, counts: dict[str, int]) -> str:
+    """The state that the border and the tray dot show: "offline", "none", or the first of PRIORITY with an agent."""
+    if not online:
+        return "offline"
+    return next((state for state in PRIORITY if counts[state] > 0), "none")

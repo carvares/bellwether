@@ -9,7 +9,7 @@ from PySide6.QtCore import Property, QObject, Signal, Slot
 
 from .client import HerdrError, HerdrOffline
 from .settings import DEFAULT_PATH, load_position, save_position
-from .state import ATTENTION, STATES, Agent, count_states
+from .state import ATTENTION, STATES, Agent, count_states, top_state
 
 log = logging.getLogger("herdr_float")
 
@@ -21,9 +21,10 @@ class Backend(QObject):
     _snapshot = Signal(object)
     _focusDone = Signal()
 
-    def __init__(self, client, interval: float = 1.0, settings_path: Path = DEFAULT_PATH) -> None:
+    def __init__(self, client, interval: float = 1.0, settings_path: Path = DEFAULT_PATH, icons=None) -> None:
         super().__init__()
         self._client = client
+        self._icons = icons  # None: the agent rows show text and no icon.
         self._interval = interval
         self._settings_path = Path(settings_path)
         self._agents: list[Agent] = []
@@ -57,14 +58,35 @@ class Backend(QObject):
                 "label": s.capitalize(),
                 "count": sum(a.status == s for a in self._agents),
                 "attention": s in ATTENTION,
-                "agents": [
-                    {"key": a.key, "name": a.name, "workspace": a.workspace}
-                    for a in self._agents
-                    if a.status == s
-                ],
+                "agents": self._rows([a for a in self._agents if a.status == s]),
             }
             for s in STATES
         ]
+
+    def _rows(self, agents: list[Agent]) -> list[dict]:
+        """The agent rows of one group. A row with an icon does not show the program word."""
+        rows = []
+        for a in agents:
+            icon = self._icons.url(a.app) if self._icons else ""
+            spoken = "Go to " + (", ".join(filter(None, (a.name, a.app))) or a.key)
+            rows.append({
+                "key": a.key,
+                "icon": icon,
+                "label": a.name or (a.workspace if icon else a.app) or a.key,
+                "detail": a.workspace if a.name or not icon else "",
+                "address": "",
+                "spoken": spoken + (f" in {a.workspace}" if a.workspace else ""),
+            })
+        looks = [(row["icon"], row["label"], row["detail"]) for row in rows]
+        for row, look in zip(rows, looks):
+            if looks.count(look) > 1 and row["label"] != row["key"]:
+                row["address"] = row["key"]  # Rows that look the same: the address tells them apart.
+        return rows
+
+    @Property(str, notify=changed)
+    def topState(self) -> str:
+        """What the border and the tray dot show: "offline", "none", or the most important state with an agent."""
+        return top_state(self._online, count_states(self._agents))
 
     @Property(str, notify=openingChanged)
     def opening(self) -> str:

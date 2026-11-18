@@ -6,6 +6,7 @@ import pytest
 
 from herdr_float.backend import Backend
 from herdr_float.client import HerdrError, HerdrOffline
+from herdr_float.icons import Icons
 from herdr_float.state import Agent
 
 
@@ -33,7 +34,9 @@ def test_groups_hold_the_four_states_in_order_with_their_agents(backend):
         ("working", "Working", 2, False),
         ("idle", "Idle", 0, False),
     ]
-    assert backend.groups[0]["agents"] == [{"key": "t1", "name": "rev", "workspace": "Main"}]
+    assert backend.groups[0]["agents"] == [{
+        "key": "t1", "icon": "", "label": "rev", "detail": "Main", "address": "", "spoken": "Go to rev in Main",
+    }]
     assert [a["key"] for a in backend.groups[2]["agents"]] == ["t3", "t2"]
 
 
@@ -183,3 +186,83 @@ def test_polling_continues_after_an_unexpected_error(app, fake_client, tmp_path,
     finally:
         backend.stop()
     assert not backend._thread.is_alive()
+
+
+GLYPH = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M2 2h20v20H2z"/></svg>'
+
+
+@pytest.fixture
+def with_icons(app, fake_client, tmp_path):
+    """A backend that reads a made-up app folder with two icons: "pi" and the generic "agent"."""
+    home = tmp_path / "app"
+    (home / "icons").mkdir(parents=True)
+    for name in ("pi", "agent"):
+        (home / "icons" / f"{name}.svg").write_text(GLYPH)
+    return Backend(fake_client, settings_path=tmp_path / "state.json", icons=Icons(home, tmp_path / "cache"))
+
+
+def rows_of(backend, state):
+    return next(g["agents"] for g in backend.groups if g["state"] == state)
+
+
+def test_agent_row_with_an_icon_shows_the_name_or_else_the_workspace_and_no_program_word(with_icons):
+    with_icons.apply([
+        Agent("t1", "idle", "rev", "Main", "pi"),
+        Agent("t2", "idle", "", "api / 1", "pi"),
+        Agent("t3", "idle", "", "", "pi"),
+    ])
+    rows = {r["key"]: r for r in rows_of(with_icons, "idle")}
+    assert all(r["icon"].startswith("file://") and r["icon"].endswith(".svg") for r in rows.values())
+    assert (rows["t1"]["label"], rows["t1"]["detail"]) == ("rev", "Main")
+    assert (rows["t2"]["label"], rows["t2"]["detail"]) == ("api / 1", "")
+    assert (rows["t3"]["label"], rows["t3"]["detail"]) == ("t3", "")  # no name and no workspace: the address
+    assert [r["address"] for r in rows.values()] == ["", "", ""]
+
+
+def test_spoken_name_says_the_program_in_words(with_icons):
+    with_icons.apply([
+        Agent("t1", "idle", "rev", "Main", "pi"),
+        Agent("t2", "idle", "", "Main", "pi"),
+        Agent("t3", "idle", "", "", ""),
+    ])
+    assert sorted(r["spoken"] for r in rows_of(with_icons, "idle")) == [
+        "Go to pi in Main", "Go to rev, pi in Main", "Go to t3",
+    ]
+
+
+def test_rows_that_look_the_same_get_the_address(with_icons):
+    with_icons.apply([
+        Agent("t1", "working", "", "Main", "pi"),
+        Agent("t2", "working", "", "Main", "pi"),
+        Agent("t3", "working", "", "Main", "codex"),  # the generic icon: a different picture, so no address
+        Agent("t4", "working", "", "docs", "pi"),
+        Agent("t5", "idle", "", "Main", "pi"),  # a different group
+    ])
+    assert {r["key"]: r["address"] for r in rows_of(with_icons, "working")} == {
+        "t1": "t1", "t2": "t2", "t3": "", "t4": "",
+    }
+    assert rows_of(with_icons, "idle")[0]["address"] == ""
+
+
+def test_a_program_without_an_icon_gets_the_generic_one(with_icons):
+    with_icons.apply([Agent("t1", "idle", "", "Main", "codex"), Agent("t2", "idle", "", "Main", "")])
+    assert [r["icon"].rsplit("/", 1)[1].split("-")[0] for r in rows_of(with_icons, "idle")] == ["agent", "agent"]
+
+
+def test_without_icons_the_row_shows_the_text_as_before(backend):
+    backend.apply([Agent("t1", "idle", "", "Main", "codex"), Agent("t2", "idle", "", "", "")])
+    assert [(r["icon"], r["label"], r["detail"]) for r in rows_of(backend, "idle")] == [
+        ("", "codex", "Main"), ("", "t2", ""),
+    ]
+
+
+def test_top_state_follows_the_priority_of_the_user(backend):
+    assert backend.topState == "offline"
+    backend.apply([])
+    assert backend.topState == "none"
+    backend.apply([Agent("t1", "idle", "a", ""), Agent("t2", "working", "b", ""), Agent("t3", "working", "c", "")])
+    assert backend.topState == "idle"
+    backend.apply([Agent("t1", "blocked", "a", ""), Agent("t2", "done", "b", "")])
+    assert backend.topState == "blocked"
+    backend.apply(None)
+    assert backend.topState == "offline"

@@ -11,6 +11,7 @@ from PySide6.QtTest import QTest
 
 from herdr_float.__main__ import IMPORT_PATH, UI_PATH
 from herdr_float.backend import Backend
+from herdr_float.icons import Icons
 from herdr_float.state import Agent
 from herdr_float.tray import STATE_COLORS
 
@@ -34,7 +35,9 @@ def walk(item):
 def window(app, fake_client, tmp_path):
     """Yield (root window, backend, Qt messages). The poll thread is not started."""
     assert app.platformName() == "offscreen"
-    backend = Backend(fake_client, settings_path=tmp_path / "state.json")
+    # The icons folder is a made-up one in tmp_path. It does not exist until a test makes it.
+    icons = Icons(tmp_path / "app", tmp_path / "cache")
+    backend = Backend(fake_client, settings_path=tmp_path / "state.json", icons=icons)
     messages = []
     previous = qInstallMessageHandler(lambda mode, context, text: messages.append(text))
     engine = QQmlApplicationEngine()
@@ -213,4 +216,67 @@ def test_the_scroll_indicator_does_not_take_clicks_or_the_wheel(app, window):
         if backend._client.focused and backend.opening == "":
             break
     assert backend._client.focused == ["i03"]  # the row that is at that place after the scroll of 2 rows
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+@pytest.mark.parametrize(
+    "states, colour",
+    [
+        (["blocked", "done", "idle", "working"], STATE_COLORS["blocked"]),
+        (["done", "idle", "working"], STATE_COLORS["done"]),
+        (["idle", "working", "working", "working"], STATE_COLORS["idle"]),  # idle is above working
+        (["working"], STATE_COLORS["working"]),
+        ([], "#3c4043"),
+        (None, "#3c4043"),  # offline
+    ],
+)
+def test_the_border_has_the_colour_of_the_top_state_and_the_panel_keeps_its_size(app, window, states, colour):
+    root, backend, messages = window
+    backend.apply(None if states is None else [Agent(f"t{n}", s, "a", "") for n, s in enumerate(states)])
+    settle(app)
+    image = root.grabWindow()
+    assert (image.width(), image.height()) == ((240, 46) if states is None else (240, 136))
+    middle = image.width() // 2
+    assert [image.pixelColor(middle, y).name() for y in (0, 1)] == [colour, colour]  # 2 px, inside the panel
+    assert image.pixelColor(middle, 2).name() != colour
+    assert image.pixelColor(middle, image.height() - 1).name() == colour
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def test_agent_rows_show_the_icon_of_the_program_and_no_program_word(app, window, tmp_path):
+    root, backend, messages = window
+    folder = tmp_path / "app" / "icons"
+    folder.mkdir(parents=True)
+    square = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path %sd="M2 2h20v20H2z"/></svg>'
+    (folder / "pi.svg").write_text(square % "")  # a black glyph: it must show in the text colour
+    (folder / "claude.svg").write_text(square % 'fill="#d97757" ')  # a picture: it shows as it is
+    backend.apply([
+        Agent("t1", "working", "rev", "Main", "pi"),
+        Agent("t2", "working", "", "Main", "claude-code"),
+        Agent("t3", "working", "", "Main", "claude-code"),
+    ])
+    settle(app)
+    click(app, root, rows(root, "status")[2])
+    root.setProperty("hoverRow", None)
+    settle(app)
+    assert [r.property("key") for r in rows(root, "agent")] == ["t1", "t2", "t3"]
+    icons = [i for i in walk(root.contentItem()) if i.property("isProgramIcon") and i.isVisible()]
+    assert [(i.width(), i.height()) for i in icons] == [(16, 16)] * 3
+    image = root.grabWindow()
+    centres = [i.mapToScene(QPointF(8, 8)).toPoint() for i in icons]
+    assert [image.pixelColor(c).name() for c in centres] == ["#e8eaed", "#d97757", "#d97757"]
+    texts = [i.property("text") for i in walk(root.contentItem()) if i.isVisible() and i.property("text")]
+    assert [t for t in texts if t in ("rev", "Main", "t1", "t2", "t3")] == ["rev", "Main", "Main", "t2", "Main", "t3"]
+    assert "claude-code" not in texts and "pi" not in texts
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def test_agent_rows_show_the_program_word_when_the_app_has_no_icons(app, window):
+    root, backend, messages = window
+    backend.apply([Agent("t2", "working", "", "Main", "claude-code")])
+    settle(app)
+    click(app, root, rows(root, "status")[2])
+    assert [i for i in walk(root.contentItem()) if i.property("isProgramIcon") and i.isVisible()] == []
+    texts = [i.property("text") for i in walk(root.contentItem()) if i.isVisible() and i.property("text")]
+    assert "claude-code" in texts and "Main" in texts
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []

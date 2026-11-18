@@ -73,8 +73,8 @@ TIMEOUT = subprocess.TimeoutExpired(cmd="x", timeout=2)
 def test_list_reads_the_app(caplog):
     caplog.set_level(logging.INFO, logger="herdr_float")
     client, runner = make(app=reply(APP_LIST), core=reply(CORE_LIST))
-    assert client.list_agents() == [Agent("t1", "done", "reviewer", "Main")]
-    assert client.list_agents() == [Agent("t1", "done", "reviewer", "Main")]
+    assert client.list_agents() == [Agent("t1", "done", "reviewer", "Main", "claude-code")]
+    assert client.list_agents() == [Agent("t1", "done", "reviewer", "Main", "claude-code")]
     assert runner.calls == [[APP, "ls"], [APP, "ls"]]
     assert [r.getMessage() for r in caplog.records] == ["source: app"]
 
@@ -93,7 +93,7 @@ def test_list_reads_the_app(caplog):
 )
 def test_list_falls_back_to_the_core_when_the_app_does_not_answer(app_answer):
     client, runner = make(app=app_answer, core=reply(CORE_LIST))
-    assert client.list_agents() == [Agent("t1", "working", "claude-code", "")]
+    assert client.list_agents() == [Agent("t1", "working", "", "", "claude-code")]
     assert runner.calls == [[APP, "ls"], [CORE, "ls", "--json"]]
 
 
@@ -106,7 +106,7 @@ def test_list_is_offline_when_the_app_and_the_core_do_not_answer(core_answer):
 
 def test_an_executable_that_was_not_found_is_not_run():
     runner = FakeRunner(core=reply(CORE_LIST))
-    assert HerdrClient(None, CORE, run=runner).list_agents() == [Agent("t1", "working", "claude-code", "")]
+    assert HerdrClient(None, CORE, run=runner).list_agents() == [Agent("t1", "working", "", "", "claude-code")]
     assert runner.calls == [[CORE, "ls", "--json"]]
     runner = FakeRunner()
     with pytest.raises(HerdrOffline):

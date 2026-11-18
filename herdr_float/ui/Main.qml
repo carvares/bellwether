@@ -149,7 +149,10 @@ Window {
         height: column.implicitHeight + 16
         radius: 12
         color: "#e6202124"
-        border.color: "#3c4043"
+        // The border has the colour of the most important state that has an agent. It is drawn inside the panel.
+        border.width: 2
+        border.color: backend.topState === "none" || backend.topState === "offline" ? "#3c4043"
+            : root.stateColors[backend.topState]
 
         Column {
             id: column
@@ -258,19 +261,42 @@ Window {
                                         radius: 6
                                         color: root.hoverRow === agentRow ? "#3c4043" : "transparent"
                                         Accessible.role: Accessible.Button
-                                        Accessible.name: "Go to " + modelData.name
+                                        Accessible.name: modelData.spoken
                                         Accessible.onPressAction: backend.focus(key)
 
-                                        Text {
-                                            anchors.left: parent.left
-                                            anchors.leftMargin: 24
-                                            anchors.right: detail.left
-                                            anchors.rightMargin: 8
+                                        // The icon that the Herdr app shows for the program of the agent.
+                                        Image {
+                                            id: programIcon
+                                            readonly property bool isProgramIcon: true
+                                            visible: agentRow.modelData.icon !== ""
+                                            x: 8
+                                            width: 16
+                                            height: 16
                                             anchors.verticalCenter: parent.verticalCenter
-                                            text: agentRow.modelData.name
+                                            sourceSize: Qt.size(16, 16)
+                                            source: agentRow.modelData.icon
+                                        }
+                                        Text {
+                                            id: label
+                                            x: programIcon.visible ? 32 : 24
+                                            width: Math.min(implicitWidth, detail.x - 8 - x
+                                                - (address.visible ? address.width + 6 : 0))
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: agentRow.modelData.label
                                             color: "#e8eaed"
                                             font.pixelSize: 13
                                             elide: Text.ElideRight
+                                        }
+                                        // The terminal address, only for rows that look the same without it.
+                                        Text {
+                                            id: address
+                                            visible: text !== ""
+                                            anchors.left: label.right
+                                            anchors.leftMargin: 6
+                                            anchors.baseline: label.baseline
+                                            text: agentRow.modelData.address
+                                            color: "#9aa0a6"
+                                            font.pixelSize: 12
                                         }
                                         Text {
                                             id: detail
@@ -281,7 +307,7 @@ Window {
                                             elide: Text.ElideRight
                                             text: agentRow.failed ? root.failedMessage
                                                 : backend.opening === agentRow.key ? "opening…"
-                                                : agentRow.modelData.workspace
+                                                : agentRow.modelData.detail
                                             color: agentRow.failed ? "#f28b82" : "#9aa0a6"
                                             font.pixelSize: 12
                                         }

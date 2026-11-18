@@ -7,6 +7,8 @@ from PySide6.QtCore import QObject, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
+from .state import PRIORITY
+
 log = logging.getLogger("herdr_float")
 
 STATE_COLORS: dict[str, str] = {
@@ -19,19 +21,11 @@ STATE_COLORS: dict[str, str] = {
 }
 
 
-def top_state(online: bool, counters: list[dict]) -> str:
-    if not online:
-        return "offline"
-    for counter in counters:
-        if counter["count"] > 0:
-            return counter["state"]
-    return "none"
-
-
 def tooltip_text(online: bool, counters: list[dict]) -> str:
     if not online:
         return "Herdr Float: offline"
-    return "Herdr Float: " + ", ".join(f'{c["count"]} {c["state"]}' for c in counters)
+    counts = {c["state"]: c["count"] for c in counters}
+    return "Herdr Float: " + ", ".join(f"{counts[state]} {state}" for state in PRIORITY)
 
 
 def make_icon(color: str) -> QIcon:
@@ -76,7 +70,7 @@ class Tray(QObject):
 
     def refresh(self) -> None:
         online, counters = self._backend.online, self._backend.counters
-        state = top_state(online, counters)
+        state = self._backend.topState  # The same state as the border of the panel.
         if state != self._shown_state:
             self._icon.setIcon(make_icon(STATE_COLORS[state]))
             self._shown_state = state
