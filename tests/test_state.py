@@ -117,10 +117,31 @@ def test_app_sub_agents_are_rows_with_the_mapping_of_the_app_list():
     assert {a.workspace for a in agents} == {"Main"}
 
 
-def test_app_terminal_listed_two_times_is_one_row():
-    kept = term("t2", "working")
-    agents = parse_app([space("Main", tab("1", term("t1", "idle", sub_agents=[kept]), kept))])
-    assert sorted(a.key for a in agents) == ["t1", "t2"]
+def test_app_terminal_listed_two_times_is_one_row_and_the_sub_agent_entry_wins():
+    as_terminal = term("t2", "done")
+    as_sub_agent = term("t2", "done")
+    parent = term("t1", "working", sub_agents=[as_sub_agent])
+    for terminals in ([parent, as_terminal], [as_terminal, parent]):
+        agents = parse_app([space("Main", tab("1", *terminals))])
+        assert {a.key: a.status for a in agents} == {"t1": "working", "t2": "idle"}
+
+
+def test_app_sub_agents_in_the_shape_of_the_core_list_are_rows():
+    subs = [
+        {"address": "t2", "agent": "codex", "state": "live", "status": "working", "parent": "t1"},
+        {"address": "t3", "agent": "codex", "state": "live", "status": "done", "parent": "t1"},
+        {"address": "t4", "agent": "codex", "state": "finished", "status": "working", "parent": "t1"},
+        {"terminal": "t5", "state": "finished", "status": "working", "app": "codex", "name": None},
+        {"address": "t6", "state": "live", "parent": "t1"},
+    ]
+    agents = parse_app([space("Main", tab("1", term("t1", "working", sub_agents=subs)))])
+    assert {a.key: a.status for a in agents} == {"t1": "working", "t2": "working", "t3": "idle"}
+
+
+def test_core_sub_agent_is_never_done():
+    child = dict(core_row("t2", "done"), parent="t1")
+    agents = parse_core([core_row("t1", "done"), child])
+    assert {a.key: a.status for a in agents} == {"t1": "done", "t2": "idle"}
 
 
 def test_status_word_that_is_not_known_is_skipped_and_logged_one_time(caplog):

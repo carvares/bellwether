@@ -118,13 +118,13 @@ Window {
                 width: 280
                 spacing: 2
 
-                property string failedPane: ""
+                property string failedKey: ""
                 property string failedMessage: ""
 
                 Connections {
                     target: backend
                     function onFocusFailed(key, message) {
-                        list.failedPane = key
+                        list.failedKey = key
                         list.failedMessage = message
                         if (backend.online)
                             root.expanded = true
@@ -135,7 +135,7 @@ Window {
                 Timer {
                     id: failTimer
                     interval: 3000
-                    onTriggered: { list.failedPane = ""; list.failedMessage = "" }
+                    onTriggered: { list.failedKey = ""; list.failedMessage = "" }
                 }
 
                 Text {
@@ -150,7 +150,7 @@ Window {
                     Rectangle {
                         id: rowItem
                         required property var modelData
-                        readonly property bool failed: list.failedPane === modelData.key
+                        readonly property bool failed: list.failedKey === modelData.key
                         width: list.width
                         height: 28
                         radius: 6

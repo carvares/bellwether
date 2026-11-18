@@ -58,15 +58,19 @@ def parse_app(spaces: list) -> list[Agent]:
 
 
 def _add_terminals(agents: dict[str, Agent], rows: object, where: str, sub_agent: bool) -> None:
+    """Add the rows and their sub-agents. A row has the shape of `herdr-app ls` ("terminal") or,
+    for a sub-agent, possibly the shape of `herdr-core ls --json` ("address", "state")."""
     if not isinstance(rows, list):
         return
     for row in rows:
-        if not isinstance(row, dict):
+        if not isinstance(row, dict) or row.get("state", "live") != "live":
             continue
-        key = row.get("terminal")
+        key = row.get("terminal") or row.get("address")
         status = _status(row.get("status"), sub_agent)
-        if isinstance(key, str) and key and status and key not in agents:
-            agents[key] = Agent(key, status, str(row.get("name") or row.get("app") or key), where)
+        # The app shows a terminal that is also a sub-agent below its parent, so that entry wins.
+        if isinstance(key, str) and key and status and (sub_agent or key not in agents):
+            name = row.get("name") or row.get("app") or row.get("agent") or key
+            agents[key] = Agent(key, status, str(name), where)
         _add_terminals(agents, row.get("sub_agents"), where, sub_agent=True)
 
 
@@ -77,7 +81,7 @@ def parse_core(terminals: list) -> list[Agent]:
         if not isinstance(row, dict) or row.get("state") != "live":
             continue
         key = row.get("address")
-        status = _status(row.get("status"))
+        status = _status(row.get("status"), sub_agent=bool(row.get("parent")))
         if isinstance(key, str) and key and status:
             agents.append(Agent(key, status, str(row.get("agent") or key), ""))
     return _sorted(agents)

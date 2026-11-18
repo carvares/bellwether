@@ -51,7 +51,10 @@ To run the widget in the foreground:
 
 ## Start with the Herdr app (optional)
 
-The folder `mod/` is a small Herdr app mod. It runs `scripts/start.sh` one time when the app starts.
+The folder `mod/` is a small Herdr app mod. It runs `scripts/start.sh` each time the app starts a copy of the mod.
+The documentation of the app says when that occurs: at the install, at the start of the app, in each window, after a change of layout, and after a save of a file of the mod.
+So after "Quit" from the tray, the widget can come back before the next start of the app.
+Repeated starts do no harm: only one widget runs at a time.
 The mod runs a program on your machine (`start.sh`). It does not use the network.
 
 Install it. Run this in the repository folder:
@@ -98,8 +101,8 @@ If the empty block stays in the window after that, remove it from your layout in
 
 Your agents continue to run in herdr-core. The widget then reads herdr-core:
 
-- The counts stay. The rows show the program name only, with no space name.
-- "done" then means that the agent itself reported "done". It can be an agent that you saw before.
+- The counts can be different from the counts of the app. A "done" agent that you looked at before stays "done". Terminals that the app does not show are counted too.
+- The rows show the program name only, with no space name.
 - A click on a row shows "Herdr app is not open". Open the app to go to an agent.
 
 The pill shows "offline" when the app and herdr-core do not answer.
@@ -123,7 +126,7 @@ The list closes when the widget goes offline, and a click on the pill does nothi
 - The widget works on KDE Plasma on Wayland only.
 - The jump shows the agent inside the Herdr app. It possibly does not raise the app window. This is not tested.
 - The jump was run for real one time, to the agent that had the focus already. The app accepted the command. A jump to an agent in a different space or tab is not yet checked by a person.
-- Sub-agents (terminals that an agent starts with `hc run`) are counted as agents, as in the agent list of the app. No real sub-agent was available for a test.
+- Sub-agents (terminals that an agent starts with `hc run`) are read as the documentation of the app describes them. This was not checked with real data: no real sub-agent was available. If the real data has a different shape, sub-agents are not counted.
 - An agent that reports "error" is counted as blocked, as in the agent list of the app.
 - The state when the app window is closed was tested with a simulation only (an empty app folder), not with the real window closed.
 - A person has not yet checked the look on the screen. The checks used an image of the widget's own window.

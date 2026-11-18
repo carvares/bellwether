@@ -66,7 +66,7 @@ def test_main_qml_loads_and_follows_the_backend(app, window):
     assert root.property("expanded") is False
 
     items = list(walk(root.contentItem()))
-    agent_list = next(i for i in items if i.property("failedPane") is not None)
+    agent_list = next(i for i in items if i.property("failedKey") is not None)
     offline_text = next(i for i in items if i.property("text") == "offline")
     assert backend.online is False
     assert agent_list.isVisible() is False
