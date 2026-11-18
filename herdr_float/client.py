@@ -22,6 +22,8 @@ TIMEOUT = 2.0
 # After the start of the app: ask it this many times, with this pause, until it answers (6 seconds).
 START_TRIES = 24
 START_PAUSE = 0.25
+# After that: ask the new window for the agent this many times, with the same pause (2 seconds).
+SHOW_TRIES = 8
 
 
 class HerdrOffline(Exception):
@@ -75,29 +77,44 @@ class HerdrClient:
         """Show the agent in the app window and bring the window to the front. Start the app if it is closed."""
         if self._app is None:
             raise HerdrError("no_app", "Herdr app is not installed")
+        tries = 1
         if not self._app_answers():
             self._start_app(key)
-        self._show(key)
+            tries = SHOW_TRIES  # A window that just started answers before it has its terminals.
+        for attempt in range(1, tries + 1):
+            try:
+                self._show(key)
+                break
+            except HerdrError as exc:
+                if exc.code != "agent_gone" or attempt == tries:
+                    raise
+                self._sleep(START_PAUSE)
         raised = raise_app_window(self._run, self._busctl)
-        log.info("jump agent=%s step=raise ok=%s", key, raised)
-        if not raised:
+        log.info("jump agent=%s step=raise kwin=%s", key, raised)
+        # Without KWin, ask the app: plain `herdr-app` opens or raises its window. KWin is first because
+        # its result is known, and it does not depend on the focus rules of the desktop.
+        if not raised and self._launch(key) != 0:
             raise HerdrError("no_raise", "could not raise the window")
 
     def _app_answers(self) -> bool:
         return self._read(self._app, ["ls"], "spaces") is not None
 
-    def _start_app(self, key: str) -> None:
-        """Start the app as the desktop does: a unit of the user's systemd, with the environment of the
-        session and not of this process. The app does not end with the widget and has none of its files."""
+    def _launch(self, key: str) -> int | str:
+        """Run plain `herdr-app` as the desktop does: a unit of the user's systemd, with the environment of
+        the session and not of this process. The app does not end with the widget and has none of its files.
+        Return the exit code of the launcher (0: accepted), or the name of the error."""
         try:
             code = self._run(
                 [self._systemd_run, "--user", "--quiet", "--collect", "--slice=app.slice", "--", self._app]
             ).returncode
         except (OSError, subprocess.SubprocessError) as exc:
             code = type(exc).__name__
-        log.info("jump agent=%s step=start exit=%s", key, code)
+        log.info("jump agent=%s step=launch exit=%s", key, code)
+        return code
+
+    def _start_app(self, key: str) -> None:
         answered = False
-        if code == 0:
+        if self._launch(key) == 0:
             for _ in range(START_TRIES):
                 self._sleep(START_PAUSE)
                 if self._app_answers():

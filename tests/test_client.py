@@ -140,7 +140,8 @@ class Desk:
     """A fake desktop: the app, its window as KWin reports it, and the launcher. It records every command."""
 
     def __init__(self, running=True, minimized=False, window_class="herdr-app", launcher_exit=0,
-                 answers_after=2, raise_works=True, focus_answer=None, busctl_error=None):
+                 answers_after=2, raise_works=True, focus_answer=None, busctl_error=None,
+                 not_ready=0):
         self.running = running
         self.minimized = minimized
         self.window_class = window_class
@@ -149,6 +150,7 @@ class Desk:
         self.raise_works = raise_works
         self.focus_answer = focus_answer
         self.busctl_error = busctl_error
+        self.not_ready = not_ready  # number of agent.focus calls that a new window refuses: no terminals yet
         self.started = False
         self.calls = []
         self.sleeps = []
@@ -177,7 +179,8 @@ class Desk:
             raise self.focus_answer
         if self.focus_answer is not None:
             return self.focus_answer
-        if json.loads(argv[3])["terminal"] == "t1":
+        self.not_ready -= 1
+        if json.loads(argv[3])["terminal"] == "t1" and self.not_ready < 0:
             return reply(b"null\n")
         return reply({"error": 'no running terminal "t9"'}, returncode=1)
 
@@ -231,6 +234,22 @@ def test_focus_with_the_app_closed_starts_it_one_time_and_waits_for_its_answer()
     assert desk.sleeps == [0.25, 0.25, 0.25]
 
 
+def test_focus_waits_for_the_terminals_of_a_window_that_just_started():
+    client, desk = jump(running=False, answers_after=1, not_ready=2)
+    client.focus_agent("t1")
+    assert desk.names() == ["ls", "start", "ls", "do", "do", "do", "Match", "getWindowInfo", "Run", "getWindowInfo"]
+    assert desk.sleeps == [0.25, 0.25, 0.25]
+
+
+def test_focus_says_agent_is_gone_when_a_new_window_never_has_the_terminal():
+    client, desk = jump(running=False, answers_after=1, not_ready=10_000)
+    with pytest.raises(HerdrError) as failure:
+        client.focus_agent("t1")
+    assert failure.value.code == "agent_gone"
+    assert desk.names().count("do") == 8 and "Run" not in desk.names()
+    assert sum(desk.sleeps) == pytest.approx(0.25 + 7 * 0.25)
+
+
 def test_focus_fails_when_the_launcher_fails():
     for options in ({"launcher_exit": 1}, {"launcher_exit": 0, "answers_after": 10_000}):
         client, desk = jump(running=False, **options)
@@ -267,14 +286,21 @@ def test_focus_fails_when_the_launcher_is_not_found():
         {"busctl_error": TIMEOUT},
     ],
 )
-def test_focus_says_when_the_window_was_not_raised(options):
+def test_focus_asks_the_app_to_raise_its_window_when_kwin_did_not(options):
     client, desk = jump(**options)
+    client.focus_agent("t1")
+    assert FOCUS_T1 in desk.calls
+    assert desk.calls[-1] == START  # plain `herdr-app` opens or raises the window
+    if options.get("window_class"):
+        assert "Run" not in desk.names()  # a window of a different class is not touched
+
+
+def test_focus_says_when_the_window_was_not_raised():
+    client, desk = jump(busctl_error=TIMEOUT, launcher_exit=1)
     with pytest.raises(HerdrError) as failure:
         client.focus_agent("t1")
     assert (failure.value.code, failure.value.message) == ("no_raise", "could not raise the window")
-    assert FOCUS_T1 in desk.calls  # the agent is shown before the raise
-    if options.get("window_class"):
-        assert "Run" not in desk.names()  # a window of a different class is not touched
+    assert desk.names() == ["ls", "do", "Match", "start"]  # the agent is shown before the raise
 
 
 def test_focus_says_when_the_agent_is_gone_and_does_not_raise_the_window():
@@ -321,10 +347,10 @@ def test_focus_logs_steps_and_exit_codes_only(caplog):
     with pytest.raises(HerdrError):
         client.focus_agent("t9")
     assert [r.getMessage() for r in caplog.records] == [
-        "jump agent=t1 step=start exit=0",
+        "jump agent=t1 step=launch exit=0",
         "jump agent=t1 step=wait answered=True",
         "jump agent=t1 step=show exit=0",
-        "jump agent=t1 step=raise ok=True",
+        "jump agent=t1 step=raise kwin=True",
         "jump agent=t9 step=show exit=1",
     ]
     assert "caption" not in caplog.text and "no running terminal" not in caplog.text
