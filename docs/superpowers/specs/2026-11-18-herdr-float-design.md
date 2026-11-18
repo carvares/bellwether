@@ -45,6 +45,8 @@ Source: `herdr api schema`, Herdr 0.9.5, protocol 22.
 
 ## Verified on 2026-11-18
 
+The spike files named in this section were removed after the tests. They are in the git history (commits 6e42551, 937bf36, 9c3175c).
+
 Tested against Herdr 0.9.5 (protocol 22) with `spike/wire.py` and a structure-only probe.
 
 1. The socket wire format.

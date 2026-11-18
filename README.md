@@ -12,7 +12,7 @@ You also need the package `layer-shell-qt`. Plasma normally installs it.
 
 Then, in the repository folder:
 
-    uv venv --system-site-packages --python /usr/bin/python3
+    uv venv --python /usr/bin/python3
     uv sync
 
 `uv sync` installs PySide6 from PyPI (`pyside6-essentials==6.12.*`).
@@ -34,16 +34,37 @@ Link the plugin one time. Run this in the repository folder:
     herdr plugin link "$PWD/plugin"
     herdr plugin list --plugin carvares.herdr-float
 
-The plugin starts the widget when Herdr starts.
+Herdr runs the start command of the plugin when Herdr starts.
+A person has not yet checked if Herdr runs it at each start or only when the Herdr server starts.
 The widget stays on the screen after you close Herdr.
 A second start does not open a second widget.
+
+The Herdr server possibly runs already when you link the plugin.
+Then start the widget one time by hand. Run this in the repository folder:
+
+    ./plugin/start.sh
+
+Do not restart the Herdr server to start the widget. A restart can stop your running agents.
+
 Stop the widget: right-click the tray icon, then click "Quit".
+To start the widget again after "Quit", run `./plugin/start.sh` again.
+If there is no tray icon, stop the widget with this command:
+
+    pkill -f 'python -m herdr_float'
+
 Remove the automatic start:
 
     herdr plugin unlink carvares.herdr-float
 
-Not yet tested: Herdr possibly runs the start command only when the Herdr server starts.
-If the widget does not show when you open Herdr, restart the Herdr server.
+## Nothing shows?
+
+- Read the log file `~/.local/state/herdr-float/herdr-float.log`.
+- Read the start log `~/.local/state/herdr-float/start.log`. It holds the output of the widget process that `plugin/start.sh` starts, for example a Qt error before the log file opens.
+- Read the Herdr logs of the plugin command:
+
+      herdr plugin log list --plugin carvares.herdr-float
+
+- `plugin/start.sh` stops with exit code 1 and a message when `.venv/bin/python` does not exist. Then run `uv sync` in the repository folder.
 
 ## Start manually
 
@@ -66,6 +87,7 @@ If the widget does not show when you open Herdr, restart the Herdr server.
 
 - Position: `~/.config/herdr-float/state.json`
 - Log: `~/.local/state/herdr-float/herdr-float.log`
+- Start log (output of `plugin/start.sh` starts): `~/.local/state/herdr-float/start.log`
 
 ## Tests
 
