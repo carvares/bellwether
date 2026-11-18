@@ -86,7 +86,14 @@ If the empty block stays in the window after that, remove it from your layout in
 
 ## Use
 
-- The panel has a layout. The layout now is C, "Techno / HUD"; the options window (see "Options" below) lists the five designs. The lines below describe Layout C.
+- The panel has a layout. You choose it in the options window (see "Options" below). The five layouts show the same data and work in the same way; only the look is different:
+  - A, "Refined list": a list of the four statuses with a colour bar and a count badge. The agents of the open status show under its row.
+  - B, "Tiles": four tiles with large numerals. The agents of the open tile show in a card below the tiles.
+  - C, "Techno / HUD" (the default): monospace text, corner brackets and one cell for each agent.
+  - D, "Signal strip": the number of all agents, the most important status as a badge, one bar with the share of each status, and the four statuses as tabs.
+  - E, "Ring": a ring with the share of each status and the number of all agents in its centre, and a list of the four counts.
+- In every layout: click a status to show its agents, click it again to close it, click an agent to open the Herdr app on that agent. A status with no agents does nothing. A list shows 8 agents at the most; turn the mouse wheel for more. The frame (in Layout C: the corner brackets) has the colour of the most important status.
+- The lines below describe Layout C.
 - The panel is a dark box, 320 px wide, with text in a monospace font (Hack, or a different monospace font if Hack is not installed).
 - The top line shows the name "BELLWETHER", the number of all agents ("AGENTS 10") and, at the right, the most important state that has agents (for example "BLOCKED").
 - The bar below it has one cell for each agent, in the colour of the state of the agent. The cells fill the width of the bar: 2 agents give 2 wide cells. With no agents, and offline, the bar is one empty outline. With more than 60 agents, the 60 cells show the share of each state, and a state with an agent keeps one cell or more.
@@ -119,14 +126,16 @@ If the empty block stays in the window after that, remove it from your layout in
 
 ### Options
 
-- Right-click the tray icon, then click "Options…". The options window opens. It is a normal window with a title bar: "Bellwether — Options".
+- Right-click the tray icon, then click "Options…". The options window opens. It has the look of the layout that the panel shows: the same frame, font and colours. It has no title bar of the system; its own header shows "Bellwether — Options" and a close control (×) at the right.
+- To move the window, press its header and move the pointer.
 - A second click on "Options…" shows the same window again and brings it to the front.
 - The section "Layout" shows the five designs as cards: A Refined list, B Tiles, C Techno / HUD, D Signal strip, E Ring. Each card has a small picture, the name and one line of text.
 - The card of the layout that shows now has a blue border and the tag "SELECTED".
 - Click a card to use that layout. The panel changes at once and stays at its place, on its monitor, with the same open row. The widget saves the layout.
-- A card with the tag "COMING NEXT" is dim. That design is not built yet, and a click on it does nothing. Now only Layout C is built.
+- The window changes its look together with the panel. The cards stay at their places.
+- All five layouts are built. If the file of a layout is missing, its card is dim, has the tag "COMING NEXT", and a click on it does nothing.
 - Keyboard: Tab and Shift+Tab move between the cards that you can choose. Enter or Space selects the card. Esc closes the window.
-- Close the window with Esc or with the close button of the title bar. The widget continues to run.
+- Close the window with Esc or with the close control (×) in its header. The widget continues to run.
 
 ### When the Herdr app window is closed
 
@@ -192,6 +201,6 @@ The widget had the name herdr-float before 2026-11-18. At its first start with t
 - A person has not yet dragged the panel or clicked its rows with a real mouse. The checks used synthesized pointer events. The drag can jitter.
 - A person has not yet checked the widget above full-screen windows.
 - A person has not yet opened the options window from the tray icon with a real mouse. The checks used the menu of the tray icon over D-Bus, synthesized keys and clicks, and the protocol trace of the compositor.
-- The picture of Layout C in the options window is the approved design picture from before the rename: its header says "HERDR".
+- A person has not yet looked at the layouts A, B, D and E, and at the options window in its new look, on the screen. The checks compared pictures of the real panel with the approved design pictures, and used synthesized keys and clicks and the protocol trace of the compositor.
 - The options window has no icon of its own in the task bar.
 - When an open row makes the panel longer than the space below it, the panel moves up. It does not move back down when the row closes.

@@ -160,7 +160,7 @@ Request of the user: "use push events, and named agents first." Before, a new st
 
 ## Change on 2026-11-18: options window and layout skins
 
-Request of the user: "we need a options menu for it. this option menu must be open by the system tray and it must let us chosse the UI version." The UI versions are the five approved designs in `design/layouts/`: A Refined list, B Tiles, C Techno / HUD, D Signal strip, E Ring. This change is step 1 of 2: the behaviour of the panel is separated from its look, the options window exists, and the layout is saved and changes while the widget runs. Layout C is the only built skin. Step 2 builds the skins A, B, D and E against the contract of this section.
+Request of the user: "we need a options menu for it. this option menu must be open by the system tray and it must let us chosse the UI version." The UI versions are the five approved designs in `design/layouts/`: A Refined list, B Tiles, C Techno / HUD, D Signal strip, E Ring. Step 1 separated the behaviour of the panel from its look, made the options window, and made the layout a saved value that changes while the widget runs, with Layout C as the only skin. Step 2 (Task 21, the subsection "Step 2" at the end of this section) built the skins A, B, D and E against the contract of this section, and gave the options window the look of the layout that shows.
 
 ### The parts
 
@@ -170,9 +170,10 @@ Request of the user: "we need a options menu for it. this option menu must be op
 | `bellwether/ui/PanelModel.qml` | The controller: the state and the rules that every skin uses (the list below). The only QML file other than `Main.qml` and `Options.qml` that reads `backend`. |
 | `bellwether/ui/AgentList.qml` | The agent rows of one group: at most 8 rows on the screen, scroll with the wheel, the scroll position stays when new data comes. The skin gives the look of a row and an optional decoration. |
 | `bellwether/ui/AgentRow.qml` | The base of one agent row: its size, its click target, its states (`failed`, `opening`, `hovered`, `last`) and its name for a screen reader. |
-| `bellwether/ui/skins/<letter>.qml` | One skin: only drawing. `C.qml` now. |
+| `bellwether/ui/skins/<letter>.qml` | One skin: only drawing. `A.qml`, `B.qml`, `C.qml`, `D.qml`, `E.qml`. |
+| `bellwether/ui/skins/<letter>Theme.qml` | The theme tokens of that skin: the values that the skin and the options window share. |
 | `bellwether/ui/Options.qml` | The options window. |
-| `bellwether/ui/previews/<letter>.png` | One picture of each design for the options window (360 px wide, shown 180 px wide). Made from the approved frames `design/out/herdr-float-layout-<letter>-1-closed.png`: the panel of the dark half, cropped. |
+| `bellwether/ui/previews/<letter>.png` | One picture of each design for the options window (360 px wide, shown 180 px wide). Made by `design/previews.py` from the real skins: the real panel, closed, with the counts 1, 2, 3 and 4, on a dark background. Run that script again after a change of a skin. |
 | `bellwether/layouts.py` | The catalogue of the five designs (letter, name, one line), the default (`"C"`), and `built_skins()`: a design is built when `ui/skins/<letter>.qml` exists. |
 | `bellwether/options.py` | `Options(engine).open()`: makes the options window at the first call, and shows the same window at each later call. |
 | `bellwether/settings.py` | The state file. Each save reads the file and changes only its own keys. |
@@ -197,7 +198,9 @@ A skin gets the controller as its property `panel`. All of these are read-only f
 - `canOpen(state)`: true when a click opens the group (Herdr answers and the state has an agent). For a skin that draws an affordance (a chevron, a cursor). A status item that cannot open is inert: no pointer look, no change on a click.
 - `toggle(state)`: open the group, or close it when it is open. It does nothing for a group with no agents and offline.
 - `jump(key)`: show the agent in the Herdr app. One jump at a time: the backend ignores a call while a jump runs.
-- Helpers: `groupOf(state)`, `countOf(state)`, `stateOf(key)`, `spokenStatus(group)` ("Blocked, 1 agent"), `pad2(n)`, `faded(hex, alpha)`.
+- Helpers: `groupOf(state)`, `countOf(state)`, `stateOf(key)`, `spokenStatus(group)` ("Blocked, 1 agent"), `pad2(n)`, `faded(hex, alpha)` (a colour value), `tint(hex, alpha)` (the text "#aarrggbb" with an 8-bit alpha, as the mock-ups make it: use it where a picture must be equal to a mock-up).
+- `strip(width, gap, minimum)`: the parts of a share strip, one `{x, width}` for each group. In proportion to the counts; a group with an agent is never narrower than `minimum`; a group with no agents has no width and no gap.
+- `ring(gap, minimum)`: the arcs of a share ring, one `{start, sweep}` in radians for each group, `start` from the top, clockwise. The arcs and the gaps fill the circle; a group with an agent is never shorter than `minimum`; one group alone is the full circle.
 
 Rules that the controller applies with no help of the skin: the open group closes when its count goes to 0 and when Herdr goes offline; a failed jump opens the group of its agent one time, and again only when that agent goes to a different group (`failedShownIn`); the message ends after 3 seconds.
 
@@ -255,10 +258,34 @@ The example of a second skin is `tests/skins/T.qml` (40 lines, used only by the 
 - "Move to next screen" for a panel at its default corner saves only the screen (`backend.saveScreen`): the file then has no `x` and `y`, so at the next start the panel is at the default corner of that screen and follows the width of the screen and of the layout.
 - Not done: the reads of the schedule still start after the first line of a new event stream (the answer of the subscription). The first line is also the wake that starts the read of a new stream, and three tests state that contract; a change needs a second kind of wake between `events.py` and `backend.py`.
 
+### Step 2 (Task 21): the skins A, B, D and E
+
+Each skin was built from its mock-up `design/layouts/<letter>-*.qml` and checked against it: the real panel (real `Main.qml`, real backend, made-up data) and the mock-up, rendered off screen at scale 2 in the ten scenes of the six approved frames, compared pixel by pixel. Result for each of A, B, D and E: 0 different pixels in 9 scenes. The scene with 12 idle agents is different only in the order of the rows (decision of the user: agents with a name first). Layout C stayed pixel-identical to step 1 in 25 states.
+
+What every skin adds to its mock-up (the mock-ups are static): a lighter plate under the pointer for a status item that can open and for an agent row; a line for a failed jump whose agent has no row; a scroll hint that follows the scroll position; the row layout with no icon.
+
+- **A, Refined list** (`A.qml`, 296 px wide; 168 px high closed, 54 px offline). One `AgentList` in each group, under its status row. Count badge: filled in the colour of the status for `group.alert`. Scroll hint: a thumb at the right and a fade over the last row while more rows are below, both in the `overlay`. Controller values: `groups`, `openState`, `topColor`, `quiet`, `failedAlone`.
+- **B, Tiles** (`B.qml`, 304 × 176; offline 206). Four tiles in a grid; a tile is solid for `group.alert`. One `AgentList` in a card below the grid; the card header shows `openLabel` and the number of agents ("3 agents"), or the rows on the screen for a long group ("1–8 of 12", from `first`, `shown` and `count` of the list). The open tile has a border and a chevron; on a solid tile they are dark (in the mock-up they have the colour of the tile and cannot be seen). Offline the tiles stay, with "–" for the counts.
+- **D, Signal strip** (`D.qml`, 320 × 122, the same offline). Headline: `total` and `topBadge` ("1 blocked", "No agents"). Strip: `strip(296, 3, 8)`; with no agents and offline one neutral track; the segments of the other statuses go dim while a status is open. Four tabs with the numerals; a lamp for `group.alert`. One `AgentList` below; its scroll hint is a footer under the rows: "4 more ↓", and "4 above ↑" at the end.
+- **E, Ring** (`E.qml`, 312 × 128, the same offline). A `Canvas` draws the ring from `ring(0.07, 0.10)` (its handlers only draw: `onPaint`, and `requestPaint()` when the arcs, the open status or `online` change). The open status has a thicker arc and the others go dim. Centre: `total` (the numeral gets smaller above 99 and above 999), or "off". With no agents one grey ring; offline a ring of dashes. The legend rows are the status items. One `AgentList` below, with a thumb and a fade as in A. The mock-up shows 8 px of the ninth row under the fade; the shared list shows exactly 8 rows.
+
+A long group fits a screen of 1080 px in every skin: the highest panel is B with 460 px.
+
+### Theme tokens and the look of the options window (Task 21, Part 3)
+
+Request of the user: "remember that this option windows should have the same window style as the main one".
+
+- Each skin has a file `skins/<letter>Theme.qml`, a `QtObject` with the tokens of the list `THEME_TOKENS` in `bellwether/layouts.py`: `panelColor`, `frameColor` (the neutral frame), `frameWidth`, `radius`, `itemRadius`, `lineColor`, `textColor`, `dimColor`, `faintColor`, `accentColor`, `selectedColor`, `hoverColor`, `fontFamily`, `titleSize`, `bodySize`, `smallSize`, `letterSpacing`, `uppercaseTitles`, and `decoration` (a `Component` for a frame ornament that fills its parent and has a colour property `tone`, or null; Layout C: the four corner brackets). A test fails when a theme file does not have a token.
+- The skin makes one instance (`CTheme { id: theme }`) and uses the tokens where a value is the same thing. A value that only that design has stays in the skin. A new skin needs its theme file; a skin with no theme file gets the tokens of Layout C in the options window.
+- `backend.themeSource` is the theme file of the layout that shows. `Options.qml` loads it and reads only tokens: frame, header, fonts, colours, the selected and the hover look of a card, the focus ring. The frame has `frameColor`, never the colour of a status: the options window does not show a status. In Layout C the window and the selected card have the corner brackets.
+- The window has no title bar of the system: `Qt.Window | Qt.FramelessWindowHint`, transparent background (round corners stay clean). It is still an `xdg_toplevel`; the trace has no decoration request for it, it gets the keyboard focus (`wl_keyboard.enter` on its surface), and the panel stays the one layer surface. Its header draws the title (capitals when `uppercaseTitles`) and a close control. A press in the header that moves 6 px or more sends `systemMoveRequested`, which calls `startSystemMove()`: the compositor moves the window, and the widget has no position code for it.
+- The size of the window (1076 × 344) and the places and sizes of the cards are the same in every theme, so a card stays under the pointer when a click changes the theme.
+
 ### Not verified
 
-- A person has not yet opened the options window from the tray icon with a real mouse, and has not yet looked at it on the screen. The checks used the tray menu over D-Bus, the window's own image, synthesized keys and clicks, and the protocol trace.
-- The picture of Layout C in the options window is the approved frame from before the rename: its header says "HERDR", the built panel says "BELLWETHER".
+- A person has not yet opened the options window from the tray icon with a real mouse, has not yet moved it by its header, and has not yet looked at it on the screen in its new look. The checks used the window's own image, synthesized keys and clicks, and the protocol trace.
+- A person has not yet looked at the layouts A, B, D and E on the screen. The checks compared images of the real panel with the mock-ups.
+- The options windows of A, B, D and E look much alike (round frame, the same font and colours; the radius and the title size are different): these four designs share their colours and their font. Only Layout C has a different font, capitals and an ornament.
 - The options window has the application name of the Python program ("python") and no icon of its own in the task bar.
 
 ## Goal
