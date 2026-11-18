@@ -1,4 +1,4 @@
-"""System tray icon in the colour of the top state: hide, show and quit."""
+"""System tray icon in the colour of the top state: options, hide, show and quit."""
 from __future__ import annotations
 
 import logging
@@ -77,7 +77,8 @@ class TrayIcons:
 
 
 class Tray(QObject):
-    def __init__(self, backend, window, app) -> None:
+    def __init__(self, backend, window, app, options=None) -> None:
+        """`options` opens the options window. None: the menu has no entry for it."""
         super().__init__()
         self._backend = backend
         self._window = window
@@ -85,6 +86,8 @@ class Tray(QObject):
         self._icons = TrayIcons.load()
 
         self._menu = QMenu()
+        if options is not None:
+            self._menu.addAction("Options…").triggered.connect(lambda *_args: options())
         self._toggle_action = self._menu.addAction("Hide widget")
         self._toggle_action.triggered.connect(self.toggle)
         # The way to a different monitor that needs no drag. Only with more than one screen.

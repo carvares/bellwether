@@ -6,11 +6,11 @@ from pathlib import Path
 DEFAULT = "C"
 # Letter, name, and one line for the options window.
 LAYOUTS = (
-    ("A", "Refined list", "The four statuses as a list with count badges."),
-    ("B", "Tiles", "A grid of four tiles with large numerals."),
-    ("C", "Techno / HUD", "Monospace numerals, corner brackets, one cell for each agent."),
-    ("D", "Signal strip", "A headline, one share bar and the statuses as tabs."),
-    ("E", "Ring", "A ring with the share of each status, and a legend."),
+    ("A", "Refined list", "A list of the statuses with count badges."),
+    ("B", "Tiles", "Four tiles with large numerals."),
+    ("C", "Techno / HUD", "Monospace numerals and one cell for each agent."),
+    ("D", "Signal strip", "A headline, a share bar and tabs."),
+    ("E", "Ring", "A ring of the shares, with a legend."),
 )
 UI_PATH = Path(__file__).parent / "ui"
 SKINS_PATH = UI_PATH / "skins"

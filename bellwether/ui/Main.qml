@@ -231,12 +231,11 @@ Window {
         return null
     }
 
-    // The window has the size of the skin. Without a skin it keeps its size.
+    // The window has the size of the skin. Without a skin it keeps its size. The width and the height change
+    // together: one new size for the layer surface.
     function takeSize() {
-        if (skin) {
-            width = skin.implicitWidth
-            height = skin.implicitHeight
-        }
+        if (skin && (width !== skin.implicitWidth || height !== skin.implicitHeight))
+            setGeometry(x, y, skin.implicitWidth, skin.implicitHeight)
     }
 
     // The place at the start, when the size of the panel is known.

@@ -17,11 +17,12 @@ from .backend import Backend
 from .client import HerdrClient, find_executables
 from .events import EventSource
 from .icons import Icons
+from .layouts import UI_PATH
+from .options import Options
 from .paths import NAME, OLD_NAME, move_old_folders, runtime_dir, state_home
 from .tray import STATE_COLORS, Tray
 
 LOG_PATH = state_home() / NAME / f"{NAME}.log"
-UI_PATH = Path(__file__).parent / "ui"
 # Holds only a link to the system module org.kde.layershell. The Qt of the wheel does not find it alone.
 IMPORT_PATH = UI_PATH / "imports"
 
@@ -116,7 +117,7 @@ def main() -> int:
 
     tray = None
     if QSystemTrayIcon.isSystemTrayAvailable():
-        tray = Tray(backend, engine.rootObjects()[0], app)
+        tray = Tray(backend, engine.rootObjects()[0], app, Options(engine).open)
     else:
         logging.getLogger("bellwether").warning("no system tray, the widget has no tray icon")
 
@@ -124,9 +125,10 @@ def main() -> int:
     app.aboutToQuit.connect(backend.stop)
     logging.getLogger("bellwether").info("started")
     code = app.exec()
-    # Delete the QML engine (and its window) first: its bindings read the backend until they are gone.
-    del engine
+    # The tray first: its options entry holds the engine. Then the QML engine (and its windows), before the
+    # backend: the bindings of the engine read the backend until they are gone.
     del tray
+    del engine
     del backend
     return code
 

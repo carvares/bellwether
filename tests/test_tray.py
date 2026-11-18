@@ -139,12 +139,12 @@ def test_a_colour_that_cannot_be_drawn_gives_the_circle_and_one_log_line(app, mo
     assert "/a/path" not in caplog.text
 
 
-def make_tray(backend, window, tray_app, monkeypatch):
+def make_tray(backend, window, tray_app, monkeypatch, options=None):
     from bellwether import appicon, tray
 
     monkeypatch.setattr(appicon, "load_app_icon", lambda *args: None)  # no icon: the circle
     monkeypatch.setattr(tray.QSystemTrayIcon, "show", lambda self: None)  # no item in a real tray
-    return tray.Tray(backend, window, tray_app)
+    return tray.Tray(backend, window, tray_app, options)
 
 
 def test_the_menu_has_move_to_next_screen_only_with_more_than_one_screen(app, fake_client, tmp_path, monkeypatch):
@@ -213,4 +213,22 @@ def test_move_to_next_screen_asks_the_panel_to_move(app, fake_client, tmp_path, 
     item = make_tray(backend, panel, app, monkeypatch)
     item._move_action.trigger()
     assert panel.moves == 1
+    backend.changed.disconnect(item.refresh)
+
+
+def test_the_menu_has_options_above_hide_and_each_click_opens_the_options(app, fake_client, tmp_path, monkeypatch):
+    from PySide6.QtGui import QWindow
+
+    from bellwether.backend import Backend
+
+    backend = Backend(fake_client, settings_path=tmp_path / "state.json")
+    opens = []
+    item = make_tray(backend, QWindow(), app, monkeypatch, lambda: opens.append(1))
+    entries = [a.text() for a in item._menu.actions() if a.isVisible() and a.text()]
+    assert entries[:2] == ["Options…", "Show widget"] and entries[-1] == "Quit"
+    assert [e for e in entries[2:-1]] in ([], ["Move to next screen"])  # with the screens of the test session
+    options = item._menu.actions()[0]
+    options.trigger()
+    options.trigger()
+    assert opens == [1, 1]
     backend.changed.disconnect(item.refresh)
