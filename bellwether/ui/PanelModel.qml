@@ -164,6 +164,42 @@ QtObject {
         backend.focus(key)
     }
 
+    // The parts of a share strip of `width` pixels, one for each of the four groups in their order, as
+    // {x, width}. A gap of `gap` pixels is between two parts. A group with no agents has the width 0 and takes
+    // no gap. The widths are in proportion to the counts, but a group with an agent is never narrower than
+    // `minimum`: the wider parts give that space. All widths are 0 with no agents and offline.
+    function strip(width, gap, minimum) {
+        var list = groups
+        var avail = width - gap * Math.max(0, parts - 1)
+        var small = []  // the groups that get the minimum
+        var i
+        for (var round = 0; round < list.length; round++) {
+            var rest = 0  // the sum of the shares of the other groups
+            for (i = 0; i < list.length; i++)
+                if (list[i].count > 0 && small.indexOf(i) < 0)
+                    rest += list[i].share
+            var found = false
+            for (i = 0; i < list.length; i++)
+                if (list[i].count > 0 && small.indexOf(i) < 0
+                        && (avail - minimum * small.length) * list[i].share / rest < minimum) {
+                    small.push(i)
+                    found = true
+                }
+            if (!found)
+                break
+        }
+        var out = []
+        var x = 0
+        for (i = 0; i < list.length; i++) {
+            var w = list[i].count === 0 ? 0
+                : small.indexOf(i) >= 0 ? minimum : (avail - minimum * small.length) * list[i].share / rest
+            out.push({x: x, width: w})
+            if (w > 0)
+                x += w + gap
+        }
+        return out
+    }
+
     // The name of a status row for a screen reader: "Blocked, 1 agent".
     function spokenStatus(group) {
         return group.label + ", " + group.count + (group.count === 1 ? " agent" : " agents")
@@ -177,6 +213,12 @@ QtObject {
     function faded(hex, alpha) {
         var c = Qt.color(hex)
         return Qt.rgba(c.r, c.g, c.b, alpha)
+    }
+
+    // "#rrggbb" with an alpha from 0 to 1 as the text "#aarrggbb": the alpha has 8 bits, as in the mock-ups.
+    function tint(hex, alpha) {
+        var a = Math.round(alpha * 255).toString(16)
+        return "#" + (a.length < 2 ? "0" + a : a) + ("" + hex).substring(1)
     }
 
     // The states of the lit cells of the bar, in the row order. One cell for each agent up to `limit` agents.

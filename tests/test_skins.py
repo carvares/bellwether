@@ -435,3 +435,94 @@ def test_layout_b_frame_colour_and_the_offline_tiles(app, layout):
     numerals = [i.property("text") for i in walk(root.contentItem()) if i.property("countFor") and i.isVisible()]
     assert numerals == ["–"] * 4 and "Herdr is offline" in visible_texts(root)
     assert [t.property("solid") for t in status_items(root)] == [False] * 4
+
+
+# ----- Layout D: Signal strip -----
+
+def strip(root, width, gap, minimum):
+    import json
+    return [(round(p["x"], 3), round(p["width"], 3))
+            for p in json.loads(js(root, f"JSON.stringify(root.panel.strip({width}, {gap}, {minimum}))"))]
+
+
+def test_the_parts_of_a_share_strip_are_in_proportion_and_a_state_with_an_agent_has_a_minimum_width(app, window):
+    root, backend, messages = window
+    backend.apply(many(blocked=1, done=2, working=3, idle=4))
+    settle(app)
+    assert strip(root, 296, 3, 8) == [(0, 28.7), (31.7, 57.4), (92.1, 86.1), (181.2, 114.8)]  # 287 px for 10 agents
+    backend.apply(many(done=1, working=2, idle=2))  # a state with no agents: no width and no gap
+    settle(app)
+    assert strip(root, 296, 3, 8) == [(0, 0), (0, 58), (61, 116), (180, 116)]
+    backend.apply(many(blocked=1, done=1, working=120, idle=90))  # two shares are less than the minimum
+    settle(app)
+    parts = strip(root, 296, 3, 8)
+    assert [w for _, w in parts][:2] == [8, 8]
+    assert parts[2][1] / parts[3][1] == pytest.approx(120 / 90, abs=0.001)  # the rest stays in proportion
+    assert parts[3][0] + parts[3][1] == pytest.approx(296)  # the strip is full
+    assert [x for x, _ in parts] == pytest.approx([0, 11, 22, 22 + parts[2][1] + 3], abs=0.002)
+    backend.apply(many(working=7))
+    settle(app)
+    assert strip(root, 296, 3, 8)[:3] == [(0, 0), (0, 0), (0, 296)] and strip(root, 296, 3, 8)[3][1] == 0
+    for agents in ([], None):
+        backend.apply(agents)
+        settle(app)
+        assert [w for _, w in strip(root, 296, 3, 8)] == [0, 0, 0, 0]
+    assert js(root, 'root.panel.tint("#f28b82", 0.16)') == "#29f28b82" and js(root, 'root.panel.tint("#000000", 0)') == "#00000000"
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+@only("D")
+def test_layout_d_shows_the_total_the_top_badge_the_strip_and_the_four_numerals(app, layout):
+    root, backend, messages = layout
+    backend.apply(many(blocked=1, done=2, working=3, idle=4))
+    settle(app)
+    assert (root.width(), root.height()) == (320, 122)
+    texts = visible_texts(root)
+    assert texts[:3] == ["10", "agents", "1 blocked"] and frame_colour(root) == STATE_COLORS["blocked"]
+    numerals = {i.property("countFor"): i.property("text") for i in walk(root.contentItem()) if i.property("countFor")}
+    assert numerals == {"blocked": "1", "done": "2", "working": "3", "idle": "4"}
+    segments = sorted(marked(root, "isSegment"), key=lambda s: s.x())
+    assert [s.property("segmentFor") for s in segments] == ORDER
+    assert [s.width() for s in segments] == pytest.approx([28.7, 57.4, 86.1, 114.8])
+    assert segments[-1].x() + segments[-1].width() == pytest.approx(296) and marked(root, "isEmptyTrack") == []
+    assert len(marked(root, "isLamp")) == 2  # blocked and done have agents
+    image = root.grabWindow()
+    for s in segments:
+        point = s.mapToScene(QPointF(s.width() / 2, 4)).toPoint()
+        assert image.pixelColor(point).name() == STATE_COLORS[s.property("segmentFor")]
+    click(app, root, status_items(root)[2])  # the other segments go dim
+    assert [s.property("opacity") for s in segments] == [0.4, 0.4, 1, 0.4]
+    assert root.height() == 122 + 1 + 3 * 30 + 12
+    backend.apply(many(blocked=1, done=1, working=120, idle=90))
+    settle(app)
+    assert visible_texts(root)[:3] == ["212", "agents", "1 blocked"]
+    assert [s.width() for s in segments][:2] == [8, 8]  # a share that is very small can still be seen
+    backend.apply(many(working=1))
+    settle(app)
+    assert visible_texts(root)[:3] == ["1", "agent", "1 working"] and marked(root, "isLamp") == []
+    assert [s.width() for s in marked(root, "isSegment")] == [296]
+
+
+@only("D")
+def test_layout_d_with_no_agents_and_offline_and_the_footer_of_a_long_list(app, layout):
+    root, backend, messages = layout
+    backend.apply([])
+    settle(app)
+    assert visible_texts(root)[:3] == ["0", "agents", "No agents"] and frame_colour(root) == "#3c4043"
+    assert marked(root, "isSegment") == [] and len(marked(root, "isEmptyTrack")) == 1  # one neutral track
+    backend.apply(None)
+    settle(app)
+    assert (root.width(), root.height()) == (320, 122)
+    assert visible_texts(root) == ["Offline", "–", "Blocked", "–", "Done", "–", "Working", "–", "Idle"]
+    assert len(marked(root, "isEmptyTrack")) == 1 and marked(root, "isTopBadge") == []
+    backend.apply(many(blocked=1, idle=12))
+    settle(app)
+    click(app, root, status_items(root)[3])
+    assert root.height() == 122 + 1 + 8 * 30 + 34
+    (hint,) = hints(root)
+    assert hint.property("text") == "4 more  ↓"
+    flick = flickable(root)
+    wheel(app, root, flick.mapToScene(QPointF(100, 100)).toPoint())
+    assert hint.property("text") == "2 more  ↓"
+    wheel(app, root, flick.mapToScene(QPointF(100, 100)).toPoint())
+    assert hint.property("text") == "4 above  ↑"
