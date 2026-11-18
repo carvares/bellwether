@@ -1,9 +1,10 @@
 """Smoke test of the real Main.qml, loaded the same way as herdr_float/__main__.py (off screen)."""
+import threading
 import time
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QPoint, QPointF, Qt, qInstallMessageHandler
+from PySide6.QtCore import QPoint, QPointF, Qt, Slot, qInstallMessageHandler
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickWindow
@@ -18,6 +19,9 @@ from herdr_float.tray import STATE_COLORS
 LAYERSHELL_QMLDIR = Path("/usr/lib/qt6/qml/org/kde/layershell/qmldir")
 # layer-shell-qt says this for every window on a platform that is not Wayland. It is expected off screen.
 OFFSCREEN_NOTE = "is not a wayland window"
+# The sizes of Layout C (design/layouts/c-hud.qml): the panel, a closed panel, an agent row, the space under a list.
+WIDTH, CLOSED, OFFLINE, AGENT_ROW, LIST_END = 320, 192, 108, 28, 4
+NEUTRAL, FRAME = "#6b747d", "#2b333b"
 
 pytestmark = pytest.mark.skipif(
     not LAYERSHELL_QMLDIR.is_file(),
@@ -31,13 +35,26 @@ def walk(item):
         yield from walk(child)
 
 
+class RecordingBackend(Backend):
+    """The real backend. It also records the positions that the QML saves."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.saves = []
+
+    @Slot(int, int)
+    def savePosition(self, x, y):
+        self.saves.append((x, y))
+        super().savePosition(x, y)
+
+
 @pytest.fixture
 def window(app, fake_client, tmp_path):
     """Yield (root window, backend, Qt messages). The poll thread is not started."""
     assert app.platformName() == "offscreen"
     # The icons folder is a made-up one in tmp_path. It does not exist until a test makes it.
     icons = Icons(tmp_path / "app", tmp_path / "cache")
-    backend = Backend(fake_client, settings_path=tmp_path / "state.json", icons=icons)
+    backend = RecordingBackend(fake_client, settings_path=tmp_path / "state.json", icons=icons)
     messages = []
     previous = qInstallMessageHandler(lambda mode, context, text: messages.append(text))
     engine = QQmlApplicationEngine()
@@ -61,6 +78,11 @@ def window(app, fake_client, tmp_path):
 def rows(root, kind):
     """The visible rows of one kind ("status" or "agent"), in the order on the screen."""
     return [i for i in walk(root.contentItem()) if i.property("rowKind") == kind and i.isVisible()]
+
+
+def visible_texts(root):
+    """Every text on the screen, in the order of the items."""
+    return [i.property("text") for i in walk(root.contentItem()) if i.isVisible() and i.property("text")]
 
 
 def settle(app):
@@ -90,13 +112,13 @@ def test_main_qml_shows_four_status_rows_and_opens_one_group_at_a_time(app, wind
     settle(app)
     status = rows(root, "status")
     assert [r.property("stateName") for r in status] == ["blocked", "done", "working", "idle"]
-    assert (root.width(), root.height()) == (240, 136)
+    assert (root.width(), root.height()) == (WIDTH, CLOSED)
     assert rows(root, "agent") == []
 
     click(app, root, status[2])
     assert root.property("openState") == "working"
     assert [r.property("key") for r in rows(root, "agent")] == ["t2", "t3"]
-    assert root.height() == 136 + 2 * 26
+    assert root.height() == CLOSED + 2 * AGENT_ROW + LIST_END
 
     click(app, root, status[0])  # a second group closes the first
     assert root.property("openState") == "blocked"
@@ -142,9 +164,8 @@ def test_the_open_group_closes_when_it_is_empty_or_herdr_is_offline(app, window)
     settle(app)
     assert root.property("openState") == ""
     assert rows(root, "status") == [] and rows(root, "agent") == []
-    offline_text = next(i for i in walk(root.contentItem()) if i.property("text") == "offline")
-    assert offline_text.isVisible() is True
-    assert root.height() == 46
+    assert visible_texts(root) == ["HERDR", "NO LINK", "OFFLINE", "OFFLINE"]  # the header, the tag and the plate
+    assert root.height() == OFFLINE
     backend.apply(AGENTS)  # back online: the group does not open by itself
     settle(app)
     assert root.property("openState") == ""
@@ -157,21 +178,21 @@ def test_a_failed_jump_shows_its_message_where_the_agent_is_now(app, window):
     settle(app)
 
     def texts():
-        return [i.property("text") for i in walk(root.contentItem()) if i.isVisible() and i.property("text")]
+        return visible_texts(root)
 
     backend.focusFailed.emit("t2", "could not raise the window")
     settle(app)
     assert root.property("openState") == "working"  # the group of the agent opens
-    assert texts().count("could not raise the window") == 1
+    assert texts().count("! could not raise the window") == 1
     backend.apply([Agent("t1", "blocked", "rev", "Main"), Agent("t2", "idle", "ana", "api / 1")])
     settle(app)
     assert root.property("openState") == "idle"  # the agent changed its state: the message follows it
-    assert texts().count("could not raise the window") == 1
+    assert texts().count("! could not raise the window") == 1
     backend.apply([Agent("t1", "blocked", "rev", "Main")])  # the agent is gone: the line at the bottom
     settle(app)
     assert root.property("openState") == ""
-    assert texts().count("could not raise the window") == 1
-    assert root.height() == 136 + 24
+    assert texts().count("! could not raise the window") == 1
+    assert root.height() == CLOSED + 24
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
@@ -209,7 +230,7 @@ def test_the_scroll_indicator_does_not_take_clicks_or_the_wheel(app, window):
                         Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False)
     app.sendEvent(root, wheel)
     settle(app)
-    assert flick.property("contentY") == 52
+    assert flick.property("contentY") == 2 * AGENT_ROW
     QTest.mouseClick(root, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, edge.toPoint())
     for _ in range(100):
         settle(app)
@@ -226,20 +247,28 @@ def test_the_scroll_indicator_does_not_take_clicks_or_the_wheel(app, window):
         (["done", "idle", "working"], STATE_COLORS["done"]),
         (["idle", "working", "working", "working"], STATE_COLORS["idle"]),  # idle is above working
         (["working"], STATE_COLORS["working"]),
-        ([], "#3c4043"),
-        (None, "#3c4043"),  # offline
+        ([], NEUTRAL),
+        (None, NEUTRAL),  # offline
     ],
 )
-def test_the_border_has_the_colour_of_the_top_state_and_the_panel_keeps_its_size(app, window, states, colour):
+def test_the_brackets_and_the_tag_have_the_colour_of_the_top_state_and_the_panel_keeps_its_size(
+    app, window, states, colour
+):
     root, backend, messages = window
     backend.apply(None if states is None else [Agent(f"t{n}", s, "a", "") for n, s in enumerate(states)])
     settle(app)
     image = root.grabWindow()
-    assert (image.width(), image.height()) == ((240, 46) if states is None else (240, 136))
-    middle = image.width() // 2
-    assert [image.pixelColor(middle, y).name() for y in (0, 1)] == [colour, colour]  # 2 px, inside the panel
-    assert image.pixelColor(middle, 2).name() != colour
-    assert image.pixelColor(middle, image.height() - 1).name() == colour
+    assert (image.width(), image.height()) == ((WIDTH, OFFLINE) if states is None else (WIDTH, CLOSED))
+    right, bottom = image.width() - 1, image.height() - 1
+    # The four corner brackets: 14 px long and 2 px thick, inside the panel.
+    corners = [(0, 0), (13, 1), (1, 13), (right, 0), (right - 13, 1), (0, bottom), (1, bottom - 13), (right, bottom)]
+    assert [image.pixelColor(x, y).name() for x, y in corners] == [colour] * len(corners)
+    # Between the brackets the frame is the neutral line: the status does not change the size of anything.
+    assert [image.pixelColor(x, y).name() for x, y in ((14, 0), (0, 14), (right // 2, 0), (right // 2, bottom))] == [FRAME] * 4
+    assert image.pixelColor(2, 2).name() not in (colour, FRAME)
+    tag = next(i for i in walk(root.contentItem()) if i.property("isTopTag"))
+    word = "OFFLINE" if states is None else "NO AGENTS" if not states else states[0].upper()
+    assert (tag.property("text"), tag.property("color").name()) == (word, colour)
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
@@ -265,8 +294,8 @@ def test_agent_rows_show_the_icon_of_the_program_and_no_program_word(app, window
     image = root.grabWindow()
     centres = [i.mapToScene(QPointF(8, 8)).toPoint() for i in icons]
     assert [image.pixelColor(c).name() for c in centres] == ["#d97757", "#d97757", "#e8eaed"]
-    texts = [i.property("text") for i in walk(root.contentItem()) if i.isVisible() and i.property("text")]
-    assert [t for t in texts if t in ("rev", "Main", "t1", "t2", "t3")] == ["Main", "t2", "Main", "t3", "rev", "Main"]
+    texts = visible_texts(root)
+    assert [t for t in texts if t in ("rev", "Main") or "t" in t] == ["Main", "[t2]", "Main", "[t3]", "rev", "Main"]
     assert "claude-code" not in texts and "pi" not in texts
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
@@ -277,7 +306,7 @@ def test_agent_rows_show_the_program_word_when_the_app_has_no_icons(app, window)
     settle(app)
     click(app, root, rows(root, "status")[2])
     assert [i for i in walk(root.contentItem()) if i.property("isProgramIcon") and i.isVisible()] == []
-    texts = [i.property("text") for i in walk(root.contentItem()) if i.isVisible() and i.property("text")]
+    texts = visible_texts(root)
     assert "claude-code" in texts and "Main" in texts
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
@@ -317,4 +346,191 @@ def test_an_icon_that_does_not_load_gives_the_row_the_layout_without_an_icon(app
     click(app, root, rows(root, "status")[2])
     assert shown_icons(root) == []
     label = next(i for i in walk(root.contentItem()) if i.isVisible() and i.property("text") == "rev")
-    assert label.x() == 24  # the place of the text of a row without an icon: no gap
+    assert label.x() == 20  # the place of the text of a row without an icon: no gap
+
+
+def many(**counts):
+    return [Agent(f"{state[0]}{n:03d}", state, f"agent {n:03d}", "pool") for state, c in counts.items() for n in range(c)]
+
+
+def test_the_header_total_is_the_sum_of_the_counts_and_the_counts_have_two_digits(app, window):
+    root, backend, messages = window
+    backend.apply(many(blocked=1, done=0, working=3, idle=12))
+    settle(app)
+    total = next(i for i in walk(root.contentItem()) if i.property("isTotal"))
+    assert total.property("text") == "AGENTS 16"
+    assert root.property("total") == sum(g["count"] for g in backend.groups) == 16
+    numerals = {}
+    for item in walk(root.contentItem()):
+        if item.property("countOf"):
+            row = item.parentItem()  # the zero at the front and the count
+            numerals[item.property("countOf")] = "".join(t.property("text") for t in row.childItems() if t.isVisible())
+    assert numerals == {"blocked": "01", "done": "00", "working": "03", "idle": "12"}
+    backend.apply(many(working=7))
+    settle(app)
+    assert total.property("text") == "AGENTS 07"
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def cells(root):
+    """The cells of the bar under the header, from left to right: (state or "", x, width)."""
+    found = [i for i in walk(root.contentItem()) if i.property("isCell") and i.isVisible()]
+    return sorted(((i.property("cellState"), i.x(), i.width()) for i in found), key=lambda cell: cell[1])
+
+
+@pytest.mark.parametrize(
+    "counts, lit",
+    [
+        ({"blocked": 1, "done": 2, "working": 3, "idle": 4}, [1, 2, 3, 4]),  # one cell for each agent
+        ({"working": 2}, [0, 0, 2, 0]),  # 8 empty cells stay: the bar has 10 cells or more
+        ({"blocked": 1, "done": 2, "working": 3, "idle": 12}, [1, 2, 3, 12]),
+        ({"blocked": 1, "idle": 299}, [1, 0, 0, 59]),  # more agents than cells: a state with an agent keeps a cell
+        ({"blocked": 100, "done": 1, "working": 100, "idle": 1}, [29, 1, 29, 1]),
+        ({}, [0, 0, 0, 0]),  # no agents: an empty track
+    ],
+)
+def test_the_bar_shows_the_share_of_each_state_and_a_state_with_an_agent_is_never_invisible(app, window, counts, lit):
+    root, backend, messages = window
+    backend.apply(many(**counts))
+    settle(app)
+    bar = cells(root)
+    states = [state for state, _, _ in bar if state]
+    assert [states.count(s) for s in ("blocked", "done", "working", "idle")] == lit
+    assert states == sorted(states, key=("blocked", "done", "working", "idle").index)  # the row order
+    assert [state for state, _, _ in bar[len(states):]] == [""] * (len(bar) - len(states))  # lit cells first
+    assert len(bar) == max(10, sum(lit)) <= 60
+    widths = {round(width, 3) for _, _, width in bar}
+    assert len(widths) == 1 and min(widths) >= 3  # equal cells, so the width of a state is its share
+    assert bar[0][1] == 0 and bar[-1][1] + bar[-1][2] == pytest.approx(WIDTH - 2 * 14)  # the bar fills the row
+    image = root.grabWindow()
+    for state, x, width in bar:  # each lit cell shows in the colour of its state
+        if state:
+            assert image.pixelColor(int(14 + x + width / 2), 11 + 22 + 9).name() == STATE_COLORS[state]
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def test_offline_the_bar_is_an_empty_track(app, window):
+    root, backend, messages = window
+    backend.apply(None)
+    settle(app)
+    assert [state for state, _, _ in cells(root)] == [""] * 10
+
+
+def test_a_drag_from_a_row_moves_the_widget_and_does_not_click(app, window):
+    root, backend, messages = window
+    backend.apply(AGENTS)
+    settle(app)
+    click(app, root, rows(root, "status")[2])
+    left, none = Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier
+    for item in (rows(root, "status")[0], rows(root, "status")[2], rows(root, "agent")[0]):
+        before = (root.property("posX"), root.property("posY"))
+        backend.saves.clear()
+        start = item.mapToScene(QPointF(item.width() / 2, item.height() / 2)).toPoint()
+        QTest.mousePress(root, left, none, start)
+        settle(app)
+        for step in (QPoint(-10, 5), QPoint(-20, 12)):  # each move is from the start: the window stays off screen
+            QTest.mouseMove(root, start + step)
+            settle(app)
+        QTest.mouseRelease(root, left, none, start + QPoint(-20, 12))
+        settle(app)
+        after = (root.property("posX"), root.property("posY"))
+        assert after == (before[0] - 30, before[1] + 17)
+        assert backend.saves == [after]  # saved one time, at the release
+        assert root.property("openState") == "working" and backend._client.focused == []
+    assert root.property("atDefault") is False
+    start = rows(root, "status")[2].mapToScene(QPointF(40, 16)).toPoint()  # less than 6 px is a click
+    backend.saves.clear()
+    QTest.mousePress(root, left, none, start)
+    QTest.mouseMove(root, start + QPoint(3, 2))
+    QTest.mouseRelease(root, left, none, start + QPoint(3, 2))
+    settle(app)
+    assert root.property("openState") == "" and backend.saves == []
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def test_clicks_are_ignored_while_a_jump_is_in_flight_and_the_row_shows_opening(app, window):
+    root, backend, messages = window
+    backend.apply(AGENTS)
+    settle(app)
+    click(app, root, rows(root, "status")[2])
+    backend._client.focus_gate = threading.Event()
+    try:
+        first, second = rows(root, "agent")
+        click(app, root, first)
+        assert backend.opening == "t2" and "> opening…" in visible_texts(root)
+        click(app, root, first)
+        click(app, root, second)
+        assert backend._client.focused == ["t2"]
+    finally:
+        backend._client.focus_gate.set()
+    for _ in range(100):
+        settle(app)
+        if backend.opening == "":
+            break
+    assert "> opening…" not in visible_texts(root)
+    click(app, root, second)
+    for _ in range(100):
+        settle(app)
+        if backend.opening == "":
+            break
+    assert backend._client.focused == ["t2", "t3"]
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def test_a_long_group_shows_8_rows_with_a_scroll_hint_and_keeps_its_place_with_new_data(app, window):
+    root, backend, messages = window
+    backend.apply(many(idle=12))
+    settle(app)
+    click(app, root, rows(root, "status")[3])
+    assert root.height() == CLOSED + 8 * AGENT_ROW + 20  # 8 rows and the line of the hint
+    flick = next(i for i in walk(root.contentItem()) if i.property("scrolls"))
+    assert flick.height() == 8 * AGENT_ROW and flick.property("contentHeight") == 12 * AGENT_ROW
+    hint = next(i for i in walk(root.contentItem()) if i.property("isScrollHint") and i.isVisible())
+    assert hint.isVisible() and hint.property("text") == "ROWS 01–08 / 12  ▼ SCROLL"
+    ticks = [i for i in walk(root.contentItem()) if i.property("isScrollTick")]
+    assert [t.property("lit") for t in ticks] == [True] * 8 + [False] * 4  # one tick for each agent
+    row = rows(root, "agent")[2]
+    point = row.mapToScene(QPointF(row.width() / 2, row.height() / 2))
+    for _ in range(3):  # 3 turns of 2 rows: the list stops at its end
+        app.sendEvent(root, QWheelEvent(point, point, QPoint(0, 0), QPoint(0, -120), Qt.MouseButton.NoButton,
+                                        Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False))
+        settle(app)
+    assert flick.property("contentY") == 4 * AGENT_ROW
+    assert hint.property("text") == "ROWS 05–12 / 12  ▲ SCROLL"
+    assert [t.property("lit") for t in ticks] == [False] * 4 + [True] * 8
+    backend.apply(many(idle=12) + [Agent("t1", "working", "ana", "")])  # new data: the list keeps its place
+    settle(app)
+    assert flick.property("contentY") == 4 * AGENT_ROW and root.property("openState") == "idle"
+    backend.apply(many(idle=10))  # a shorter list: the place is inside the new list
+    settle(app)
+    assert flick.property("contentY") == 2 * AGENT_ROW
+    backend.apply(many(idle=8))  # 8 rows fit: no hint and no space for it
+    settle(app)
+    assert not hint.isVisible() and root.height() == CLOSED + 8 * AGENT_ROW + LIST_END
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def test_a_very_long_group_has_one_scroll_bar_and_not_a_tick_for_each_agent(app, window):
+    root, backend, messages = window
+    backend.apply(many(idle=90))
+    settle(app)
+    click(app, root, rows(root, "status")[3])
+    assert [i for i in walk(root.contentItem()) if i.property("isScrollTick")] == []
+    hint = next(i for i in walk(root.contentItem()) if i.property("isScrollHint") and i.isVisible())
+    assert hint.property("text") == "ROWS 01–08 / 90  ▼ SCROLL"
+    assert root.height() == CLOSED + 8 * AGENT_ROW + 20
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def test_the_rows_have_names_for_a_screen_reader(app, window):
+    root, backend, messages = window
+    backend.apply(AGENTS)
+    settle(app)
+    click(app, root, rows(root, "status")[2])
+    names = []
+    for item in rows(root, "status") + rows(root, "agent"):
+        attached = next((c for c in item.children() if c.metaObject().className() == "QQuickAccessibleAttached"), None)
+        assert attached is not None
+        names.append(attached.property("name"))
+    assert names == ["Blocked, 1 agent", "Done, 0 agents", "Working, 2 agents", "Idle, 0 agents",
+                            "Go to ana in api / 1", "Go to bob"]
