@@ -20,6 +20,9 @@ Window {
     LayerShell.Window.exclusionZone: -1
     LayerShell.Window.margins.left: root.posX
     LayerShell.Window.margins.top: root.posY
+    // set_margin has no effect until the next wl_surface.commit. Qt sends no
+    // commit for a margin change alone, so ask for a frame.
+    LayerShell.Window.onMarginsChanged: root.requestUpdate()
 
     Rectangle {
         anchors.fill: parent

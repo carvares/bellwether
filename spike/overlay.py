@@ -11,6 +11,8 @@ Switches (environment variables, for the spike only):
   SPIKE_QML=<file>      QML file name in this directory (default Overlay.qml)
   SPIKE_NO_BRIDGE=1     do not expose the system QML module
   SPIKE_RUN_MS=<n>      quit after n milliseconds (default 6000)
+  SPIKE_NO_PLATFORM_ENV=1   do not set QT_QPA_PLATFORM
+  SPIKE_MODE=<name>     context property spikeMode, read by OverlayMove.qml
 """
 import os
 import sys
@@ -27,7 +29,9 @@ def make_bridge(root: Path) -> Path:
     return root
 
 
-os.environ.setdefault("QT_QPA_PLATFORM", "wayland")
+if not os.environ.get("SPIKE_NO_PLATFORM_ENV"):
+    os.environ.setdefault("QT_QPA_PLATFORM", "wayland")
+print("QT_QPA_PLATFORM=%r" % os.environ.get("QT_QPA_PLATFORM"), file=sys.stderr)
 
 from PySide6.QtCore import QTimer, qVersion  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
@@ -49,6 +53,7 @@ print("qt=%s platform=%s" % (qVersion(), app.platformName()), file=sys.stderr)
 engine = QQmlApplicationEngine()
 if use_bridge:
     engine.addImportPath(str(make_bridge(Path(bridge.name))))
+engine.rootContext().setContextProperty("spikeMode", os.environ.get("SPIKE_MODE", "none"))
 engine.load(Path(__file__).with_name(os.environ.get("SPIKE_QML", "Overlay.qml")))
 if not engine.rootObjects():
     print("qml=load-failed", file=sys.stderr)
