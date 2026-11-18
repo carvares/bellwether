@@ -14,6 +14,7 @@ from PySide6.QtTest import QTest
 from bellwether.__main__ import IMPORT_PATH, UI_PATH, follow_refresh_rate
 from bellwether.backend import Backend
 from bellwether.icons import Icons
+from bellwether.layouts import built_skins
 from bellwether.state import Agent
 from bellwether.tray import STATE_COLORS
 
@@ -23,6 +24,10 @@ OFFSCREEN_NOTE = "is not a wayland window"
 # The sizes of Layout C (design/layouts/c-hud.qml): the panel, a closed panel, an agent row, the space under a list.
 WIDTH, CLOSED, OFFLINE, AGENT_ROW, LIST_END = 320, 192, 108, 28, 4
 NEUTRAL, FRAME = "#6b747d", "#2b333b"
+
+# The skins of the program, a second skin that only the tests have, and a skin file that does not load.
+SKINS = {**built_skins(), "T": Path(__file__).parent / "skins" / "T.qml", "X": Path(__file__).parent / "skins" / "Broken.qml"}
+T_WIDTH, T_ROW = 240, 20  # the test skin: four status rows and the list of the open group below them
 
 pytestmark = pytest.mark.skipif(
     not LAYERSHELL_QMLDIR.is_file(),
@@ -57,7 +62,7 @@ def window(app, fake_client, tmp_path):
     assert app.platformName() == "offscreen"
     # The icons folder is a made-up one in tmp_path. It does not exist until a test makes it.
     icons = Icons(tmp_path / "app", tmp_path / "cache")
-    backend = RecordingBackend(fake_client, settings_path=tmp_path / "state.json", icons=icons)
+    backend = RecordingBackend(fake_client, settings_path=tmp_path / "state.json", icons=icons, skins=SKINS)
     messages = []
     previous = qInstallMessageHandler(lambda mode, context, text: messages.append(text))
     engine = QQmlApplicationEngine()
@@ -970,3 +975,125 @@ def test_the_start_uses_the_saved_screen_and_place(app, tmp_path, request, saved
     assert root.property("surfaceScreen") == name and root.isVisible()
     assert backend.saves == []
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+# ----- layouts: the skin changes, the window and its state stay -----
+
+def test_a_different_layout_shows_in_the_same_window_and_keeps_the_place_the_screen_and_the_open_group(app, window, tmp_path):
+    root, backend, messages = window
+    backend.apply(many(blocked=1, working=2, idle=12))
+    settle(app)
+    use_screens(root, OFFSET, "B", 700, 300)
+    click(app, root, rows(root, "status")[3])
+    assert root.property("openState") == "idle" and root.height() == CLOSED + 8 * AGENT_ROW + 20
+    sizes = []
+    root.widthChanged.connect(lambda *_: sizes.append(("width", root.width())))
+    root.heightChanged.connect(lambda *_: sizes.append(("height", root.height())))
+    shown = []
+    root.visibleChanged.connect(lambda *_: shown.append(root.isVisible()))
+
+    backend.setLayout("T")
+    settle(app)
+    assert (root.width(), root.height()) == (T_WIDTH, 4 * T_ROW + 8 * T_ROW)  # the size of the new skin, 8 rows of 12
+    assert sizes == [("width", T_WIDTH), ("height", 12 * T_ROW)]  # one change of each: never the size 0
+    assert shown == [] and root.isVisible()  # the same window: it was not hidden
+    assert place(root) == ("B", 700, 300) and root.property("openState") == "idle"
+    assert [r.property("stateName") for r in rows(root, "status")] == ["blocked", "done", "working", "idle"]
+    assert len(rows(root, "agent")) == 12
+    assert json.loads((tmp_path / "state.json").read_text()) == {"layout": "T"}
+    assert backend.saves == []  # the place did not change: it is not saved again
+
+    backend.setLayout("C")
+    settle(app)
+    assert (root.width(), root.height()) == (WIDTH, CLOSED + 8 * AGENT_ROW + 20)
+    assert place(root) == ("B", 700, 300) and root.property("openState") == "idle"
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def test_the_window_finds_the_rows_of_a_second_skin_by_their_role(app, window):
+    """The test skin has no pointer code: the click, the jump, the wheel and the rules come from the shared parts."""
+    root, backend, messages = window
+    backend.setLayout("T")
+    backend.apply(many(blocked=1, working=2, idle=12))
+    settle(app)
+    status = rows(root, "status")
+    click(app, root, status[2])
+    assert root.property("openState") == "working" and root.height() == 4 * T_ROW + 2 * T_ROW
+    click(app, root, status[1])  # a group without agents does not open
+    assert root.property("openState") == "working"
+    click(app, root, status[3])  # one list for the open group: it shows the new group from its first row
+    assert root.property("openState") == "idle"
+    flick = next(i for i in walk(root.contentItem()) if i.property("hitRole") == "scroll" and i.isVisible())
+    assert flick.height() == 8 * T_ROW and flick.property("contentHeight") == 12 * T_ROW
+    row = rows(root, "agent")[2]
+    point = row.mapToScene(QPointF(row.width() / 2, row.height() / 2))
+    app.sendEvent(root, QWheelEvent(point, point, QPoint(0, 0), QPoint(0, -120), Qt.MouseButton.NoButton,
+                                    Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False))
+    settle(app)
+    assert flick.property("contentY") == 2 * T_ROW
+    QTest.mouseClick(root, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point.toPoint())
+    for _ in range(100):
+        settle(app)
+        if backend._client.focused and backend.opening == "":
+            break
+    assert backend._client.focused == ["i004"]  # the row at that place after the scroll of 2 rows
+    click(app, root, status[2])  # a different group in the same list starts at its first row
+    assert flick.property("contentY") == 0 and [r.property("key") for r in rows(root, "agent")] == ["w000", "w001"]
+    backend.focusFailed.emit("i003", "could not raise the window")  # the failure rule opens the group of the agent
+    settle(app)
+    assert root.property("openState") == "idle"
+    backend.apply(None)  # the offline rule closes it
+    settle(app)
+    assert root.property("openState") == "" and root.height() == 4 * T_ROW
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def test_a_bigger_skin_is_kept_on_the_screen_and_the_default_corner_follows_the_width(app, window):
+    root, backend, messages = window
+    backend.setLayout("T")
+    backend.apply(AGENTS)
+    settle(app)
+    use_screens(root, OFFSET, "B", 1920 - T_WIDTH, 1080 - 4 * T_ROW)  # in the bottom-right corner of B
+    backend.setLayout("C")  # wider and higher
+    settle(app)
+    assert place(root) == ("B", 1920 - WIDTH, 1080 - CLOSED)
+    root.setProperty("atDefault", True)
+    js(root, "root.clampPosition()")
+    assert place(root) == ("B", 1920 - WIDTH - 16, 16)
+    backend.setLayout("T")
+    settle(app)
+    assert place(root) == ("B", 1920 - T_WIDTH - 16, 16) and root.property("atDefault") is True
+    assert backend.saves == []
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def test_a_start_shows_the_saved_layout(app, tmp_path, request):
+    (tmp_path / "state.json").write_text('{"x": 120, "y": 48, "layout": "T"}')
+    root, backend, messages = request.getfixturevalue("window")
+    backend.apply(AGENTS)
+    settle(app)
+    assert backend.layout == "T" and (root.width(), root.height()) == (T_WIDTH, 4 * T_ROW)
+    assert place(root)[1:] == (120, 48) and root.isVisible()
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def test_a_skin_that_does_not_load_gives_the_default_layout(app, window, tmp_path):
+    root, backend, messages = window
+    backend.apply(AGENTS)
+    settle(app)
+    click(app, root, rows(root, "status")[2])
+    backend.setLayout("X")
+    settle(app)
+    assert backend.layout == "C" and (root.width(), root.height()) == (WIDTH, CLOSED + 2 * AGENT_ROW + LIST_END)
+    assert root.isVisible() and root.property("openState") == "working"
+    assert json.loads((tmp_path / "state.json").read_text()) == {"layout": "C"}
+    assert any("Broken.qml" in m for m in messages)  # Qt says why the file did not load
+
+
+def test_a_start_with_a_saved_skin_that_does_not_load_shows_the_default_layout(app, tmp_path, request):
+    (tmp_path / "state.json").write_text('{"layout": "X"}')
+    root, backend, messages = request.getfixturevalue("window")
+    assert not root.isVisible()  # no window without a skin: a layer surface must have a size
+    settle(app)
+    assert backend.layout == "C" and (root.width(), root.height()) == (WIDTH, OFFLINE)
+    assert root.isVisible() and root.property("started") is True

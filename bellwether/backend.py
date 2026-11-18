@@ -7,10 +7,11 @@ import threading
 import time
 from pathlib import Path
 
-from PySide6.QtCore import Property, QObject, Signal, Slot
+from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
 
+from . import layouts
 from .client import HerdrError, HerdrOffline
-from .settings import DEFAULT_PATH, load_position, save_position
+from .settings import DEFAULT_PATH, load_layout, load_position, save_layout, save_position, save_screen
 from .state import ATTENTION, STATES, Agent, count_states, top_state
 
 log = logging.getLogger("bellwether")
@@ -36,12 +37,14 @@ class Backend(QObject):
     changed = Signal()
     focusFailed = Signal(str, str)
     openingChanged = Signal()
+    layoutChanged = Signal()
     _snapshot = Signal(object)
     _focusDone = Signal()
 
     def __init__(self, client, interval: float = 1.0, settings_path: Path = DEFAULT_PATH, icons=None,
                  events=None, slow_interval: float = SLOW_INTERVAL, floor: float = FLOOR,
-                 after: tuple[float, ...] = AFTER, clock=time.monotonic, wait=None) -> None:
+                 after: tuple[float, ...] = AFTER, clock=time.monotonic, wait=None,
+                 skins: dict[str, Path] | None = None) -> None:
         super().__init__()
         self._clock = clock
         # wait(event, seconds) waits for a threading.Event and returns True when it is set. Tests give
@@ -64,6 +67,15 @@ class Backend(QObject):
         self._last_failure: str | None = None
         self._opening = ""  # the key of the agent that a jump is going to; "" when no jump runs
         self._saved = load_position(self._settings_path) or (-1, -1, "")
+        # The skin file of each layout that can show. Tests give their own.
+        self._skins = layouts.built_skins() if skins is None else skins
+        self._layout = load_layout(self._settings_path)
+        if self._layout is None:
+            self._layout = layouts.DEFAULT  # a file of an older version, or no file
+        elif self._layout not in self._skins:
+            # Not the saved text: a file that a person changed can hold anything.
+            log.warning("the saved layout is not available: the layout is %s", layouts.DEFAULT)
+            self._layout = layouts.DEFAULT
         self._snapshot.connect(self.apply)
         self._focusDone.connect(self._set_opening)
 
@@ -136,6 +148,30 @@ class Backend(QObject):
     def savedScreen(self) -> str:
         """The name of the screen of the saved position. "" when the file has no screen (an older version)."""
         return self._saved[2]
+
+    @Property(str, notify=layoutChanged)
+    def layout(self) -> str:
+        """The letter of the layout that the panel shows."""
+        return self._layout
+
+    @Property(QUrl, notify=layoutChanged)
+    def skinSource(self) -> QUrl:
+        """The skin file of the layout."""
+        return QUrl.fromLocalFile(str(self._skins[self._layout])) if self._layout in self._skins else QUrl()
+
+    @Property("QVariantList", constant=True)
+    def layouts(self) -> list[dict]:
+        """The five designs for the options window. `built` False: the design cannot be chosen yet."""
+        return [
+            {
+                "id": letter,
+                "name": name,
+                "description": description,
+                "built": letter in self._skins,
+                "preview": QUrl.fromLocalFile(str(layouts.PREVIEWS_PATH / f"{letter}.png")),
+            }
+            for letter, name, description in layouts.LAYOUTS
+        ]
 
     # ----- state -----
 
@@ -246,3 +282,34 @@ class Backend(QObject):
             save_position(x, y, self._settings_path, screen)
         except OSError:
             log.warning("position was not saved")
+
+    @Slot(str)
+    def saveScreen(self, screen: str) -> None:
+        """Save the screen of a panel that is at its default corner. The file then has no place, so the panel
+        is at the default corner again at the next start."""
+        try:
+            save_screen(screen, self._settings_path)
+        except OSError:
+            log.warning("position was not saved")
+
+    @Slot(str)
+    def setLayout(self, layout: str) -> None:
+        """Show a different layout now, and save it. A layout that is not built is ignored."""
+        if layout == self._layout or layout not in self._skins:
+            return
+        self._layout = layout
+        log.info("layout: %s", layout)
+        self.layoutChanged.emit()
+        try:
+            save_layout(layout, self._settings_path)
+        except OSError:
+            log.warning("layout was not saved")
+
+    @Slot()
+    def skinFailed(self) -> None:
+        """The skin file of the layout did not load: show the default layout, now and at the next start."""
+        if self._layout == layouts.DEFAULT:
+            log.error("the layout %s did not load", self._layout)
+            return
+        log.error("the layout %s did not load: the layout is %s", self._layout, layouts.DEFAULT)
+        self.setLayout(layouts.DEFAULT)

@@ -1,4 +1,7 @@
-// The floating panel, Layout C "Techno / HUD". The visual reference is design/layouts/c-hud.qml.
+// The window of the floating panel: the layer surface, its place and its screen, the drag, and the one pointer
+// handler. The state and the rules are in PanelModel.qml. The drawing is a skin (skins/<letter>.qml) that the
+// Loader below shows: the layout of the backend. The skin contract is in the spec
+// (docs/superpowers/specs/2026-11-18-bellwether-design.md, "options window and layout skins").
 import QtQuick
 import QtQuick.Window
 import org.kde.layershell as LayerShell
@@ -12,6 +15,10 @@ Window {
     // The open group and the row under the pointer, for tests and scripts.
     property alias openState: panelModel.openState
     property alias hoverRow: panelModel.hoverItem
+    // The skin that shows now. null for a moment while a different skin loads.
+    readonly property Item skin: skinLoader.item
+    // False until the first skin is there and the panel has its place: the window shows after that.
+    property bool started: false
     // The place of the panel, from the top-left corner of its screen (screenName).
     property int posX: 0
     property int posY: 0
@@ -37,30 +44,11 @@ Window {
     // screen. So a pointer event can come one frame after a move and still be relative to the old place.
     readonly property real minMoveMs: refreshRate > 0 ? Math.min(20, Math.max(4, 2000 / refreshRate)) : 16
     readonly property int edge: 16
-    readonly property int statusRowHeight: 32
-    readonly property int agentRowHeight: 28
-    readonly property int inset: 14
-    // The colour of the top status: the corner brackets and the tag in the header. Neutral with no agents
-    // and when Herdr is offline.
-    readonly property color signalColor: panel.quiet ? "#6b747d" : panel.topColor
-    // Hack, or the first monospace font that this system has.
-    readonly property string mono: {
-        var have = Qt.fontFamilies()
-        var wanted = ["Hack", "JetBrains Mono", "DejaVu Sans Mono", "Liberation Mono", "Noto Sans Mono"]
-        for (var i = 0; i < wanted.length; i++)
-            if (have.indexOf(wanted[i]) >= 0)
-                return wanted[i]
-        return "monospace"
-    }
-    readonly property color line: "#2b333b"
-    readonly property color dim: "#8a949e"
-    readonly property color ink: "#e3e9ee"
 
-    visible: true
+    // A layer surface must not have the size 0: the window shows when it has the size of its first skin.
+    visible: false
     color: "transparent"
     flags: Qt.FramelessWindowHint | Qt.WindowDoesNotAcceptFocus
-    width: frame.width
-    height: frame.height
 
     LayerShell.Window.scope: "bellwether"
     LayerShell.Window.layer: LayerShell.Window.LayerOverlay
@@ -243,7 +231,16 @@ Window {
         return null
     }
 
-    Component.onCompleted: {
+    // The window has the size of the skin. Without a skin it keeps its size.
+    function takeSize() {
+        if (skin) {
+            width = skin.implicitWidth
+            height = skin.implicitHeight
+        }
+    }
+
+    // The place at the start, when the size of the panel is known.
+    function start() {
         surfaceScreen = Screen.name
         // The saved screen. A file with no screen name, or a screen that is not there: the screen of the window.
         var saved = backend.savedScreen === "" ? null : screenNamed(backend.savedScreen)
@@ -254,6 +251,15 @@ Window {
             && backend.savedY <= home.height - height
         atDefault = !valid
         rehome(home, valid ? backend.savedX : 0, valid ? backend.savedY : 0)
+        started = true
+        visible = true
+    }
+
+    Component.onCompleted: skinLoader.load()
+    onSkinChanged: {
+        takeSize()
+        if (skin && !started)
+            start()
     }
     onWidthChanged: clampPosition()
     onHeightChanged: clampPosition()
@@ -277,438 +283,87 @@ Window {
         id: panelModel
     }
 
-    Rectangle {
-        id: frame
-        width: 320
-        height: column.height + 22
-        color: "#f00b0e11"
-        border.width: 1
-        border.color: root.line
-
-        // Corner brackets in the colour of the top status.
-        Repeater {
-            model: 4
-            Item {
-                id: bracket
-                required property int index
-                readonly property bool atRight: index % 2 === 1
-                readonly property bool atBottom: index > 1
-                x: atRight ? frame.width - 14 : 0
-                y: atBottom ? frame.height - 14 : 0
-                width: 14; height: 14
-                Rectangle { x: 0; y: bracket.atBottom ? 12 : 0; width: 14; height: 2; color: root.signalColor }
-                Rectangle { x: bracket.atRight ? 12 : 0; y: 0; width: 2; height: 14; color: root.signalColor }
-            }
+    // The layout: only drawing. It reads panelModel, and this window finds its rows by their hitRole.
+    Loader {
+        id: skinLoader
+        // The skin of the layout of the backend, with the controller as its `panel`.
+        function load() {
+            panelModel.hoverItem = null
+            setSource(backend.skinSource, {panel: panelModel})
         }
+        // Later: this handler runs inside setSource(), and the backend then asks for the default skin.
+        onStatusChanged: if (status === Loader.Error) Qt.callLater(function() { backend.skinFailed() })
+    }
 
-        Column {
-            id: column
-            x: root.inset
-            y: 11
-            width: parent.width - root.inset * 2
+    Connections {
+        target: root.skin
+        function onImplicitWidthChanged() { root.takeSize() }
+        function onImplicitHeightChanged() { root.takeSize() }
+    }
 
-            // Header: name, total, and the top status as a lamp with a word.
-            Item {
-                width: parent.width
-                height: 22
-                Text {
-                    id: nameWord
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "BELLWETHER"
-                    color: root.dim
-                    font { family: root.mono; pixelSize: 10; letterSpacing: 2; weight: Font.Bold }
-                }
-                Text {
-                    readonly property bool isTotal: true
-                    anchors.left: nameWord.right
-                    anchors.leftMargin: 12
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: root.panel.online ? "AGENTS " + root.panel.pad2(root.panel.total) : "NO LINK"
-                    color: root.dim
-                    font { family: root.mono; pixelSize: 10; letterSpacing: 1 }
-                }
-                Text {
-                    id: lampWord
-                    readonly property bool isTopTag: true
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: root.panel.topLabel.toUpperCase()
-                    color: root.signalColor
-                    font { family: root.mono; pixelSize: 10; letterSpacing: 1.5; weight: Font.Bold }
-                }
-                Rectangle {
-                    anchors.right: lampWord.left
-                    anchors.rightMargin: 6
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: 6; height: 6
-                    color: root.signalColor
-                }
-            }
+    Connections {
+        target: backend
+        function onLayoutChanged() { skinLoader.load() }
+    }
 
-            // Cell bar: one cell for each agent, in the colour of its status. The cells fill the width.
-            // With no agents, and offline: one empty track.
-            Item {
-                id: cells
-                readonly property var states: root.panel.cells
-                readonly property int n: states.length
-                readonly property real cellGap: n > 24 ? 1 : 2
-                readonly property real cell: (width - cellGap * (n - 1)) / n
-                width: parent.width
-                height: 20
-                Rectangle {
-                    readonly property bool isEmptyTrack: true
-                    visible: cells.n === 0
-                    y: 5
-                    width: parent.width
-                    height: 8
-                    color: "transparent"
-                    border.width: 1
-                    border.color: root.line
-                }
-                Repeater {
-                    model: cells.n
-                    Rectangle {
-                        required property int index
-                        readonly property string cellState: cells.states[index]
-                        readonly property bool isCell: true
-                        x: index * (cells.cell + cells.cellGap)
-                        y: 5
-                        width: cells.cell
-                        height: 8
-                        color: root.panel.stateColors[cellState]
-                    }
-                }
-            }
-
-            // Offline body: a hatched plate with one word.
-            Item {
-                visible: !root.panel.online
-                width: parent.width
-                height: 44
-                Rectangle {
-                    y: 6
-                    width: parent.width
-                    height: 32
-                    color: "transparent"
-                    border.width: 1
-                    border.color: root.line
-                    clip: true
-                    Repeater {
-                        model: 40
-                        Rectangle {
-                            required property int index
-                            x: index * 10 - 40; y: -10
-                            width: 1; height: 60
-                            rotation: 35
-                            color: "#1d242b"
-                        }
-                    }
-                    Text {
-                        anchors.centerIn: parent
-                        text: "OFFLINE"
-                        color: root.dim
-                        font { family: root.mono; pixelSize: 13; letterSpacing: 4; weight: Font.Bold }
-                    }
-                }
-            }
-
-            Repeater {
-                // The four groups stay the same items when the agents change, so a list keeps its scroll position.
-                model: root.panel.online ? 4 : 0
-
-                Column {
-                    id: groupItem
-                    required property int index
-                    readonly property var group: root.panel.groups[index]
-                    readonly property bool open: root.panel.openState === group.state
-                    readonly property bool empty: group.count === 0
-                    readonly property color tone: group.color
-                    width: column.width
-
-                    Item {
-                        id: statusRow
-                        readonly property string hitRole: "status"
-                        readonly property string stateName: groupItem.group.state
-                        width: parent.width
-                        height: root.statusRowHeight
-                        Accessible.role: Accessible.Button
-                        Accessible.name: root.panel.spokenStatus(groupItem.group)
-                        Accessible.onPressAction: root.panel.toggle(stateName)
-
-                        // The plate of the open row, with the accent at the left. A lighter plate under the pointer.
-                        Rectangle {
-                            readonly property bool hovered: root.panel.hoverItem === statusRow && !groupItem.empty
-                            visible: groupItem.open || hovered
-                            x: -6; y: 2
-                            width: parent.width + 12
-                            height: parent.height - 4
-                            color: root.panel.faded(groupItem.tone, groupItem.open ? (hovered ? 0.16 : 0.10) : 0.06)
-                            Rectangle { visible: groupItem.open; width: 2; height: parent.height; color: groupItem.tone }
-                        }
-                        // Marker: a filled square when the status has agents, an empty one when it has none.
-                        Rectangle {
-                            x: 2
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: 8; height: 8
-                            color: groupItem.empty ? "transparent" : groupItem.tone
-                            border.width: 1
-                            border.color: groupItem.empty ? "#4a535c" : groupItem.tone
-                        }
-                        Text {
-                            id: nameText
-                            x: 20
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: groupItem.group.label.toUpperCase()
-                            color: groupItem.empty ? "#68727c" : root.ink
-                            font { family: root.mono; pixelSize: 12; letterSpacing: 1.5 }
-                        }
-                        // Dotted leader between the name and the numeral.
-                        Row {
-                            anchors.left: nameText.right
-                            anchors.leftMargin: 10
-                            anchors.right: countRow.left
-                            anchors.rightMargin: 10
-                            anchors.verticalCenter: parent.verticalCenter
-                            anchors.verticalCenterOffset: 4
-                            height: 1
-                            spacing: 4
-                            clip: true
-                            Repeater {
-                                model: 40
-                                Rectangle { width: 2; height: 1; color: "#343d46" }
-                            }
-                        }
-                        // The count with two digits. The zero at the front is dim.
-                        Row {
-                            id: countRow
-                            anchors.right: parent.right
-                            anchors.verticalCenter: parent.verticalCenter
-                            Text {
-                                visible: groupItem.group.count < 10
-                                text: "0"
-                                color: "#3a444d"
-                                font { family: root.mono; pixelSize: 20; weight: Font.Bold }
-                            }
-                            Text {
-                                readonly property string countFor: statusRow.stateName
-                                text: groupItem.group.count
-                                color: groupItem.empty ? "#4a555f" : groupItem.group.attention ? groupItem.tone : root.ink
-                                font { family: root.mono; pixelSize: 20; weight: Font.Bold }
-                            }
-                        }
-                    }
-
-                    Item {
-                        visible: groupItem.open
-                        width: parent.width
-                        // More rows than fit: a line under the list says so.
-                        height: agentList.height + (agentList.longer ? 20 : 4)
-
-                        AgentList {
-                            id: agentList
-                            panel: root.panel
-                            stateName: groupItem.group.state
-                            rowHeight: root.agentRowHeight
-                            width: parent.width
-
-                            delegate: AgentRow {
-                                id: agentRow
-                                view: agentList
-
-                                Rectangle {
-                                    visible: agentRow.hovered
-                                    x: 14; y: 2
-                                    width: parent.width - 14 + 6
-                                    height: parent.height - 4
-                                    color: "#14e3e9ee"
-                                }
-                                // Tree lines from the status marker to each agent.
-                                Rectangle {
-                                    x: 5; width: 1
-                                    height: agentRow.last ? parent.height / 2 : parent.height
-                                    color: "#3a444d"
-                                }
-                                Rectangle { x: 5; y: parent.height / 2; width: 9; height: 1; color: "#3a444d" }
-                                // The icon that the Herdr app shows for the program of the agent.
-                                Image {
-                                    id: programIcon
-                                    readonly property bool isProgramIcon: true
-                                    // An icon that does not load is not shown: the row has no gap.
-                                    visible: agentRow.modelData.icon !== "" && status !== Image.Error
-                                    x: 20
-                                    width: 16
-                                    height: 16
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    sourceSize: Qt.size(16, 16)
-                                    source: agentRow.modelData.icon
-                                }
-                                Text {
-                                    id: label
-                                    x: programIcon.visible ? 44 : 20
-                                    width: Math.min(implicitWidth, detail.x - 8 - x
-                                        - (address.visible ? address.width + 6 : 0))
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: agentRow.modelData.label
-                                    color: root.ink
-                                    elide: Text.ElideRight
-                                    font { family: root.mono; pixelSize: 12 }
-                                }
-                                // The terminal address, only for rows that look the same without it.
-                                Text {
-                                    id: address
-                                    // The failure message needs the width.
-                                    visible: agentRow.modelData.address !== "" && !agentRow.failed
-                                    anchors.left: label.right
-                                    anchors.leftMargin: 6
-                                    anchors.baseline: label.baseline
-                                    text: "[" + agentRow.modelData.address + "]"
-                                    color: "#68727c"
-                                    font { family: root.mono; pixelSize: 11 }
-                                }
-                                Text {
-                                    id: detail
-                                    anchors.right: parent.right
-                                    anchors.rightMargin: agentList.longer ? 10 : 0
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: Math.min(implicitWidth, agentRow.failed ? 200 : 120)
-                                    elide: Text.ElideRight
-                                    text: agentRow.failed ? "! " + root.panel.failedMessage
-                                        : agentRow.opening ? "> opening…"
-                                        : agentRow.modelData.detail
-                                    color: agentRow.failed ? "#f28b82" : agentRow.opening ? "#8ab4f8" : root.dim
-                                    font { family: root.mono; pixelSize: 11 }
-                                }
-                            }
-
-                            // Scroll track.
-                            overlay: Component {
-                            Item {
-                                id: track
-                                readonly property int count: agentList.count
-                                readonly property real span: agentList.height - 8
-                                // One tick for each agent while a tick is 1 px or more. One bar for a longer list.
-                                readonly property bool ticks: track.count <= (track.span + 2) / 3
-                                visible: agentList.longer
-                                x: agentList.width - 3
-                                y: 4
-
-                                Column {
-                                    spacing: 2
-                                    Repeater {
-                                        model: track.visible && track.ticks ? track.count : 0
-                                        Rectangle {
-                                            required property int index
-                                            readonly property bool isScrollTick: true
-                                            // Bright for the rows on the screen.
-                                            readonly property bool lit: index >= agentList.first
-                                                && index < agentList.first + agentList.shown
-                                            width: 3
-                                            height: (track.span - 2 * (track.count - 1)) / track.count
-                                            color: lit ? "#8a949e" : "#2b333b"
-                                        }
-                                    }
-                                }
-                                Rectangle { visible: !track.ticks; width: 3; height: track.span; color: "#2b333b" }
-                                Rectangle {
-                                    visible: !track.ticks
-                                    width: 3
-                                    height: Math.max(8, track.span * agentList.height / Math.max(1, agentList.contentHeight))
-                                    y: (track.span - height) * agentList.contentY
-                                        / Math.max(1, agentList.contentHeight - agentList.height)
-                                    color: "#8a949e"
-                                }
-                            }
-                            }
-                        }
-
-                        // Scroll hint: the rows on the screen and the direction in which more rows are.
-                        Text {
-                            readonly property bool isScrollHint: true
-                            visible: agentList.longer
-                            x: 20
-                            y: agentList.height + 2
-                            text: "ROWS " + root.panel.pad2(agentList.first + 1) + "–" + root.panel.pad2(agentList.first + agentList.shown)
-                                + " / " + root.panel.pad2(agentList.count) + (agentList.atEnd ? "  ▲ SCROLL" : "  ▼ SCROLL")
-                            color: "#68727c"
-                            font { family: root.mono; pixelSize: 10; letterSpacing: 1 }
-                        }
-                    }
-                }
-            }
-
-            // The message of a failed jump when its agent has no row (the agent is gone, or Herdr is offline).
-            Text {
-                visible: root.panel.failedAlone
-                width: parent.width
-                height: 24
-                leftPadding: 2
-                verticalAlignment: Text.AlignVCenter
-                elide: Text.ElideRight
-                text: "! " + root.panel.failedMessage
-                color: "#f28b82"
-                font { family: root.mono; pixelSize: 11 }
-            }
+    // The one pointer handler of the panel. A press that moves 6 px or more drags the widget.
+    // A press that moves less is a click on the row under it: a status row opens, an agent row jumps.
+    MouseArea {
+        id: pointerArea
+        anchors.fill: parent
+        hoverEnabled: true
+        property real startX: 0
+        property real startY: 0
+        property bool moved: false
+        // Time of the last margin change. At most one change in each step (minMoveMs), so that a pointer
+        // event that comes before the compositor applies the last margin does not count the motion twice.
+        // A dropped event loses nothing: the next one uses the absolute pointer position again.
+        property double lastMoveMs: 0
+        // The row or the list of the skin under the pointer.
+        function under(point, roles) {
+            return root.skin ? root.hitAt(root.skin, point.x, point.y, roles) : null
         }
-
-        // The one pointer handler of the panel. A press that moves 6 px or more drags the widget.
-        // A press that moves less is a click on the row under it: a status row opens, an agent row jumps.
-        MouseArea {
-            id: pointerArea
-            anchors.fill: parent
-            hoverEnabled: true
-            property real startX: 0
-            property real startY: 0
-            property bool moved: false
-            // Time of the last margin change. At most one change in each step (minMoveMs), so that a pointer
-            // event that comes before the compositor applies the last margin does not count the motion twice.
-            // A dropped event loses nothing: the next one uses the absolute pointer position again.
-            property double lastMoveMs: 0
-            // The row or the list under the pointer. The search starts below this handler, in the column.
-            function under(point, roles) {
-                return root.hitAt(column, point.x - column.x, point.y - column.y, roles)
+        // lastMoveMs starts again at each press: a clock that went back must not block the drag.
+        onPressed: (mouse) => { startX = mouse.x; startY = mouse.y; moved = false; lastMoveMs = 0 }
+        onPositionChanged: (mouse) => {
+            if (!pressed) {
+                root.panel.hoverItem = under(mouse, ["status", "agent"])
+                return
             }
-            // lastMoveMs starts again at each press: a clock that went back must not block the drag.
-            onPressed: (mouse) => { startX = mouse.x; startY = mouse.y; moved = false; lastMoveMs = 0 }
-            onPositionChanged: (mouse) => {
-                if (!pressed) {
-                    root.panel.hoverItem = under(mouse, ["status", "agent"])
-                    return
-                }
-                var dx = mouse.x - startX
-                var dy = mouse.y - startY
-                if (!moved && Math.abs(dx) + Math.abs(dy) < 6)
-                    return
-                moved = true
-                root.panel.hoverItem = null
-                var now = Date.now()
-                if (now - lastMoveMs < root.minMoveMs)
-                    return
-                lastMoveMs = now
-                root.atDefault = false
-                // The panel follows the pointer on all the screens. The surface stays on its output until the release.
-                var place = root.dragPlace(root.screens(), root.home.x + root.posX + dx, root.home.y + root.posY + dy,
-                                           root.width, root.height)
-                root.posX = place.x - root.home.x
-                root.posY = place.y - root.home.y
+            var dx = mouse.x - startX
+            var dy = mouse.y - startY
+            if (!moved && Math.abs(dx) + Math.abs(dy) < 6)
+                return
+            moved = true
+            root.panel.hoverItem = null
+            var now = Date.now()
+            if (now - lastMoveMs < root.minMoveMs)
+                return
+            lastMoveMs = now
+            root.atDefault = false
+            // The panel follows the pointer on all the screens. The surface stays on its output until the release.
+            var place = root.dragPlace(root.screens(), root.home.x + root.posX + dx, root.home.y + root.posY + dy,
+                                       root.width, root.height)
+            root.posX = place.x - root.home.x
+            root.posY = place.y - root.home.y
+        }
+        onReleased: (mouse) => {
+            if (moved) {
+                moved = false
+                root.settle()
+                return
             }
-            onReleased: (mouse) => {
-                if (moved) {
-                    moved = false
-                    root.settle()
-                    return
-                }
-                var row = under(mouse, ["status", "agent"])
-                if (row && row.hitRole === "status")
-                    root.panel.toggle(row.stateName)
-                else if (row)
-                    root.panel.jump(row.key)
-            }
-            onExited: root.panel.hoverItem = null
-            onWheel: (wheel) => {
-                var list = under(wheel, ["scroll"])
-                if (list)
-                    list.scrollBy(wheel.pixelDelta.y, wheel.angleDelta.y)
-            }
+            var row = under(mouse, ["status", "agent"])
+            if (row && row.hitRole === "status")
+                root.panel.toggle(row.stateName)
+            else if (row)
+                root.panel.jump(row.key)
+        }
+        onExited: root.panel.hoverItem = null
+        onWheel: (wheel) => {
+            var list = under(wheel, ["scroll"])
+            if (list)
+                list.scrollBy(wheel.pixelDelta.y, wheel.angleDelta.y)
         }
     }
 }
