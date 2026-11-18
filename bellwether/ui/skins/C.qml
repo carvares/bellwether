@@ -15,44 +15,30 @@ Item {
     // The colour of the top status: the corner brackets and the tag in the header. Neutral with no agents
     // and when Herdr is offline.
     readonly property color signalColor: panel.quiet ? "#6b747d" : panel.topColor
-    // Hack, or the first monospace font that this system has.
-    readonly property string mono: {
-        var have = Qt.fontFamilies()
-        var wanted = ["Hack", "JetBrains Mono", "DejaVu Sans Mono", "Liberation Mono", "Noto Sans Mono"]
-        for (var i = 0; i < wanted.length; i++)
-            if (have.indexOf(wanted[i]) >= 0)
-                return wanted[i]
-        return "monospace"
-    }
-    readonly property color line: "#2b333b"
-    readonly property color dim: "#8a949e"
-    readonly property color ink: "#e3e9ee"
+    readonly property string mono: theme.fontFamily
+    readonly property color line: theme.lineColor
+    readonly property color dim: theme.dimColor
+    readonly property color ink: theme.textColor
 
     implicitWidth: frame.width
     implicitHeight: frame.height
+
+    CTheme { id: theme }
 
     Rectangle {
         id: frame
         width: 320
         height: column.height + 22
-        color: "#f00b0e11"
-        border.width: 1
-        border.color: skin.line
+        color: theme.panelColor
+        border.width: theme.frameWidth
+        border.color: theme.frameColor
 
         // Corner brackets in the colour of the top status.
-        Repeater {
-            model: 4
-            Item {
-                id: bracket
-                required property int index
-                readonly property bool atRight: index % 2 === 1
-                readonly property bool atBottom: index > 1
-                x: atRight ? frame.width - 14 : 0
-                y: atBottom ? frame.height - 14 : 0
-                width: 14; height: 14
-                Rectangle { x: 0; y: bracket.atBottom ? 12 : 0; width: 14; height: 2; color: skin.signalColor }
-                Rectangle { x: bracket.atRight ? 12 : 0; y: 0; width: 2; height: 14; color: skin.signalColor }
-            }
+        Loader {
+            id: brackets
+            anchors.fill: parent
+            sourceComponent: theme.decoration
+            Binding { target: brackets.item; property: "tone"; value: skin.signalColor }
         }
 
         Column {
