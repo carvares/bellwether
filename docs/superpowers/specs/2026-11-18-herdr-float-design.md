@@ -1,7 +1,7 @@
 # herdr-float: design
 
 Date: 2026-11-18
-Status: built. The data source changed on 2026-11-18 (see the next section).
+Status: built. The data source changed on 2026-11-18. The layout and the jump changed on 2026-11-18 (see the next two sections).
 
 ## Change on 2026-11-18: data source is the Herdr desktop app
 
@@ -14,9 +14,49 @@ The agents of the user are in the Herdr desktop app (`herdr-app`, the window) an
 - **Agent row.** A terminal with a status is an agent. A terminal with status `null` is a plain shell and is not a row. The key of a row is the terminal address (for example `t11`). The name is the terminal name, else the program (`app`), else the address. The place text is the space name, and the tab name when the space has more than one tab.
 - **Sub-agents.** The entries in `sub_agents` are agents too (terminals that an agent started). They are rows. As in the agent list of the app, a sub-agent that reports `done` counts as `idle`. No real sub-agent was available on 2026-11-18, so the widget accepts two shapes for these entries: the fields of a terminal in `herdr-app ls` (`terminal`), and the fields of `herdr-core ls --json` (`address`, `state`; only `live` entries count). A terminal that is listed in a tab and also below a parent is one row with the sub-agent status. This is not verified with real data.
 - **States.** Four: `blocked`, `done`, `working`, `idle`. `done` means that the agent finished while the person did not look; the app changes it to `idle` after the person looks. There is no `unknown` state. A program can report the raw word `error`; the widget counts it as `blocked`, as the agent list of the app does. A different word that is not known: the row is skipped and the word is logged one time.
-- **Fallback.** When `herdr-app ls` gives no valid answer (window closed, app not installed, timeout), the widget runs `herdr-core ls --json`. A row is a terminal with `state` `live` and a status. Name: the `agent` field. No place text. A row with a `parent` is a sub-agent (`done` counts as `idle`). The status is the word of the program itself, so `done` shows also when the person saw the agent before. If herdr-core does not answer either, the pill shows "offline".
-- **Jump.** `herdr-app do agent.focus {"terminal": "<address>"}`. With herdr-core as the source there is no window: the row shows "Herdr app is not open" and no command runs.
+- **Fallback.** When `herdr-app ls` gives no valid answer (window closed, app not installed, timeout), the widget runs `herdr-core ls --json`. A row is a terminal with `state` `live` and a status. Name: the `agent` field. No place text. A row with a `parent` is a sub-agent (`done` counts as `idle`). The status is the word of the program itself, so `done` shows also when the person saw the agent before. If herdr-core does not answer either, the panel shows "offline".
+- **Jump.** `herdr-app do agent.focus {"terminal": "<address>"}`. The jump also starts a closed app and raises the window (see the next section).
 - **Start.** `scripts/start.sh` starts the widget. The folder `mod/` is a Herdr app mod that runs this script when the app starts; the user installs it (see the README). The `plugin/` folder for the `herdr` 0.9 program is removed.
+
+## Change on 2026-11-18: vertical status list and open-the-app click
+
+Request of the user: a larger interface with a vertical list of the states and their counts, rows that expand to show their agents, and a click on an agent that opens the Herdr app also when it is closed or minimized.
+
+**Interface (`ui/Main.qml`).**
+
+- A panel 240 px wide. Four status rows (30 px), always visible, in the order Blocked, Done, Working, Idle: colour dot, name, count at the right edge. A row with 0 is dim. `blocked` and `done` show a coloured, bold count when they are not 0.
+- A click on a row with agents opens it: its agents show below it (26 px each, indented): name at the left, space text at the right. A second click closes it. One row is open at a time. A row with 0 does nothing.
+- An open group shows 8 agent rows at most. The mouse wheel scrolls the others. A thin bar at the right is the scroll indicator. The four group items are fixed, so the scroll position stays when the agents change.
+- The open group closes when its count becomes 0, and when Herdr goes offline. Offline, the panel shows the one line "offline".
+- One pointer handler covers the panel. A press that moves 6 px or more is a drag (the rules of the first design). A press that moves less is a click on the row below the pointer. So a drag can start on any row.
+- The backend gives `groups`: for each state `{state, label, count, attention, agents: [{key, name, workspace}]}`. `counters` stays for the tray. The flat `agents` property is removed.
+- Measured sizes (image of the widget's own window): closed 240 x 136; 3 agents open 240 x 214; 12 agents open 240 x 344; offline 240 x 46; with the error line + 24.
+
+**Jump (`client.py`, `window.py`).** A click on an agent row does these steps on a worker thread:
+
+1. `herdr-app ls`. If it does not answer, the app is closed: start it and ask again each 0.25 s, for 6 s at most. Failure: "Herdr app did not start".
+2. `herdr-app do agent.focus`. A window that just started answers `ls` before it has its terminals, so after a start this step is tried for 2 s. The reply `no running terminal` gives "agent is gone".
+3. Raise the window. Failure: "could not raise the window".
+
+- **Start.** `systemd-run --user --quiet --collect --slice=app.slice -- <herdr-app>`. Plasma starts the app the same way (a unit of the user's systemd in `app.slice`, Exec `herdr-app` from `herdr-app.desktop`). The app gets the environment of the session and not that of the widget (a widget that was started from a Herdr terminal has `HC_*` variables). The app is not a child of the widget and has none of its files.
+- **Raise.** KWin has the window runner of KRunner on D-Bus (`org.kde.KWin`, `/WindowsRunner`, `org.kde.krunner1`). `Match "herdr-app"` gives the windows; `getWindowInfo` (path `/KWin`) confirms the exact class `herdr-app`; `Run "0_<window id>"` restores the window from minimized, goes to its desktop and activates it; a second `getWindowInfo` confirms `minimized: false`. The widget calls it with `busctl --user --json=short`. No KWin script and no file are necessary.
+- **Fallback for the raise.** If KWin did not raise the window, the widget runs plain `herdr-app` (the same start command). The app documentation says that this "opens or raises the window".
+- While a jump runs, the backend property `opening` holds its terminal address. The row shows "opening…". More clicks on agents are ignored until the jump ends, so the app cannot start two times.
+- A failed jump shows its message for 3 seconds in the agent row. If the agent changed its state, its new group opens. If the agent has no row (gone, or offline), the message shows in a line at the bottom of the panel.
+- Logs: `jump agent=<address> step=<launch|wait|show|raise> ...` with exit codes. No command output.
+
+**Measured on 2026-11-18** (KWin on Wayland, focus stealing prevention at its default "low", one virtual desktop, window state read from KWin with a read-only KWin script):
+
+| Method | Window behind a different window | Window minimized | App closed |
+|---|---|---|---|
+| Plain `herdr-app` (no activation token) | raised and active, 2 of 2 | restored and active, 1 of 1 | starts the app; the new window is active |
+| KWin window runner `Run` | raised and active in 8 ms | restored and active | not applicable (no window) |
+| The real jump (`HerdrClient.focus_agent`) | ok, 0.03 s, 2 of 2 | ok, 0.03 s, 2 of 2 | ok, 0.6 s, 2 of 2 |
+
+- Not tried: an xdg-activation token from the click on the widget (PySide6 has no public call for it), and a KWin script (the window runner does the same with no script file).
+- Not tested: a window on a different virtual desktop (this machine has one desktop).
+- KWin is the first method because its result can be read back and it does not depend on the focus rules of the desktop.
+- The app window closed 3 times in the tests. The 5 live terminals of herdr-core stayed alive each time. After a restart the app showed the same space, tab and agent as before the close.
 
 The sections below are the first design. Lines that the change made false are corrected.
 Sections that describe the `herdr` 0.9 program are kept as history and say so.
@@ -36,7 +76,7 @@ It lets the user jump to an agent.
 | Scope | The Herdr desktop app that uses the default folder `~/.config/herdr-app`, and the default herdr-core. |
 | States | Four counters, one for each state of the app: `blocked`, `done`, `working`, `idle`. No state is merged into another. |
 | Attention | `blocked` and `done` use the attention colour. |
-| Interaction | Compact counters. A click expands an agent list. A click on an agent shows it in the Herdr app. |
+| Interaction | A vertical list of the four states with counts. A click on a state shows its agents. A click on an agent opens the Herdr app on it. |
 | Tray | A system tray icon. Left click hides or shows the widget. The menu has "Hide widget" / "Show widget" and "Quit". |
 | Stack | Python, Qt6 (PySide6), KDE layer-shell library. PySide6 comes from PyPI (`pyside6-essentials`), pinned to the minor version of the system Qt (6.12), because `sudo` was not available to install the system package. The layer-shell library comes from the system package `layer-shell-qt`. A system Qt upgrade to a new minor version can break the load of the layer-shell QML module until the pin moves too. |
 | Platform | Linux, KDE Plasma on Wayland. No other platform. |
@@ -125,7 +165,7 @@ Tested against Herdr 0.9.5 (protocol 22) with `spike/wire.py` and a structure-on
 
 ## Not verified
 
-3. A method to raise the Herdr app window after a jump. This test needs the user and a live agent. If the test fails, the known limit stays.
+3. A method to raise the Herdr app window after a jump. Done on 2026-11-18: see "Change on 2026-11-18: vertical status list and open-the-app click".
 
 ## Parts
 
@@ -134,10 +174,11 @@ Each part has one job.
 | Part | Job | Depends on |
 |---|---|---|
 | `herdr_float/state.py` | Convert the rows of `herdr-app ls` or `herdr-core ls --json` to a sorted agent list. Return the four counts. No reads of Herdr. | nothing |
-| `herdr_float/client.py` | Run `herdr-app` (or `herdr-core` as the fallback). Return the agents or an error. Run the jump command. | `state.py`, the two programs |
+| `herdr_float/client.py` | Run `herdr-app` (or `herdr-core` as the fallback). Return the agents or an error. Run the jump: start a closed app, show the agent, raise the window. | `state.py`, `window.py`, the two programs, `systemd-run` |
+| `herdr_float/window.py` | Ask KWin to restore and activate the app window. | `busctl`, KWin |
 | `herdr_float/settings.py` | Save and load the window position. | nothing |
-| `herdr_float/backend.py` | Qt object. Reads a snapshot each second. Gives counters and agents to the interface. | `client.py`, `state.py`, `settings.py` |
-| `herdr_float/ui/Main.qml` | Layer-shell overlay window, compact pill, expanded list, drag. | `backend.py` |
+| `herdr_float/backend.py` | Qt object. Reads a snapshot each second. Gives counters and status groups to the interface. Runs one jump at a time on a worker thread. | `client.py`, `state.py`, `settings.py` |
+| `herdr_float/ui/Main.qml` | Layer-shell overlay window, status rows, agent rows of the open group, drag. | `backend.py` |
 | `herdr_float/tray.py` | System tray icon and menu. The one source of the state colours. | Qt, `backend.py` |
 | `herdr_float/__main__.py` | Connect the parts. Start the Qt application. | all parts |
 | `scripts/start.sh` | Starts the widget as an independent process. | nothing |
@@ -164,20 +205,11 @@ Push updates (`herdr-core` has an event stream) are a later option, only if the 
 
 ## Interface
 
-**Compact pill**
+**Status list and agent rows**
 
-- Four counters in this order: `blocked`, `done`, `working`, `idle`.
-- Each counter has a colour dot and a number.
-- A counter with zero is dim.
-- `blocked` and `done` use the attention colour when they are not zero.
+The first design had a horizontal pill and one list below it. The section "Change on 2026-11-18: vertical status list and open-the-app click" describes the interface that replaced them.
 
-**Expanded list**
-
-- A click on the pill opens the list. A second click closes it.
-- Each row shows the agent name (or the program if there is no name), the state, and the space (with the tab name when the space has more than one tab).
-- Sort order: `blocked`, `done`, `working`, `idle`. Then by name.
-- A click on a row runs `herdr-app do agent.focus` for that terminal. The list closes.
-- With no agents, the list shows "No agents".
+- Sort order of the agents in a group: by name.
 
 **Window**
 
@@ -201,10 +233,10 @@ Push updates (`herdr-core` has an event stream) are a later option, only if the 
 
 | Case | Behaviour |
 |---|---|
-| The app window is closed | The widget shows the agents that herdr-core reports. A click on a row shows "Herdr app is not open". |
-| The app and herdr-core do not answer | The pill shows "offline" in grey. The widget reads again each second. |
+| The app window is closed | The widget shows the agents that herdr-core reports. A click on an agent starts the app and shows the agent. |
+| The app and herdr-core do not answer | The panel shows "offline" in grey. The widget reads again each second. |
 | A reply is not valid | The widget uses the next source, or shows "offline". It writes one log line when the source changes. |
-| The jump command fails | The row shows a short error for 3 seconds. |
+| The jump fails | The agent row, or a line at the bottom of the panel, shows a short error for 3 seconds. |
 | A second widget starts | The second process exits. One widget only. |
 
 Logs go to `~/.local/state/herdr-float/herdr-float.log`.
@@ -214,15 +246,17 @@ Logs contain terminal addresses, states and counts only. They do not contain nam
 ## Tests
 
 - `state.py`: pytest unit tests. Zero, one and many agents. Rows that are not valid. Sort order. Each of the four states. Sub-agents. Rows of herdr-core.
-- `client.py`: pytest with a fake command runner. No test runs the real programs. Normal flow, fallback, offline, invalid data, the jump argument list and its errors.
+- `client.py`: pytest with a fake command runner. No test runs the real programs. Normal flow, fallback, offline, invalid data, and each branch of the jump: window visible, minimized, app closed, app does not start, raise fails, agent gone.
+- `backend.py` and `Main.qml`: the groups, one jump at a time, and pointer clicks on the real QML off screen.
 - Live check on the desktop with real agents: each state, expand, jump, drag, restart, Herdr stopped and started.
 
 ## Known limits
 
-- The jump shows the agent inside the Herdr app. It possibly does not raise the app window, because Wayland blocks an application from activating another application's window.
+- The jump raises the app window through KWin, so it works on KDE Plasma only. A window on a different virtual desktop was not tested.
 - After a jump the person looks at the agent, so the app changes `done` to `idle`. This is the expected Herdr behaviour.
 - The drag can jitter. The pointer positions are relative to the surface, and the surface moves one frame late. A person has not yet seen this on the screen.
-- The list closes when Herdr goes offline. Decision of 2026-11-18.
+- The open group closes when Herdr goes offline. Decision of 2026-11-18.
+- An open group can make the panel longer than the space below it. The panel then moves up and does not move back when the group closes.
 
 ## Not in scope
 

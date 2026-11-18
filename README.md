@@ -86,13 +86,18 @@ If the empty block stays in the window after that, remove it from your layout in
 
 ## Use
 
-- The pill shows four counts: blocked, done, working, idle. They are the states that the Herdr app shows.
-- "done" means that an agent finished while you did not look at it. It becomes "idle" after you look at it in the app.
+- The panel shows four rows: Blocked, Done, Working, Idle. Each row shows the number of agents in that state. They are the states that the Herdr app shows.
+- "Done" means that an agent finished while you did not look at it. It becomes "Idle" after you look at it in the app.
 - A terminal that runs no agent (a plain shell) is not counted.
-- Click the pill to open the agent list. Click the pill again to close it.
-- Each row shows the agent, its state, and its space (with the tab name when the space has more than one tab).
-- Click an agent in the list to go to it in the Herdr app.
-- Drag the pill to move it. The widget saves the position.
+- Click a row to show its agents below it. Click the row again to hide them. Only one row is open at a time. A row with 0 agents does not open.
+- Each agent line shows the agent and its space (with the tab name when the space has more than one tab).
+- An open row shows 8 agents at most. Turn the mouse wheel on the list to see the others.
+- Click an agent to go to it. The Herdr app window comes to the front and shows that agent:
+  - If the window is behind other windows or minimized, the widget brings it to the front.
+  - If the app is closed, the widget starts it. This takes about 1 second. The line shows "opening…" during that time.
+  - During a jump, more clicks on agents do nothing.
+- If a jump fails, the line shows a short message for 3 seconds: "Herdr app did not start", "could not raise the window", "agent is gone" or "Herdr is offline". If the agent has no line any more, the message shows at the bottom of the panel.
+- Drag the panel to move it. You can start the drag on any row. The widget saves the position.
 - Click the tray icon to hide or show the widget.
 - Right-click the tray icon to open the menu with "Quit".
 - The colour of the tray icon shows the most important state that has agents.
@@ -102,11 +107,17 @@ If the empty block stays in the window after that, remove it from your layout in
 Your agents continue to run in herdr-core. The widget then reads herdr-core:
 
 - The counts can be different from the counts of the app. A "done" agent that you looked at before stays "done". Terminals that the app does not show are counted too.
-- The rows show the program name only, with no space name.
-- A click on a row shows "Herdr app is not open". Open the app to go to an agent.
+- The agent lines show the program name only, with no space name.
+- A click on an agent starts the Herdr app and shows that agent.
 
-The pill shows "offline" when the app and herdr-core do not answer.
-The list closes when the widget goes offline, and a click on the pill does nothing then.
+The panel shows "offline" when the app and herdr-core do not answer.
+An open row closes when the widget goes offline.
+
+### How the widget opens the app window
+
+- The widget asks KWin (the window manager of Plasma) to restore and activate the window. It uses the program `busctl` for this.
+- If KWin does not do it, the widget runs plain `herdr-app`. The app then raises its own window.
+- The widget starts a closed app with `systemd-run --user`, as the desktop does. The app does not stop when the widget stops.
 
 ## Files
 
@@ -124,11 +135,12 @@ The list closes when the widget goes offline, and a click on the pill does nothi
 - The widget looks for `herdr-app` and `herdr-core` one time, at its start. If you install one of them later, start the widget again.
 - The widget reads a new list one time each second. One read takes 3 to 14 ms.
 - The widget works on KDE Plasma on Wayland only.
-- The jump shows the agent inside the Herdr app. It possibly does not raise the app window. This is not tested.
-- The jump was run for real one time, to the agent that had the focus already. The app accepted the command. A jump to an agent in a different space or tab is not yet checked by a person.
+- The jump was tested on 2026-11-18 on this machine (one virtual desktop): window behind a different window, window minimized, app closed. A window on a different virtual desktop was not tested.
+- The jump needs `busctl` and `systemd-run` (parts of systemd) and KWin. Without `systemd-run` the widget cannot start a closed app.
+- A jump to a "done" agent changes it to "idle", because you then look at it.
 - Sub-agents (terminals that an agent starts with `hc run`) are read as the documentation of the app describes them. This was not checked with real data: no real sub-agent was available. If the real data has a different shape, sub-agents are not counted.
 - An agent that reports "error" is counted as blocked, as in the agent list of the app.
-- The state when the app window is closed was tested with a simulation only (an empty app folder), not with the real window closed.
 - A person has not yet checked the look on the screen. The checks used an image of the widget's own window.
-- A person has not yet dragged the pill with a real mouse. The drag can jitter.
+- A person has not yet dragged the panel or clicked its rows with a real mouse. The checks used synthesized pointer events. The drag can jitter.
 - A person has not yet checked the widget above full-screen windows.
+- When an open row makes the panel longer than the space below it, the panel moves up. It does not move back down when the row closes.
