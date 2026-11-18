@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
 from pathlib import Path
 
@@ -12,6 +13,11 @@ from .settings import DEFAULT_PATH, load_position, save_position
 from .state import ATTENTION, STATES, Agent, count_states, top_state
 
 log = logging.getLogger("herdr_float")
+
+
+def _natural(address: str) -> list:
+    """A sort key that reads the numbers of an address as numbers: "t2" is before "t10"."""
+    return [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", address)]
 
 
 class Backend(QObject):
@@ -77,7 +83,9 @@ class Backend(QObject):
                 "address": "",
                 "spoken": spoken + (f" in {a.workspace}" if a.workspace else ""),
             })
-        rows.sort(key=lambda row: (row["label"].lower(), row["key"]))  # The order of the text that shows.
+        # Agents with a name first, then the order of the text that shows, then the address (t2 before t10).
+        named = {a.key for a in agents if a.name}
+        rows.sort(key=lambda row: (row["key"] not in named, row["label"].lower(), _natural(row["key"])))
         looks = [(row["icon"], row["label"], row["detail"]) for row in rows]
         for row, look in zip(rows, looks):
             if looks.count(look) > 1 and row["label"] != row["key"]:

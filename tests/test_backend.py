@@ -268,17 +268,38 @@ def test_top_state_follows_the_priority_of_the_user(backend):
     assert backend.topState == "offline"
 
 
-def test_rows_of_a_group_are_in_the_order_of_the_label_that_shows_and_then_the_address(with_icons):
+def test_rows_of_a_group_show_the_named_agents_first_and_then_the_others(with_icons):
     with_icons.apply([
-        Agent("t1", "idle", "", "zeta", "pi"),  # shows "zeta"
-        Agent("t2", "idle", "Mid", "alpha", "pi"),  # shows "Mid"
-        Agent("t3", "idle", "", "alpha", "claude-code"),  # shows "alpha"
-        Agent("t5", "idle", "", "", "pi"),  # shows "t5"
-        Agent("t4", "idle", "", "alpha", "pi"),  # shows "alpha"
+        Agent("t1", "idle", "", "zeta", "pi"),  # no name: shows "zeta"
+        Agent("t6", "idle", "zed", "alpha", "pi"),
+        Agent("t3", "idle", "", "alpha", "claude-code"),  # no name: shows "alpha"
+        Agent("t5", "idle", "", "", "pi"),  # no name: shows "t5"
+        Agent("t2", "idle", "Mid", "alpha", "pi"),
+        Agent("t4", "idle", "", "Beta", "pi"),  # no name: shows "Beta"
     ])
     assert [(r["key"], r["label"]) for r in rows_of(with_icons, "idle")] == [
-        ("t3", "alpha"), ("t4", "alpha"), ("t2", "Mid"), ("t5", "t5"), ("t1", "zeta"),
+        ("t2", "Mid"), ("t6", "zed"), ("t3", "alpha"), ("t4", "Beta"), ("t5", "t5"), ("t1", "zeta"),
     ]
+
+
+def test_rows_with_the_same_text_are_in_the_natural_order_of_the_address(with_icons):
+    with_icons.apply([
+        Agent("t10", "idle", "", "api", "pi"),
+        Agent("t2", "idle", "", "api", "pi"),
+        Agent("t1b", "idle", "", "api", "pi"),
+        Agent("t12", "idle", "rev", "api", "pi"),
+        Agent("t9", "idle", "Rev", "api", "pi"),
+        Agent("t1", "idle", "", "api", "pi"),
+    ])
+    rows = rows_of(with_icons, "idle")
+    assert [r["key"] for r in rows] == ["t9", "t12", "t1", "t1b", "t2", "t10"]
+    # The address shows on the rows that look the same, also after the sort.
+    assert [r["address"] for r in rows] == ["", "", "t1", "t1b", "t2", "t10"]
+
+
+def test_a_named_agent_is_first_also_without_icons(backend):
+    backend.apply([Agent("t1", "idle", "", "a", "codex"), Agent("t2", "idle", "zoe", "a", "codex")])
+    assert [r["label"] for r in rows_of(backend, "idle")] == ["zoe", "codex"]
 
 
 def test_rows_without_icons_are_in_the_order_of_their_text(backend):

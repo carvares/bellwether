@@ -288,14 +288,14 @@ def test_agent_rows_show_the_icon_of_the_program_and_no_program_word(app, window
     click(app, root, rows(root, "status")[2])
     root.setProperty("hoverRow", None)
     settle(app)
-    assert [r.property("key") for r in rows(root, "agent")] == ["t2", "t3", "t1"]
+    assert [r.property("key") for r in rows(root, "agent")] == ["t1", "t2", "t3"]  # the agent with a name is first
     icons = [i for i in walk(root.contentItem()) if i.property("isProgramIcon") and i.isVisible()]
     assert [(i.width(), i.height()) for i in icons] == [(16, 16)] * 3
     image = root.grabWindow()
     centres = [i.mapToScene(QPointF(8, 8)).toPoint() for i in icons]
-    assert [image.pixelColor(c).name() for c in centres] == ["#d97757", "#d97757", "#e8eaed"]
+    assert [image.pixelColor(c).name() for c in centres] == ["#e8eaed", "#d97757", "#d97757"]
     texts = visible_texts(root)
-    assert [t for t in texts if t in ("rev", "Main") or "t" in t] == ["Main", "[t2]", "Main", "[t3]", "rev", "Main"]
+    assert [t for t in texts if t in ("rev", "Main") or "t" in t] == ["rev", "Main", "Main", "[t2]", "Main", "[t3]"]
     assert "claude-code" not in texts and "pi" not in texts
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
