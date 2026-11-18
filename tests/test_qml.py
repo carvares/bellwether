@@ -1,10 +1,12 @@
 """Smoke test of the real Main.qml, loaded the same way as herdr_float/__main__.py (off screen)."""
+import time
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import qInstallMessageHandler
+from PySide6.QtCore import QPointF, Qt, qInstallMessageHandler
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickWindow
+from PySide6.QtTest import QTest
 
 from herdr_float.__main__ import IMPORT_PATH, UI_PATH
 from herdr_float.backend import Backend
@@ -52,23 +54,120 @@ def window(app, fake_client, tmp_path):
     assert backend._thread is None
 
 
-def test_main_qml_loads_and_follows_the_backend(app, window):
+def rows(root, kind):
+    """The visible rows of one kind ("status" or "agent"), in the order on the screen."""
+    return [i for i in walk(root.contentItem()) if i.property("rowKind") == kind and i.isVisible()]
+
+
+def settle(app):
+    """Deliver the events and let the items take their places (the layout runs before a frame)."""
+    for _ in range(5):
+        app.processEvents()
+        time.sleep(0.01)
+
+
+def click(app, root, item):
+    """A real pointer click (press and release) in the middle of a row."""
+    center = item.mapToScene(QPointF(item.width() / 2, item.height() / 2)).toPoint()
+    QTest.mouseClick(root, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, center)
+    settle(app)
+
+
+AGENTS = [
+    Agent("t1", "blocked", "rev", "Main"),
+    Agent("t2", "working", "ana", "api / 1"),
+    Agent("t3", "working", "bob", ""),
+]
+
+
+def test_main_qml_shows_four_status_rows_and_opens_one_group_at_a_time(app, window):
     root, backend, messages = window
+    backend.apply(AGENTS)
+    settle(app)
+    status = rows(root, "status")
+    assert [r.property("stateName") for r in status] == ["blocked", "done", "working", "idle"]
+    assert (root.width(), root.height()) == (240, 136)
+    assert rows(root, "agent") == []
+
+    click(app, root, status[2])
+    assert root.property("openState") == "working"
+    assert [r.property("key") for r in rows(root, "agent")] == ["t2", "t3"]
+    assert root.height() == 136 + 2 * 26
+
+    click(app, root, status[0])  # a second group closes the first
+    assert root.property("openState") == "blocked"
+    assert [r.property("key") for r in rows(root, "agent")] == ["t1"]
+
+    click(app, root, status[1])  # a group without agents does not open, and the open group stays
+    assert root.property("openState") == "blocked"
+
+    click(app, root, status[0])  # a second click closes the group
+    assert root.property("openState") == ""
+    assert rows(root, "agent") == []
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
-    backend.apply([Agent("t1", "blocked", "rev", "Main")])
-    root.setProperty("expanded", True)
-    app.processEvents()
-    assert root.width() == 300
 
+def test_a_click_on_an_agent_row_jumps_one_time(app, window):
+    root, backend, messages = window
+    backend.apply(AGENTS)
+    settle(app)
+    click(app, root, rows(root, "status")[2])
+    click(app, root, rows(root, "agent")[1])
+    backend._focusDone.emit()  # no thread in this test: wait for nothing
+    for _ in range(200):
+        settle(app)
+        if backend._client.focused:
+            break
+        time.sleep(0.005)
+    assert backend._client.focused == ["t3"]
+    assert root.property("openState") == "working"
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def test_the_open_group_closes_when_it_is_empty_or_herdr_is_offline(app, window):
+    root, backend, messages = window
+    backend.apply(AGENTS)
+    settle(app)
+    click(app, root, rows(root, "status")[0])
+    assert root.property("openState") == "blocked"
+    backend.apply(AGENTS[1:])  # the one blocked agent is gone
+    settle(app)
+    assert root.property("openState") == ""
+
+    click(app, root, rows(root, "status")[2])
+    assert root.property("openState") == "working"
     backend.apply(None)
-    app.processEvents()
-    assert root.property("expanded") is False
-
-    items = list(walk(root.contentItem()))
-    agent_list = next(i for i in items if i.property("failedKey") is not None)
-    offline_text = next(i for i in items if i.property("text") == "offline")
-    assert backend.online is False
-    assert agent_list.isVisible() is False
+    settle(app)
+    assert root.property("openState") == ""
+    assert rows(root, "status") == [] and rows(root, "agent") == []
+    offline_text = next(i for i in walk(root.contentItem()) if i.property("text") == "offline")
     assert offline_text.isVisible() is True
+    assert root.height() == 46
+    backend.apply(AGENTS)  # back online: the group does not open by itself
+    settle(app)
+    assert root.property("openState") == ""
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def test_a_failed_jump_shows_its_message_where_the_agent_is_now(app, window):
+    root, backend, messages = window
+    backend.apply(AGENTS)
+    settle(app)
+
+    def texts():
+        return [i.property("text") for i in walk(root.contentItem()) if i.isVisible() and i.property("text")]
+
+    backend.focusFailed.emit("t2", "could not raise the window")
+    settle(app)
+    assert root.property("openState") == "working"  # the group of the agent opens
+    assert texts().count("could not raise the window") == 1
+    backend.apply([Agent("t1", "blocked", "rev", "Main"), Agent("t2", "idle", "ana", "api / 1")])
+    settle(app)
+    assert root.property("openState") == "idle"  # the agent changed its state: the message follows it
+    assert texts().count("could not raise the window") == 1
+    backend.apply([Agent("t1", "blocked", "rev", "Main")])  # the agent is gone: the line at the bottom
+    settle(app)
+    assert root.property("openState") == ""
+    assert texts().count("could not raise the window") == 1
+    assert root.height() == 136 + 24
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
