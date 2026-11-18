@@ -15,12 +15,12 @@ from .state import ATTENTION, STATES, Agent, count_states, top_state
 
 log = logging.getLogger("herdr_float")
 
-# Seconds between two reads while the event stream is healthy. Each change comes as an event, so these
-# reads only repair a missed one. With no healthy stream, `interval` (one second) is used.
-SLOW_INTERVAL = 5.0
-# The shortest time from the start of one read to the start of the next.
-# Titles can change ten times each second while an agent works: this keeps the reads at ten each second.
-FLOOR = 0.1
+# Seconds between two reads while the event stream is healthy. The changes come as events, so these reads
+# only repair a missed one. With no healthy stream, `interval` (one second) is used.
+SLOW_INTERVAL = 2.0
+# The shortest time from the start of one read to the start of the next read that an event starts.
+# Titles can change ten times each second while an agent works: this keeps the reads at four each second.
+FLOOR = 0.25
 # After a wake: the waits before more reads. The app shows some changes up to 0.5 s (one time 1.5 s) later
 # than herdr-core tells of them. The reads come 0.15, 0.4, 0.55, 1.0 and 1.6 s after the read of the wake.
 AFTER = (0.15, 0.25, 0.15, 0.45, 0.6)
@@ -28,7 +28,8 @@ AFTER = (0.15, 0.25, 0.15, 0.45, 0.6)
 
 def _natural(address: str) -> list:
     """A sort key that reads the numbers of an address as numbers: "t2" is before "t10"."""
-    return [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", address)]
+    # The split gives text and numbers in turn: the parts at the odd places are the numbers.
+    return [int(part) if place % 2 else part for place, part in enumerate(re.split(r"(\d+)", address))]
 
 
 class Backend(QObject):
@@ -40,8 +41,12 @@ class Backend(QObject):
 
     def __init__(self, client, interval: float = 1.0, settings_path: Path = DEFAULT_PATH, icons=None,
                  events=None, slow_interval: float = SLOW_INTERVAL, floor: float = FLOOR,
-                 after: tuple[float, ...] = AFTER) -> None:
+                 after: tuple[float, ...] = AFTER, clock=time.monotonic, wait=None) -> None:
         super().__init__()
+        self._clock = clock
+        # wait(event, seconds) waits for a threading.Event and returns True when it is set. Tests give
+        # a clock and a wait that use no real time.
+        self._wait = wait or (lambda event, seconds: event.wait(seconds))
         self._client = client
         self._icons = icons  # None: the agent rows show text and no icon.
         self._interval = interval  # seconds between two reads when no event stream tells of changes
@@ -179,7 +184,7 @@ class Backend(QObject):
     def _run(self) -> None:
         after: tuple[float, ...] = ()  # the waits before the reads that follow a wake and are not done yet
         while not self._stop.is_set():
-            began = time.monotonic()
+            began = self._clock()
             # Clear before the read: a wake that comes during the read starts the next read at once.
             # Many wakes during one read start one read: there is never a queue of reads.
             self._wake.clear()
@@ -193,11 +198,13 @@ class Backend(QObject):
                 seconds = self._slow_interval  # The stream tells of each change: this read is only a net.
             else:
                 seconds = self._interval
-            if self._wake.wait(seconds):
+            if self._wait(self._wake, seconds):
                 # The app can show a change a short time after herdr-core tells of it: read again later.
                 after = self._after
                 # A stream that never stops must not start reads without a pause.
-                self._stop.wait(self._floor - (time.monotonic() - began))
+                rest = self._floor - (self._clock() - began)
+                if rest > 0:
+                    self._wait(self._stop, rest)
 
     # ----- actions from QML -----
 

@@ -309,6 +309,11 @@ def test_rows_with_the_same_text_are_in_the_natural_order_of_the_address(with_ic
     assert [r["address"] for r in rows] == ["", "", "t1", "t1b", "t2", "t10"]
 
 
+def test_an_address_with_a_digit_that_is_not_a_decimal_number_does_not_break_the_order(backend):
+    backend.apply([Agent("t3", "idle", "", "a", "x"), Agent("\u00b2", "idle", "", "a", "x"), Agent("t\u00b2", "idle", "", "a", "x")])
+    assert [r["key"] for r in rows_of(backend, "idle")] == ["t3", "t\u00b2", "\u00b2"]
+
+
 def test_a_named_agent_is_first_also_without_icons(backend):
     backend.apply([Agent("t1", "idle", "", "a", "codex"), Agent("t2", "idle", "zoe", "a", "codex")])
     assert [r["label"] for r in rows_of(backend, "idle")] == ["zoe", "codex"]

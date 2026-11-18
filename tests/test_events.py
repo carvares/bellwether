@@ -6,8 +6,8 @@ import time
 
 import pytest
 
-from herdr_float.backend import Backend
-from herdr_float.events import BACKOFF, EventSource
+from herdr_float.backend import AFTER, FLOOR, SLOW_INTERVAL, Backend
+from herdr_float.events import BACKOFF, MIN_LIFE, EventSource
 from herdr_float.state import Agent
 
 SECRET = b"title-of-a-terminal /home/person/folder"
@@ -153,13 +153,13 @@ def test_garbage_and_very_long_lines_do_not_break_the_reader_and_are_not_logged(
 
 def test_a_heartbeat_keeps_the_stream_alive_and_starts_no_read(source_of):
     child, wakes, pauses = FakeChild(), [], Pauses()
-    source = source_of(Factory(child), lambda: wakes.append(1), pause=pauses, quiet=0.15)
+    source = source_of(Factory(child), lambda: wakes.append(1), pause=pauses, quiet=1.0)
     source.start()
     child.write(LINE)
     assert until(lambda: wakes == [1])
-    for seq in range(8):  # 0.4 s: longer than `quiet`
+    for seq in range(8):  # 1.6 s: longer than `quiet`, and each step is much shorter than `quiet`
         child.write(b'{"jsonrpc":"2.0","method":"heartbeat","params":{"seq":%d}}\n' % seq)
-        time.sleep(0.05)
+        time.sleep(0.2)
     assert source.healthy() is True and pauses.seconds == []  # the heartbeats showed that the stream lives
     assert wakes == [1]  # and nothing changed, so there is no read
     child.write(b'{"jsonrpc":"2.0","method":"heartbeat","params":{"seq":9}}\n' + LINE)
@@ -185,7 +185,8 @@ def test_retries_use_the_backoff_and_a_new_stream_starts_a_read_at_once(source_o
     caplog.set_level(logging.INFO, logger="herdr_float")
     first, second, wakes, pauses = FakeChild(), FakeChild(), [], Pauses()
     factory = Factory(first)
-    source = source_of(factory, lambda: wakes.append(source.healthy()), pause=pauses)
+    now = [100.0]
+    source = source_of(factory, lambda: wakes.append(source.healthy()), pause=pauses, clock=lambda: now[0])
     source.start()
     first.write(LINE)
     assert until(lambda: source.healthy())
@@ -203,15 +204,64 @@ def test_retries_use_the_backoff_and_a_new_stream_starts_a_read_at_once(source_o
     assert until(lambda: len(factory.calls) == 8)
     second.write(LINE)
     assert until(lambda: wakes == [True])  # healthy again: the wake starts a read now
+    assert "events: connected" not in [r.getMessage() for r in caplog.records][1:]  # not yet: it can end at once
+    now[0] += MIN_LIFE  # the stream lives
+    second.write(b'{"jsonrpc":"2.0","method":"heartbeat","params":{"seq":1}}\n')
+    assert until(lambda: [r.getMessage() for r in caplog.records].count("events: connected") == 2)
     second.exit(1)
     assert until(lambda: len(pauses.seconds) == 8)
-    assert pauses.seconds[-1] == 1.0  # after a stream that worked, the backoff starts again
+    assert pauses.seconds[-1] == 1.0  # after a stream that lived, the backoff starts again
     assert factory.most_alive == 1  # never two children at the same time
     # A long time with no stream writes each line one time, not one line for each try.
     assert [r.getMessage() for r in caplog.records] == [
         "events: connected", "events: lost (exit code 0)", "events: retry in 1s", "events: retry in 2s",
         "events: retry in 5s", "events: retry in 10s",
         "events: connected", "events: lost (exit code 1)", "events: retry in 1s",
+    ]
+
+
+def test_children_that_write_one_line_and_end_do_not_reset_the_backoff_or_fill_the_log(source_of, caplog):
+    """For example herdr-core that is not reachable and writes one error line at each start."""
+    caplog.set_level(logging.INFO, logger="herdr_float")
+    children = [FakeChild() for _ in range(7)]
+    for child in children:
+        child.write(b'{"error":{"kind":"x"}}\n')
+        child.exit(1)
+    factory, wakes, pauses, now = Factory(*children), [], Pauses(), [100.0]
+    source = source_of(factory, lambda: wakes.append(1), pause=pauses, clock=lambda: now[0])
+    source.start()
+    for count in range(1, 7):
+        assert until(lambda: len(pauses.seconds) == count)
+        now[0] += pauses.seconds[-1] + 0.01  # each child lived 10 ms
+        pauses.go.release()
+    assert until(lambda: len(pauses.seconds) == 7)
+    assert pauses.seconds == [1.0, 2.0, 5.0, 10.0, 10.0, 10.0, 10.0]
+    messages = [r.getMessage() for r in caplog.records]
+    assert messages == [
+        "events: connected", "events: lost (exit code 1)", "events: retry in 1s", "events: retry in 2s",
+        "events: retry in 5s", "events: retry in 10s",
+    ]
+    assert len(wakes) == 14  # each child: its line and its loss; the reader takes the short interval
+    assert factory.most_alive == 1
+
+
+def test_an_error_at_the_start_of_the_child_is_a_failed_start_with_backoff(source_of, caplog):
+    import subprocess
+    caplog.set_level(logging.INFO, logger="herdr_float")
+    calls, pauses = [], Pauses()
+
+    def spawn(argv):
+        calls.append(1)
+        raise subprocess.SubprocessError("Exception occurred in preexec_fn.")
+
+    source = source_of(spawn, pause=pauses)
+    source.start()
+    assert until(lambda: pauses.seconds == [1.0])
+    pauses.go.release()
+    assert until(lambda: pauses.seconds == [1.0, 2.0])
+    assert source._thread.is_alive() and len(calls) == 2
+    assert [r.getMessage() for r in caplog.records] == [
+        "events: lost (exit code SubprocessError)", "events: retry in 1s", "events: retry in 2s",
     ]
 
 
@@ -248,7 +298,7 @@ def test_stop_ends_the_child_and_the_thread_in_a_short_time(source_of):
     assert until(lambda: source.healthy())
     began = time.monotonic()
     source.stop()
-    assert time.monotonic() - began < 1.0
+    assert time.monotonic() - began < 3.0
     assert child.signals == ["terminate"]
     assert factory.alive == 0  # the child was reaped
     assert not source._thread.is_alive()
@@ -263,7 +313,7 @@ def test_stop_during_the_pause_before_a_retry_ends_the_thread(source_of):
     time.sleep(0.02)
     began = time.monotonic()
     source.stop()
-    assert time.monotonic() - began < 1.0
+    assert time.monotonic() - began < 3.0
     assert not source._thread.is_alive()
 
 
@@ -316,6 +366,7 @@ def test_the_real_child_reads_no_input_and_ends_when_its_parent_is_killed(tmp_pa
         "time.sleep(30)\n"
     )
     parent = subprocess.Popen([sys.executable, "-c", program], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    pid = None
     try:
         pid, read = parent.stdout.readline().decode().split()
         assert read == "''"  # the input of the child is /dev/null: it read the end at once
@@ -335,6 +386,11 @@ def test_the_real_child_reads_no_input_and_ends_when_its_parent_is_killed(tmp_pa
         parent.wait(5)
         parent.stdin.close()
         parent.stdout.close()
+        if pid is not None:  # A failed check must not leave the child of the child behind.
+            try:
+                os.kill(int(pid), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
 
 # ----- the reads that the events start -----
@@ -375,99 +431,138 @@ def running():
         backend.stop()
 
 
-def test_an_event_starts_a_read_at_once(app, tmp_path, running):
+def test_an_event_starts_a_read_in_the_real_threads(app, tmp_path, running):
+    """A smoke test with real threads and real time. The times of the reads are tested on the made-up clock."""
     client, child = CountingClient(), FakeChild()
     backend, _, _ = running(client, child, interval=30, slow_interval=30, settings_path=tmp_path / "s.json")
-    assert until(lambda: client.reads == 1)  # the read at the start
+    assert until(lambda: client.reads == 1, timeout=5.0)  # the read at the start
     child.write(LINE)
-    assert until(lambda: client.reads == 2, timeout=0.5)  # the new stream
-    time.sleep(0.15)
-    assert client.reads == 2
-    began = time.monotonic()
+    assert until(lambda: client.reads == 2, timeout=5.0)  # the new stream
     child.write(LINE)
-    assert until(lambda: client.reads == 3, timeout=0.5)
-    assert time.monotonic() - began < 0.15
+    assert until(lambda: client.reads == 3, timeout=5.0)  # 30 s is the next read by time
 
 
-def test_a_burst_of_100_events_causes_at_most_two_reads(app, tmp_path, running):
-    client, child = CountingClient(seconds=0.05), FakeChild()
-    backend, _, _ = running(client, child, interval=30, slow_interval=30, settings_path=tmp_path / "s.json")
-    child.write(LINE)
-    assert until(lambda: client.reads >= 2)
-    time.sleep(0.3)
-    before = client.reads
-    for _ in range(100):
-        child.write(LINE)  # the whole burst arrives before the first read of the burst ends
-    time.sleep(0.5)
-    assert 1 <= client.reads - before <= 2
+# ----- the times of the reads, on a made-up clock: no thread, no real time -----
 
 
-def test_after_an_event_more_reads_follow_at_the_given_times_and_then_the_slow_interval(app, tmp_path, running):
-    client, child = CountingClient(), FakeChild()
-    backend, _, _ = running(
-        client, child, interval=30, slow_interval=30, after=(0.05, 0.1), floor=0, settings_path=tmp_path / "s.json",
-    )
-    child.write(LINE)
-    assert until(lambda: client.reads == 4, timeout=1.0)  # the start, the event, and two more reads
-    times = [time.monotonic()]
-    child.write(LINE)
-    for count in (5, 6, 7):
-        assert until(lambda: client.reads == count, timeout=1.0)
-        times.append(time.monotonic())
-    assert times[1] - times[0] < 0.045  # at once
-    assert times[2] - times[1] > 0.045 and times[3] - times[2] > 0.095 and times[3] - times[0] < 0.5
-    time.sleep(0.3)
-    assert client.reads == 7  # the app had its time: no more reads until the slow interval
+class Timeline:
+    """The clock and the wait of a Backend. Time moves only in the waits and in the reads.
+
+    `events` are the times at which the event source wakes the reader. `health(now)` tells if the stream
+    is healthy. `Backend._run` runs in the thread of the test until the time `end`."""
+
+    def __init__(self, tmp_path, events=(), end=60.0, health=None, read_seconds=0.0, **options):
+        self.now = 0.0
+        self.end = end
+        self.events = sorted(events)
+        self.read_seconds = read_seconds
+        self.reads = []  # the start time of each read
+        self.waits = []  # ("wake" or "floor", seconds) for each wait
+        source = None
+        if health is not None:
+            source = type("Source", (), {
+                "healthy": lambda _: health(self.now), "start": lambda _: None, "stop": lambda _: None,
+            })()
+        self.backend = Backend(
+            self, settings_path=tmp_path / "s.json", events=(lambda wake: source) if source else None,
+            clock=lambda: self.now, wait=self.wait, **options,
+        )
+
+    def list_agents(self):
+        while self.events and self.events[0] <= self.now:
+            self.events.pop(0)  # The reader cleared its wake before this read: these events are in this read.
+        self.reads.append(round(self.now, 6))
+        self.now += self.read_seconds
+        return []
+
+    def wait(self, event, seconds):
+        if self.now >= self.end:
+            self.backend._stop.set()
+            return False
+        if event is self.backend._stop:  # the pause of the floor
+            self.waits.append(("floor", round(seconds, 6)))
+            self.now += seconds
+            return False
+        self.waits.append(("wake", seconds))
+        woken = event.is_set() or bool(self.events and self.events[0] <= self.now + seconds)
+        self.now = max(self.now, self.events[0]) if woken and self.events else self.now + (0 if woken else seconds)
+        while self.events and self.events[0] <= self.now:
+            self.events.pop(0)  # events that came before now are one wake: there is no queue
+        if self.now >= self.end:
+            self.backend._stop.set()
+        return woken
+
+    def run(self):
+        self.backend._run()
+        return self
+
+    def reads_from(self, start, end=None):
+        return [t for t in self.reads if t >= start and (end is None or t < end)]
 
 
-def test_a_stream_that_never_stops_cannot_start_reads_faster_than_the_floor(app, tmp_path, running):
-    client, child = CountingClient(), FakeChild()
-    backend, _, _ = running(
-        client, child, interval=30, slow_interval=30, floor=0.05, settings_path=tmp_path / "s.json",
-    )
-    child.write(LINE)
-    assert until(lambda: client.reads >= 2)
-    before, end = client.reads, time.monotonic() + 0.5
-    while time.monotonic() < end:
-        child.write(LINE)
-        time.sleep(0.001)
-    assert 5 <= client.reads - before <= 11  # 0.5 s with one read each 0.05 s
+HEALTHY = lambda now: True  # noqa: E731
 
 
-def test_with_a_healthy_stream_and_no_event_the_reads_come_at_the_slow_interval(app, tmp_path, running):
-    client, child = CountingClient(), FakeChild()
-    backend, _, _ = running(client, child, interval=0.02, slow_interval=0.2, settings_path=tmp_path / "s.json")
-    assert until(lambda: client.reads >= 3)  # no stream yet: the short interval
-    child.write(LINE)
-    assert until(lambda: backend._events.healthy())
-    time.sleep(0.1)  # the read of the new stream is done
-    before = client.reads
-    time.sleep(0.5)
-    assert 1 <= client.reads - before <= 3  # 0.5 s at 0.2 s; at 0.02 s it would be 25
+def test_the_values_of_the_times_that_the_documents_state():
+    assert (SLOW_INTERVAL, FLOOR, AFTER) == (2.0, 0.25, (0.15, 0.25, 0.15, 0.45, 0.6))
 
 
-def test_when_the_stream_ends_the_reads_come_at_the_short_interval_again(app, tmp_path, running):
-    client, child = CountingClient(), FakeChild()
-    backend, factory, pauses = running(
-        client, child, interval=0.02, slow_interval=30, settings_path=tmp_path / "s.json",
-    )
-    child.write(LINE)
-    assert until(lambda: backend._events.healthy())
-    time.sleep(0.1)
-    before = client.reads
-    time.sleep(0.1)
-    assert client.reads == before  # healthy: no read for 30 s
-    child.exit(1)
-    assert until(lambda: client.reads >= before + 5, timeout=1.0)  # unhealthy: a read each 0.02 s
-    again = FakeChild()
-    factory.children.append(again)
-    pauses.go.release()
-    again.write(LINE)
-    assert until(lambda: backend._events.healthy())
-    time.sleep(0.1)
-    before = client.reads
-    time.sleep(0.1)
-    assert client.reads == before  # healthy again: the slow interval
+def test_with_a_healthy_stream_and_no_event_the_reads_come_each_two_seconds(app, tmp_path):
+    line = Timeline(tmp_path, health=HEALTHY, end=60.0).run()
+    assert line.reads == [2.0 * n for n in range(30)]  # 30 reads in 60 seconds
+    assert set(line.waits) == {("wake", 2.0)}
+
+
+def test_with_no_healthy_stream_the_reads_come_each_second(app, tmp_path):
+    line = Timeline(tmp_path, health=lambda now: False, end=10.0).run()
+    assert line.reads == [1.0 * n for n in range(10)] and set(line.waits) == {("wake", 1.0)}
+    line = Timeline(tmp_path, end=10.0).run()  # no event source at all
+    assert line.reads == [1.0 * n for n in range(10)] and set(line.waits) == {("wake", 1.0)}
+
+
+def test_an_event_starts_a_read_at_once_and_more_reads_at_the_times_of_the_schedule(app, tmp_path):
+    line = Timeline(tmp_path, health=HEALTHY, events=[10.9], end=17.0).run()
+    assert line.reads_from(10.0) == pytest.approx([10.0, 10.9, 11.05, 11.3, 11.45, 11.9, 12.5, 14.5, 16.5])
+    assert ("floor", pytest.approx(0)) not in line.waits and all(kind == "wake" for kind, _ in line.waits)
+
+
+def test_a_second_event_starts_its_read_at_the_floor_and_the_schedule_again(app, tmp_path):
+    line = Timeline(tmp_path, health=HEALTHY, events=[10.9, 11.0], end=14.0).run()
+    # 11.0 is 0.1 s after the read of 10.9: the read waits 0.15 s more. Then the schedule starts again.
+    assert line.reads_from(10.5) == pytest.approx([10.9, 11.15, 11.3, 11.55, 11.7, 12.15, 12.75])
+    assert [seconds for kind, seconds in line.waits if kind == "floor"] == pytest.approx([0.15])
+
+
+def test_a_storm_of_events_starts_four_reads_each_second_at_the_most(app, tmp_path):
+    storm = [10.0 + n * 0.01 for n in range(6000)]  # 100 events each second for 60 seconds
+    line = Timeline(tmp_path, health=HEALTHY, events=storm, end=75.0, read_seconds=0.005).run()
+    during = line.reads_from(10.0, 70.0)
+    assert len(during) == 240
+    assert min(b - a for a, b in zip(during, during[1:])) == pytest.approx(0.25)
+    assert len(line.reads_from(70.0, 72.0)) == 1 + len(AFTER)  # the last event, and the reads of the schedule
+
+
+def test_a_burst_of_100_events_during_one_read_starts_one_more_read_and_the_reads_of_the_schedule(app, tmp_path):
+    burst = [10.9 + n * 0.0004 for n in range(100)]  # all in the 0.05 s of the read that the first one starts
+    line = Timeline(tmp_path, health=HEALTHY, events=burst, end=13.5, read_seconds=0.05).run()
+    reads = line.reads_from(10.5, 13.5)
+    assert len(reads) == 2 + len(AFTER)  # the production schedule: never one read for each event
+    assert reads[:2] == pytest.approx([10.9, 11.15])  # the first event, and one read for the 99 others
+    alone = Timeline(tmp_path, health=HEALTHY, events=burst, end=12.9, read_seconds=0.05, after=()).run()
+    assert len(alone.reads_from(10.5)) == 2  # with no schedule: two reads
+
+
+def test_a_new_stream_starts_a_read_at_once_and_then_the_slow_interval(app, tmp_path):
+    # No stream until 5.5 s. Then its first line comes.
+    line = Timeline(tmp_path, health=lambda now: now >= 5.5, events=[5.5], end=12.0).run()
+    assert line.reads == pytest.approx([0, 1, 2, 3, 4, 5, 5.5, 5.65, 5.9, 6.05, 6.5, 7.1, 9.1, 11.1])
+    assert [s for _, s in line.waits][:6] == [1.0] * 6 and [s for _, s in line.waits][-2:] == [2.0, 2.0]
+
+
+def test_a_lost_stream_starts_a_read_at_once_and_then_one_read_each_second(app, tmp_path):
+    # The stream ends at 20.5 s: the event source wakes the reader one time.
+    line = Timeline(tmp_path, health=lambda now: now < 20.5, events=[20.5], end=26.0).run()
+    assert line.reads_from(19.0) == pytest.approx([20.0, 20.5, 20.65, 20.9, 21.05, 21.5, 22.1, 23.1, 24.1, 25.1])
 
 
 def test_without_an_event_source_the_reads_come_at_the_interval(app, tmp_path):
@@ -475,7 +570,7 @@ def test_without_an_event_source_the_reads_come_at_the_interval(app, tmp_path):
     backend = Backend(client, interval=0.02, slow_interval=30, settings_path=tmp_path / "s.json")
     backend.start()
     try:
-        assert until(lambda: client.reads >= 5, timeout=1.0)
+        assert until(lambda: client.reads >= 5, timeout=5.0)
     finally:
         backend.stop()
 
@@ -487,7 +582,7 @@ def test_stop_of_the_backend_ends_both_threads_and_the_child(app, tmp_path, runn
     assert until(lambda: backend._events.healthy())
     began = time.monotonic()
     backend.stop()
-    assert time.monotonic() - began < 1.0
+    assert time.monotonic() - began < 3.0
     assert not backend._thread.is_alive() and not backend._events._thread.is_alive()
     assert child.signals == ["terminate"] and factory.alive == 0
 

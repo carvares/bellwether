@@ -14,11 +14,15 @@ import select
 import signal
 import subprocess
 import threading
+import time
 
 log = logging.getLogger("herdr_float")
 
 # Seconds before the next try to start the stream. The last one repeats.
 BACKOFF = (1.0, 2.0, 5.0, 10.0)
+# A stream that lived for this many seconds worked: the backoff starts again at its first step. A stream
+# that ends before (for example a child that writes one error line at each start) does not reset it.
+MIN_LIFE = 20.0
 # A stream that writes nothing for this many seconds is ended and started again (three heartbeats).
 QUIET = 45.0
 # After terminate: the seconds that the child has to end before it is killed.
@@ -28,8 +32,11 @@ GRACE = 2.0
 HEARTBEAT = b'{"jsonrpc":"2.0","method":"heartbeat"'
 
 _PR_SET_PDEATHSIG = 1
-# Loaded here and not in the child: between fork and exec the child must not load a library.
-_libc = ctypes.CDLL(None)
+# The function is found and its types are set here and not in the child: between fork and exec the child
+# must not load a library or look for a symbol.
+_prctl = ctypes.CDLL(None).prctl
+_prctl.argtypes = [ctypes.c_int, ctypes.c_ulong]
+_prctl.restype = ctypes.c_int
 
 
 def _spawn(argv: list[str]) -> subprocess.Popen:
@@ -37,8 +44,8 @@ def _spawn(argv: list[str]) -> subprocess.Popen:
     parent = os.getpid()
 
     def die_with_parent() -> None:
-        _libc.prctl(_PR_SET_PDEATHSIG, signal.SIGTERM)
-        if os.getppid() != parent:  # The parent ended before the line above.
+        # No child without the signal. And the parent can end before the call: then the child ends here.
+        if _prctl(_PR_SET_PDEATHSIG, signal.SIGTERM) != 0 or os.getppid() != parent:
             os._exit(1)
 
     return subprocess.Popen(
@@ -52,7 +59,8 @@ class EventSource:
     the stream is lost. `healthy()` is true from the first line of a child to the end of that child."""
 
     def __init__(self, argv: list[str], wake, spawn=_spawn, pause=None, quiet: float = QUIET,
-                 grace: float = GRACE) -> None:
+                 grace: float = GRACE, clock=time.monotonic) -> None:
+        self._clock = clock
         self._argv = argv
         self._wake = wake
         self._spawn = spawn
@@ -94,19 +102,20 @@ class EventSource:
             self._wake()
 
     def _retry_loop(self) -> None:
-        tries = 0  # the tries since the last stream that worked
+        tries = 0  # the tries since the last stream that lived for MIN_LIFE
         logged = None  # the last retry time that was written to the log
         while not self._stop.is_set():
             code: object = "no start"
             connected = False
+            began = self._clock()
             try:
                 child = self._spawn(self._argv)
-            except OSError as exc:
+            except (OSError, subprocess.SubprocessError) as exc:  # also an error between fork and exec
                 child = None
                 code = type(exc).__name__
             if child is not None:
                 try:
-                    connected = self._follow(child)
+                    connected = self._follow(child, began, announce=tries == 0)
                 finally:
                     code = self._end(child)
             self._healthy.clear()
@@ -114,7 +123,9 @@ class EventSource:
                 break
             if connected:
                 self._wake()  # The reader goes back to its short interval now.
-                tries, logged = 0, None
+                if self._clock() - began >= MIN_LIFE:
+                    tries, logged = 0, None
+            # A long time with no stream that lives writes each line one time, not one line for each try.
             if tries == 0:
                 log.warning("events: lost (exit code %s)", code)
             seconds = BACKOFF[min(tries, len(BACKOFF) - 1)]
@@ -124,9 +135,10 @@ class EventSource:
             tries += 1
             self._pause(seconds)
 
-    def _follow(self, child) -> bool:
+    def _follow(self, child, began: float, announce: bool) -> bool:
         """Call `wake` for each read that holds the end of a line, until the child ends, is silent for too
-        long, or stop() runs. Return True when the child wrote one line or more."""
+        long, or stop() runs. Return True when the child wrote one line or more. `announce` False: this
+        child comes after one that ended early, so "connected" is logged only when it lived for MIN_LIFE."""
         descriptor = child.stdout.fileno()
         connected = False
         while not self._stop.is_set():
@@ -138,10 +150,14 @@ class EventSource:
                 break  # the child closed its output
             if b"\n" not in data:
                 continue  # a part of a long line
+            if not announce and connected and self._clock() - began >= MIN_LIFE:
+                announce = True
+                log.info("events: connected")
             if not connected:
                 connected = True
                 self._healthy.set()
-                log.info("events: connected")
+                if announce:
+                    log.info("events: connected")
             elif data.startswith(HEARTBEAT) and data.count(b"\n") == 1:
                 continue  # The stream lives and nothing changed: no read.
             self._wake()
