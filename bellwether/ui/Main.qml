@@ -236,10 +236,13 @@ Window {
         return null
     }
 
-    // The window has the size of the skin. Without a skin it keeps its size. The width and the height change
-    // together: one new size for the layer surface.
+    // The window has the size of the skin. Without a skin, and while a skin reports no size, it keeps its
+    // size: a layer surface must never get the size 0. The width and the height change together: one new size
+    // for the layer surface.
     function takeSize() {
-        if (skin && (width !== skin.implicitWidth || height !== skin.implicitHeight))
+        if (!skin || skin.implicitWidth <= 0 || skin.implicitHeight <= 0)
+            return
+        if (width !== skin.implicitWidth || height !== skin.implicitHeight)
             setGeometry(x, y, skin.implicitWidth, skin.implicitHeight)
     }
 
@@ -296,7 +299,7 @@ Window {
             setSource(backend.skinSource, {panel: panelModel})
         }
         // Later: this handler runs inside setSource(), and the backend then asks for the default skin.
-        onStatusChanged: if (status === Loader.Error) Qt.callLater(function() { backend.skinFailed() })
+        onStatusChanged: if (status === Loader.Error) Qt.callLater(function() { backend.skinFailed("Loader.Error") })
     }
 
     Connections {
@@ -331,7 +334,7 @@ Window {
         onPressed: (mouse) => { startX = mouse.x; startY = mouse.y; moved = false; lastMoveMs = 0 }
         onPositionChanged: (mouse) => {
             if (!pressed) {
-                root.panel.hoverItem = under(mouse, ["status", "agent"])
+                root.panel.hover(under(mouse, ["status", "agent"]))
                 return
             }
             var dx = mouse.x - startX

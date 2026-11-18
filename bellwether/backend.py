@@ -70,6 +70,10 @@ class Backend(QObject):
         # The skin file of each layout that can show. Tests give their own.
         self._skins = layouts.built_skins() if skins is None else skins
         self._layout = load_layout(self._settings_path)
+        # The layout of the file. It is not the layout that shows after a skin did not load.
+        self._saved_layout = self._layout
+        if layouts.DEFAULT not in self._skins:
+            log.error("the skin file of the default layout %s is missing: the panel cannot show", layouts.DEFAULT)
         if self._layout is None:
             self._layout = layouts.DEFAULT  # a file of an older version, or no file
         elif self._layout not in self._skins:
@@ -295,21 +299,27 @@ class Backend(QObject):
     @Slot(str)
     def setLayout(self, layout: str) -> None:
         """Show a different layout now, and save it. A layout that is not built is ignored."""
-        if layout == self._layout or layout not in self._skins:
+        if layout not in self._skins:
             return
-        self._layout = layout
-        log.info("layout: %s", layout)
-        self.layoutChanged.emit()
-        try:
-            save_layout(layout, self._settings_path)
-        except OSError:
-            log.warning("layout was not saved")
+        if layout != self._layout:
+            self._layout = layout
+            log.info("layout: %s", layout)
+            self.layoutChanged.emit()
+        if layout != self._saved_layout:  # also the layout that shows after a different one did not load
+            self._saved_layout = layout
+            try:
+                save_layout(layout, self._settings_path)
+            except OSError:
+                log.warning("layout was not saved")
 
     @Slot()
-    def skinFailed(self) -> None:
-        """The skin file of the layout did not load: show the default layout, now and at the next start."""
+    @Slot(str)
+    def skinFailed(self, reason: str = "unknown") -> None:
+        """The skin file of the layout did not load: show the default layout now. The saved layout stays, so
+        a later start tries it again. `reason` is the status of the QML loader, never a path."""
         if self._layout == layouts.DEFAULT:
-            log.error("the layout %s did not load", self._layout)
+            log.error("the layout %s did not load (%s)", self._layout, reason)
             return
-        log.error("the layout %s did not load: the layout is %s", self._layout, layouts.DEFAULT)
-        self.setLayout(layouts.DEFAULT)
+        log.error("the layout %s did not load (%s): the layout is %s", self._layout, reason, layouts.DEFAULT)
+        self._layout = layouts.DEFAULT
+        self.layoutChanged.emit()

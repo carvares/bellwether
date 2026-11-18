@@ -113,17 +113,34 @@ def test_the_options_list_has_the_five_designs_and_marks_the_built_ones(app, fak
         QUrl.fromLocalFile(str(layouts.PREVIEWS_PATH / f"{letter}.png")) for letter in "ABCDE"]
 
 
-def test_a_skin_that_does_not_load_gives_c_and_says_so_in_the_log(app, fake_client, tmp_path, caplog):
+def test_a_skin_that_does_not_load_gives_c_in_memory_and_the_saved_layout_stays(app, fake_client, tmp_path, caplog):
     path = tmp_path / "state.json"
     backend = make(fake_client, path)
     backend.setLayout("T")
+    told = []
+    backend.layoutChanged.connect(lambda: told.append(backend.layout))
     with caplog.at_level(logging.INFO, logger="bellwether"):
-        backend.skinFailed()
-    assert backend.layout == "C" and json.loads(path.read_text()) == {"layout": "C"}
-    assert [r.getMessage() for r in caplog.records] == ["the layout T did not load: the layout is C", "layout: C"]
+        backend.skinFailed("Error")
+    assert backend.layout == "C" and told == ["C"]
+    assert json.loads(path.read_text()) == {"layout": "T"}  # the file is not changed: a later version can load T
+    assert [r.getMessage() for r in caplog.records] == ["the layout T did not load (Error): the layout is C"]
+    assert make(fake_client, path).layout == "T"  # the next start tries the saved layout again
     caplog.clear()
-    backend.skinFailed()  # the default skin itself: there is no other one to show
-    assert backend.layout == "C" and [r.getMessage() for r in caplog.records] == ["the layout C did not load"]
+    backend.skinFailed("Error")  # the default skin itself: there is no other one to show
+    assert backend.layout == "C" and [r.getMessage() for r in caplog.records] == ["the layout C did not load (Error)"]
+    backend.setLayout("C")  # the person chooses the layout that shows: it is saved now
+    assert told == ["C"] and json.loads(path.read_text()) == {"layout": "C"}
+
+
+def test_a_start_without_the_default_skin_file_says_so_in_the_log(app, fake_client, tmp_path, caplog):
+    with caplog.at_level(logging.INFO, logger="bellwether"):
+        backend = make(fake_client, tmp_path / "state.json", skins={"T": Path("/skins/T.qml")})
+    assert backend.layout == "C" and backend.skinSource == QUrl()
+    assert [r.getMessage() for r in caplog.records] == ["the skin file of the default layout C is missing: the panel cannot show"]
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="bellwether"):
+        make(fake_client, tmp_path / "state.json")
+    assert caplog.records == []
 
 
 def test_only_the_screen_is_saved_for_a_panel_at_its_default_corner(app, fake_client, tmp_path):

@@ -25,9 +25,9 @@ Item {
     readonly property bool open: stateName !== "" && panel.openState === stateName
     // The number of agents of the group, and the number of rows on the screen.
     readonly property int count: group ? group.count : 0
-    readonly property int shown: Math.min(count, panel.maxAgentRows)
+    readonly property int shown: panel.rowsFor(count)
     // More rows than fit: the list scrolls. A skin then shows a scroll hint.
-    readonly property bool longer: count > panel.maxAgentRows
+    readonly property bool longer: count > shown
     // The number of the first row on the screen, from 0.
     readonly property int first: Math.round(view.contentY / rowHeight)
     // True when the last row is on the screen.
@@ -38,8 +38,9 @@ Item {
 
     implicitHeight: shown * rowHeight
 
-    // With one list for the open group: a different group starts at its first row.
+    // A group that opens starts at its first row: also a different group in the one list of a skin.
     onStateNameChanged: view.contentY = 0
+    onOpenChanged: if (open) view.contentY = 0
 
     Flickable {
         id: view

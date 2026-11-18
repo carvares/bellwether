@@ -12,10 +12,11 @@ QtObject {
     // "#rrggbb" for "blocked", "done", "working", "idle", "offline" and "none".
     readonly property var stateColors: stateColors_
     // The four states in the display order (blocked, done, working, idle), always four. Each is
-    // {state, label, count, attention, alert, color, share, agents}:
+    // {state, label, count, attention, alert, color, share, start, agents}:
     //   attention  the state needs the person (blocked, done), with or without agents
     //   alert      attention, and the state has an agent
     //   share      count / total, from 0 to 1 (0 with no agents)
+    //   start      the sum of the shares of the states before this one: where its part of a ring or strip starts
     //   agents     the rows of the group in their order: {key, icon, label, detail, address, spoken}
     // Offline, every count is 0.
     readonly property var groups: {
@@ -25,11 +26,13 @@ QtObject {
         for (i = 0; i < source.length; i++)
             sum += source[i].count
         var out = []
+        var before = 0
         for (i = 0; i < source.length; i++) {
             var g = source[i]
             out.push({state: g.state, label: g.label, count: g.count, attention: g.attention,
                       alert: g.attention && g.count > 0, color: stateColors[g.state],
-                      share: sum > 0 ? g.count / sum : 0, agents: g.agents})
+                      share: sum > 0 ? g.count / sum : 0, start: sum > 0 ? before / sum : 0, agents: g.agents})
+            before += g.count
         }
         return out
     }
@@ -77,11 +80,12 @@ QtObject {
     readonly property color openColor: openGroup ? openGroup.color : stateColors["none"]
     // The rows of the open group. Empty with no open group.
     readonly property var agents: openGroup ? openGroup.agents : []
-    // A list shows this many rows at the most. A longer group scrolls.
-    readonly property int maxAgentRows: 8
+    // A list shows this many rows at the most. A longer group scrolls. rowsFor() is the one place that
+    // applies it. (Not readonly: a test changes it.)
+    property int maxAgentRows: 8
     // The rows of the open group that are on the screen, and true when the group has more.
-    readonly property int shown: Math.min(agents.length, maxAgentRows)
-    readonly property bool scrolls: agents.length > maxAgentRows
+    readonly property int shown: rowsFor(agents.length)
+    readonly property bool scrolls: agents.length > shown
 
     // ----- the jump -----
 
@@ -101,7 +105,8 @@ QtObject {
 
     // ----- the pointer -----
 
-    // The status row or agent row under the pointer. The window sets it. null during a drag.
+    // The status item or agent row under the pointer, for the pointer look of a skin. The window gives it with
+    // hover(). null during a drag, and for a status item that cannot open (see canOpen).
     property Item hoverItem: null
 
     // ----- rules -----
@@ -130,11 +135,27 @@ QtObject {
         return ""
     }
 
+    // The number of rows that a list shows for a group of `count` agents.
+    function rowsFor(count) {
+        return Math.min(count, maxAgentRows)
+    }
+
+    // True when a click on the status item of this state opens its group: Herdr answers and the state has an
+    // agent. A status item that cannot open is inert: no pointer look, and no change on a click.
+    function canOpen(stateName) {
+        return backend.online && countOf(stateName) > 0
+    }
+
+    // The window tells which target is under the pointer (null: none).
+    function hover(item) {
+        hoverItem = item && item.hitRole === "status" && !canOpen(item.stateName) ? null : item
+    }
+
     // Open the group, or close it when it is open. A group without agents does not open.
     function toggle(stateName) {
         if (openState === stateName)
             openState = ""
-        else if (backend.online && countOf(stateName) > 0)
+        else if (canOpen(stateName))
             openState = stateName
     }
 
@@ -190,6 +211,7 @@ QtObject {
     property Connections backendLink: Connections {
         target: backend
         function onChanged() {
+            panel.hover(panel.hoverItem)  // the status item under the pointer can have no agents now
             // Close the group when Herdr goes offline, so that it does not open by itself when Herdr comes back.
             if (!backend.online) {
                 panel.openState = ""

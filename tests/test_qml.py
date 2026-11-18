@@ -1102,7 +1102,7 @@ def test_a_skin_that_does_not_load_gives_the_default_layout(app, window, tmp_pat
     settle(app)
     assert backend.layout == "C" and (root.width(), root.height()) == (WIDTH, CLOSED + 2 * AGENT_ROW + LIST_END)
     assert root.isVisible() and root.property("openState") == "working"
-    assert json.loads((tmp_path / "state.json").read_text()) == {"layout": "C"}
+    assert json.loads((tmp_path / "state.json").read_text()) == {"layout": "X"}  # only in memory: the file stays
     assert any("Broken.qml" in m for m in messages)  # Qt says why the file did not load
 
 
@@ -1113,3 +1113,118 @@ def test_a_start_with_a_saved_skin_that_does_not_load_shows_the_default_layout(a
     settle(app)
     assert backend.layout == "C" and (root.width(), root.height()) == (WIDTH, OFFLINE)
     assert root.isVisible() and root.property("started") is True
+    assert json.loads((tmp_path / "state.json").read_text()) == {"layout": "X"}
+
+
+def test_a_skin_that_reports_the_size_0_does_not_change_the_size_of_the_window(app, window):
+    """A layer surface must never get the size 0."""
+    root, backend, messages = window
+    backend.setLayout("T")
+    backend.apply(AGENTS)
+    settle(app)
+    assert (root.width(), root.height()) == (T_WIDTH, 4 * T_ROW)
+    skin = root.property("skin")
+    for name, value in (("implicitWidth", 0), ("implicitHeight", 0), ("implicitHeight", -5)):
+        skin.setProperty(name, value)
+        settle(app)
+        assert (root.width(), root.height()) == (T_WIDTH, 4 * T_ROW), (name, value)
+    skin.setProperty("implicitHeight", 4 * T_ROW)
+    skin.setProperty("implicitWidth", 200)  # the two values are good again: the window takes them
+    settle(app)
+    assert (root.width(), root.height()) == (200, 4 * T_ROW)
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def test_a_status_without_agents_gets_no_pointer_look_and_the_controller_says_what_can_open(app, window):
+    root, backend, messages = window
+    backend.apply(AGENTS)
+    settle(app)
+    panel = root.property("panel")
+    status = rows(root, "status")
+
+    def hover(item):
+        QTest.mouseMove(root, item.mapToScene(QPointF(item.width() / 2, item.height() / 2)).toPoint())
+        settle(app)
+        return root.property("hoverRow")
+
+    assert [js(root, f'root.panel.canOpen("{s}")') for s in ("blocked", "done", "working", "idle", "", "x")] == [
+        True, False, True, False, False, False]
+    assert hover(status[0]) == status[0]
+    assert hover(status[1]) is None and hover(status[3]) is None  # no agents: not a target for the pointer
+    assert hover(status[2]) == status[2]
+    backend.apply(AGENTS[:1])  # the last working agent goes away under the pointer
+    settle(app)
+    assert root.property("hoverRow") is None
+    backend.apply(AGENTS)
+    settle(app)
+    assert hover(status[0]) == status[0] and hover(status[2]) == status[2]  # at the next move of the pointer
+    click(app, root, status[2])
+    agent = rows(root, "agent")[0]
+    assert hover(agent) == agent  # an agent row is always a target
+    backend.apply(None)
+    settle(app)
+    assert js(root, 'root.panel.canOpen("blocked")') is False and panel.property("openState") == ""
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def test_each_group_has_its_share_and_the_sum_of_the_shares_before_it(app, window):
+    root, backend, messages = window
+
+    def shares():
+        return json.loads(js(root, "JSON.stringify(root.panel.groups.map(g => [g.state, g.share, g.start]))"))
+
+    backend.apply(many(blocked=1, done=2, working=3, idle=4))
+    settle(app)
+    assert shares() == [["blocked", 0.1, 0], ["done", 0.2, 0.1], ["working", 0.3, pytest.approx(0.3)],
+                        ["idle", 0.4, pytest.approx(0.6)]]
+    last = shares()[-1]
+    assert last[1] + last[2] == pytest.approx(1)  # the shares fill the ring or the strip
+    backend.apply(many(working=2))
+    settle(app)
+    assert [(share, start) for _, share, start in shares()] == [(0, 0), (0, 0), (1, 0), (0, 1)]
+    for agents in ([], None):  # no agents, and offline
+        backend.apply(agents)
+        settle(app)
+        assert [(share, start) for _, share, start in shares()] == [(0, 0)] * 4
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def test_the_cap_of_8_rows_has_one_source(app, window):
+    root, backend, messages = window
+    backend.apply(many(working=3, idle=12))
+    settle(app)
+    assert [js(root, f"root.panel.rowsFor({n})") for n in (0, 3, 8, 9, 90)] == [0, 3, 8, 8, 8]
+    click(app, root, rows(root, "status")[3])
+    lists = [i.parentItem() for i in walk(root.contentItem()) if i.property("hitRole") == "scroll"]
+    open_list = next(l for l in lists if l.property("open"))
+    assert (open_list.property("shown"), open_list.property("longer")) == (8, True)
+    assert (root.property("panel").property("shown"), root.property("panel").property("scrolls")) == (8, True)
+    root.property("panel").setProperty("maxAgentRows", 5)  # the one number: the list and the controller follow it
+    settle(app)
+    assert (open_list.property("shown"), root.property("panel").property("shown")) == (5, 5)
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def test_a_group_that_opens_again_starts_at_its_first_row(app, window):
+    root, backend, messages = window
+    backend.apply(many(working=10, idle=12))
+    settle(app)
+    for layout in ("C", "T"):  # one list in each group, and one list for the open group
+        backend.setLayout(layout)
+        settle(app)
+        root.setProperty("openState", "")
+        settle(app)
+        click(app, root, rows(root, "status")[3])
+        flick = next(i for i in walk(root.contentItem()) if i.property("hitRole") == "scroll" and i.isVisible())
+        row = rows(root, "agent")[2]
+        point = row.mapToScene(QPointF(row.width() / 2, row.height() / 2))
+        app.sendEvent(root, QWheelEvent(point, point, QPoint(0, 0), QPoint(0, -120), Qt.MouseButton.NoButton,
+                                        Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False))
+        settle(app)
+        assert flick.property("contentY") > 0
+        click(app, root, rows(root, "status")[3])  # close
+        click(app, root, rows(root, "status")[3])  # and open again
+        flick = next(i for i in walk(root.contentItem()) if i.property("hitRole") == "scroll" and i.isVisible())
+        assert flick.property("contentY") == 0, layout
+        assert [r.property("key") for r in rows(root, "agent")][:1] == ["i000"]
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []

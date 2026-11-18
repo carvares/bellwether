@@ -191,7 +191,7 @@ Item {
 
                         // The plate of the open row, with the accent at the left. A lighter plate under the pointer.
                         Rectangle {
-                            readonly property bool hovered: skin.panel.hoverItem === statusRow && !groupItem.empty
+                            readonly property bool hovered: skin.panel.hoverItem === statusRow
                             visible: groupItem.open || hovered
                             x: -6; y: 2
                             width: parent.width + 12
