@@ -107,9 +107,13 @@ If the empty block stays in the window after that, remove it from your layout in
   - During a jump, more clicks on agents do nothing.
 - If a jump fails, the line shows a short message in red, after a "!", for 3 seconds: "Herdr app did not start", "could not raise the window", "agent is gone", "Herdr is offline" or "jump failed" (an error that has no message of its own). If the agent has no line any more, the message shows at the bottom of the panel.
 - Drag the panel to move it. You can start the drag on any row. The widget saves the position.
+- With more than one monitor, you can move the panel to a different monitor in two ways:
+  - Drag the panel across the edge where the two monitors touch, and release it there. The panel then belongs to the monitor that holds its middle, and it is fully on that monitor.
+  - Right-click the tray icon, then click "Move to next screen". The panel keeps its distance to the nearer edges. The menu has this entry only when more than one monitor is connected.
+- The widget saves the monitor with the position. At the next start the panel is on the same monitor at the same place. If that monitor is not connected, the panel shows at the top-right corner of a connected monitor.
 - The tray icon is the Herdr app icon in one colour (the tile in the status colour, the ram cut out). If the widget cannot find or cannot use the Herdr app icon, the tray icon is a circle. The tray icon is the only icon of the widget: the widget has no application icon.
 - Click the tray icon to hide or show the widget.
-- Right-click the tray icon to open the menu with "Quit".
+- Right-click the tray icon to open the menu: "Hide widget" or "Show widget", "Move to next screen" (with more than one monitor) and "Quit".
 - The tray icon has the same colour as the corner brackets of the panel when at least one agent exists. With no agents, or offline, the two are grey (two different greys).
 
 ### When the Herdr app window is closed
@@ -133,7 +137,7 @@ An open row closes when the widget goes offline.
 
 ## Files
 
-- Position: `~/.config/herdr-float/state.json`
+- Position: `~/.config/herdr-float/state.json` (`x` and `y` from the top-left corner of a monitor, and `screen`, the name of that monitor)
 - Log: `~/.local/state/herdr-float/herdr-float.log`
 - Start log (output of `scripts/start.sh` starts): `~/.local/state/herdr-float/start.log`
 - Icon copies: `~/.cache/herdr-float/icons/`. The widget reads the icons from the folder of the app (`~/.config/herdr-app/icons/`, or `$HERDR_APP_HOME/icons/`) and does not change them. A one-colour icon is black, so the widget writes a light copy of it here. You can delete this folder.
@@ -149,7 +153,10 @@ An open row closes when the widget goes offline.
 - The widget finds the icon of a program by the file name. It tries, in this order: a short list of other names from the program table of the app (for example `github-copilot` gives `copilot.svg`), `icons/<program>.svg`, the part before the first `-` (`claude-code` gives `claude.svg`), `agent.svg`. A program name longer than 64 characters gets `agent.svg`. The app does not give its program table to other programs, so the widget does not read `programs.json`: an icon that you changed there does not show in the widget.
 - The widget reads each icon one time. After an update of the app that changes an icon, start the widget again. If an icon file or the folder of icon copies is deleted, the widget finds or makes the file again at the next change of the list.
 - The widget reads a new list one time each second. One read takes 3 to 14 ms.
-- The panel draws at the refresh rate of your screen, and a drag moves the panel one time in each frame of the screen. The agent data is still read one time each second.
+- The panel redraws at most one time for each frame of your screen, and only when something changes. A drag moves the panel at most one time in two frames of the screen that the panel is on (240 Hz: each 8.3 ms, 144 Hz: each 13.9 ms, 60 Hz: each 20 ms). The second frame gives the compositor time to apply the last move before the next one is calculated.
+- A drag across monitors: the panel goes only across an edge that two monitors share. Where a monitor has no neighbour (for example above a smaller monitor that starts lower), the panel stops at the edge. During the drag the panel can be on two monitors. At the release it goes fully to the monitor that holds its middle, and it can blink one time when it changes its monitor: the compositor needs a new surface for a different monitor.
+- If the monitor of the panel is disconnected while the widget runs, the panel shows on a monitor that stays. This was tested with made-up screens only, not with a real cable. The saved monitor does not change, so after a later start with that monitor the panel is there again.
+- A person has not yet dragged the panel to a different monitor with a real mouse. The checks used the same functions without a pointer, and the protocol trace of the compositor.
 - The widget works on KDE Plasma on Wayland only.
 - The jump was tested on 2026-11-18 on this machine (one virtual desktop): window behind a different window, window minimized, app closed. A window on a different virtual desktop was not tested.
 - The jump needs `systemd-run` (a part of systemd). Without it the widget cannot start a closed app and has no second method to raise the window. `busctl` and KWin are the first method to raise the window; the jump also works without them (see "How the widget opens the app window").
