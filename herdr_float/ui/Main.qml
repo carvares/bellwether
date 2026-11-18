@@ -123,8 +123,8 @@ Window {
 
                 Connections {
                     target: backend
-                    function onFocusFailed(paneId, message) {
-                        list.failedPane = paneId
+                    function onFocusFailed(key, message) {
+                        list.failedPane = key
                         list.failedMessage = message
                         if (backend.online)
                             root.expanded = true
@@ -150,7 +150,7 @@ Window {
                     Rectangle {
                         id: rowItem
                         required property var modelData
-                        readonly property bool failed: list.failedPane === modelData.paneId
+                        readonly property bool failed: list.failedPane === modelData.key
                         width: list.width
                         height: 28
                         radius: 6
@@ -185,7 +185,8 @@ Window {
                             elide: Text.ElideRight
                             text: rowItem.failed
                                 ? list.failedMessage
-                                : rowItem.modelData.status + " · " + rowItem.modelData.workspace
+                                : rowItem.modelData.status
+                                  + (rowItem.modelData.workspace ? " · " + rowItem.modelData.workspace : "")
                             color: rowItem.failed ? "#f28b82" : "#9aa0a6"
                             font.pixelSize: 12
                         }
@@ -196,7 +197,7 @@ Window {
                             Accessible.name: "Go to " + rowItem.modelData.name
                             onClicked: {
                                 root.expanded = false
-                                backend.focus(rowItem.modelData.paneId)
+                                backend.focus(rowItem.modelData.key)
                             }
                         }
                     }

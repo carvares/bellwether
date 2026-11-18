@@ -14,7 +14,6 @@ STATE_COLORS: dict[str, str] = {
     "done": "#fdd663",
     "working": "#8ab4f8",
     "idle": "#81c995",
-    "unknown": "#9aa0a6",
     "offline": "#5f6368",
     "none": "#5f6368",
 }

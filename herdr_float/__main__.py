@@ -13,7 +13,7 @@ from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
 from .backend import Backend
-from .client import HerdrClient
+from .client import HerdrClient, find_executables
 from .tray import STATE_COLORS, Tray
 
 LOG_PATH = Path.home() / ".local" / "state" / "herdr-float" / "herdr-float.log"
@@ -59,7 +59,7 @@ def main() -> int:
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
 
-    backend = Backend(HerdrClient())
+    backend = Backend(HerdrClient(*find_executables()))
     engine = QQmlApplicationEngine()
     engine.rootContext().setContextProperty("backend", backend)
     engine.rootContext().setContextProperty("stateColors_", STATE_COLORS)

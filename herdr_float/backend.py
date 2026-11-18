@@ -7,9 +7,9 @@ from pathlib import Path
 
 from PySide6.QtCore import Property, QObject, Signal, Slot
 
-from .client import HerdrError, HerdrOffline, HerdrProtocolError
+from .client import HerdrError, HerdrOffline
 from .settings import DEFAULT_PATH, load_position, save_position
-from .state import ATTENTION, STATES, Agent, count_states, parse_agents
+from .state import ATTENTION, STATES, Agent, count_states
 
 log = logging.getLogger("herdr_float")
 
@@ -47,7 +47,7 @@ class Backend(QObject):
     @Property("QVariantList", notify=changed)
     def agents(self) -> list[dict]:
         return [
-            {"paneId": a.pane_id, "name": a.name, "status": a.status, "workspace": a.workspace_id}
+            {"key": a.key, "name": a.name, "status": a.status, "workspace": a.workspace}
             for a in self._agents
         ]
 
@@ -75,7 +75,7 @@ class Backend(QObject):
     def fetch(self) -> list[Agent] | None:
         """Read one snapshot. Runs on the worker thread."""
         try:
-            agents = parse_agents(self._client.list_agents())
+            agents = self._client.list_agents()
         except Exception as exc:  # any failure means offline; the poll thread must not end
             failure = type(exc).__name__
             if failure != self._last_failure:
@@ -111,19 +111,19 @@ class Backend(QObject):
     # ----- actions from QML -----
 
     @Slot(str)
-    def focus(self, pane_id: str) -> None:
-        threading.Thread(target=self.focus_now, args=(pane_id,), daemon=True).start()
+    def focus(self, key: str) -> None:
+        threading.Thread(target=self.focus_now, args=(key,), daemon=True).start()
 
-    def focus_now(self, pane_id: str) -> None:
+    def focus_now(self, key: str) -> None:
         try:
-            self._client.focus_agent(pane_id)
-            log.info("focus ok pane=%s", pane_id)
+            self._client.focus_agent(key)
+            log.info("focus ok agent=%s", key)
         except HerdrError as exc:
-            log.warning("focus failed pane=%s code=%s", pane_id, exc.code)
-            self.focusFailed.emit(pane_id, exc.message or exc.code)
-        except (HerdrOffline, HerdrProtocolError):
-            log.warning("focus failed pane=%s offline", pane_id)
-            self.focusFailed.emit(pane_id, "Herdr is offline")
+            log.warning("focus failed agent=%s code=%s", key, exc.code)
+            self.focusFailed.emit(key, exc.message or exc.code)
+        except HerdrOffline:
+            log.warning("focus failed agent=%s offline", key)
+            self.focusFailed.emit(key, "Herdr is offline")
         self._wake.set()
 
     @Slot(int, int)

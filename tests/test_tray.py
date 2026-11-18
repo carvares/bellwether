@@ -22,11 +22,10 @@ def test_top_state_follows_display_order():
     assert top_state(True, counters(idle=5, working=2)) == "working"
     assert top_state(True, counters(idle=5, done=1, working=2)) == "done"
     assert top_state(True, counters(idle=5, done=1, blocked=1)) == "blocked"
-    assert top_state(True, counters(unknown=1)) == "unknown"
 
 
 def test_tooltip_text():
     assert tooltip_text(False, counters()) == "Herdr Float: offline"
     assert tooltip_text(True, counters(blocked=1, idle=2)) == (
-        "Herdr Float: 1 blocked, 0 done, 0 working, 2 idle, 0 unknown"
+        "Herdr Float: 1 blocked, 0 done, 0 working, 2 idle"
     )

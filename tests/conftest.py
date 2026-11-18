@@ -15,7 +15,7 @@ def app():
 
 class FakeClient:
     def __init__(self):
-        self.result = {"type": "agent_list", "agents": []}
+        self.result = []
         self.list_error = None
         self.focus_error = None
         self.focused = []
@@ -25,8 +25,8 @@ class FakeClient:
             raise self.list_error
         return self.result
 
-    def focus_agent(self, pane_id):
-        self.focused.append(pane_id)
+    def focus_agent(self, key):
+        self.focused.append(key)
         if self.focus_error:
             raise self.focus_error
 

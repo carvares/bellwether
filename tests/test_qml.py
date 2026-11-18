@@ -56,7 +56,7 @@ def test_main_qml_loads_and_follows_the_backend(app, window):
     root, backend, messages = window
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
-    backend.apply([Agent("w1:p1", "blocked", "rev", "w1")])
+    backend.apply([Agent("t1", "blocked", "rev", "Main")])
     root.setProperty("expanded", True)
     app.processEvents()
     assert root.width() == 300
