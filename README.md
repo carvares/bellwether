@@ -80,12 +80,13 @@ If the empty block stays in the window after that, remove it from your layout in
 ## Nothing shows?
 
 - Read the log file `~/.local/state/bellwether/bellwether.log`. The line `source: app`, `source: core` or `source: none` shows where the counts come from.
-- Read the start log `~/.local/state/bellwether/start.log`. It holds the output of the widget process that `scripts/start.sh` starts, for example a Qt error before the log file opens.
+- Read the start log `~/.local/state/bellwether/start.log`. It holds the output of the widget process that `scripts/start.sh` starts, for example a Qt error before the log file opens. A start while a widget runs already writes the line `bellwether: already running` here.
 - `scripts/start.sh` stops with exit code 1 and a message when `.venv/bin/python` does not exist. Then run `uv sync` in the repository folder.
 - If the mod does not start the widget, run `herdr-app status` and read its `errors`.
 
 ## Use
 
+- The panel has a layout. The layout now is C, "Techno / HUD"; the options window (see "Options" below) lists the five designs. The lines below describe Layout C.
 - The panel is a dark box, 320 px wide, with text in a monospace font (Hack, or a different monospace font if Hack is not installed).
 - The top line shows the name "BELLWETHER", the number of all agents ("AGENTS 10") and, at the right, the most important state that has agents (for example "BLOCKED").
 - The bar below it has one cell for each agent, in the colour of the state of the agent. The cells fill the width of the bar: 2 agents give 2 wide cells. With no agents, and offline, the bar is one empty outline. With more than 60 agents, the 60 cells show the share of each state, and a state with an agent keeps one cell or more.
@@ -113,8 +114,19 @@ If the empty block stays in the window after that, remove it from your layout in
 - The widget saves the monitor with the position. At the next start the panel is on the same monitor at the same place. If that monitor is not connected, the panel shows at the top-right corner of a connected monitor.
 - The tray icon is the Herdr app icon in one colour (the tile in the status colour, the ram cut out). If the widget cannot find or cannot use the Herdr app icon, the tray icon is a circle. The tray icon is the only icon of the widget: the widget has no application icon.
 - Click the tray icon to hide or show the widget.
-- Right-click the tray icon to open the menu: "Hide widget" or "Show widget", "Move to next screen" (with more than one monitor) and "Quit".
+- Right-click the tray icon to open the menu: "Options…", "Hide widget" or "Show widget", "Move to next screen" (with more than one monitor) and "Quit".
 - The tray icon has the same colour as the corner brackets of the panel when at least one agent exists. With no agents, or offline, the two are grey (two different greys).
+
+### Options
+
+- Right-click the tray icon, then click "Options…". The options window opens. It is a normal window with a title bar: "Bellwether — Options".
+- A second click on "Options…" shows the same window again and brings it to the front.
+- The section "Layout" shows the five designs as cards: A Refined list, B Tiles, C Techno / HUD, D Signal strip, E Ring. Each card has a small picture, the name and one line of text.
+- The card of the layout that shows now has a blue border and the tag "SELECTED".
+- Click a card to use that layout. The panel changes at once and stays at its place, on its monitor, with the same open row. The widget saves the layout.
+- A card with the tag "COMING NEXT" is dim. That design is not built yet, and a click on it does nothing. Now only Layout C is built.
+- Keyboard: Tab and Shift+Tab move between the cards that you can choose. Enter or Space selects the card. Esc closes the window.
+- Close the window with Esc or with the close button of the title bar. The widget continues to run.
 
 ### When the Herdr app window is closed
 
@@ -123,6 +135,8 @@ Your agents continue to run in herdr-core. The widget then reads herdr-core:
 - The counts can be different from the counts of the app. A "done" agent that you looked at before stays "done". Terminals that the app does not show are counted too.
 - The agent lines show the program icon and the terminal address, with no terminal name and no space name.
 - A click on an agent starts the Herdr app and shows that agent.
+
+One read of the app that fails changes nothing: the widget keeps the last list of the app. After two failed reads one after the other, the widget reads herdr-core. It reads the app again at the first answer of the app.
 
 The panel shows "OFFLINE" when the app and herdr-core do not answer.
 An open row closes when the widget goes offline.
@@ -137,18 +151,18 @@ An open row closes when the widget goes offline.
 
 ### How the data stays fresh
 
-The widget follows the changes of herdr-core with one child process, `herdr-core events --json`. The widget reads `herdr-app ls` as soon as herdr-core reports a change (a few milliseconds; at most four reads each second). The Herdr app itself sometimes shows a change 0.3 to 1.5 s after herdr-core reports it. So the widget reads again five times in the first 1.6 s after a change. While the stream works, the widget also reads one time each 2 seconds: a change that gives no event, or that the app shows later than 1.6 s, shows after at most 2 s. If herdr-core does not run, or the stream ends, the widget reads one time each second, as before, and tries to start the stream again after 1, 2, 5 and then each 10 seconds. The widget does not keep or log the text of a change. The child process ends with the widget, also when the widget is killed.
+The widget follows the changes of herdr-core with one child process, `herdr-core events --json`. The widget reads `herdr-app ls` when herdr-core reports a change: usually a few milliseconds after the event, at most 0.25 s after it. A stream of changes gives about four to five reads each second at the most. The Herdr app itself sometimes shows a change 0.3 to 1.5 s after herdr-core reports it. So the widget reads again five times in the first 1.6 s after a change. While the stream works, the widget also reads one time each 2 seconds: a change that gives no event, or that the app shows later than 1.6 s, shows after at most 2 s. If herdr-core does not run, or the stream ends, the widget reads one time each second, as before, and tries to start the stream again after 1, 2, 5 and then each 10 seconds. The widget does not keep or log the text of a change. The child process ends with the widget, also when the widget is killed.
 
 ## Files
 
-- Position: `~/.config/bellwether/state.json` (`x` and `y` from the top-left corner of a monitor, and `screen`, the name of that monitor)
+- Position and layout: `~/.config/bellwether/state.json`. The keys are `x` and `y` (from the top-left corner of a monitor), `screen` (the name of that monitor) and `layout` (the letter of the layout, `"C"` when the key is not there). A panel that is at its default corner (top right) has no `x` and `y`. A layout that the widget does not have gives Layout C and one line in the log.
 - Log: `~/.local/state/bellwether/bellwether.log`
 - Start log (output of `scripts/start.sh` starts): `~/.local/state/bellwether/start.log`
 - Icon copies: `~/.cache/bellwether/icons/`. The widget reads the icons from the folder of the app (`~/.config/herdr-app/icons/`, or `$HERDR_APP_HOME/icons/`) and does not change them. A one-colour icon is black, so the widget writes a light copy of it here. You can delete this folder.
 
 The widget uses `$XDG_CONFIG_HOME`, `$XDG_STATE_HOME` and `$XDG_CACHE_HOME` in place of `~/.config`, `~/.local/state` and `~/.cache` when you set them.
 
-The widget had the name herdr-float before 2026-11-18. At its first start with the new name, it moves each folder `herdr-float` in these three places to the new name `bellwether`, with all files in it. It does not move a folder when a `bellwether` folder is already there. If a move fails, the widget starts with its default position and writes one line about it in the log. The old log files stay in the moved folder with their old names. While a widget of the old name runs, a new widget does not start.
+The widget had the name herdr-float before 2026-11-18. At its first start with the new name, it moves each folder `herdr-float` in these three places to the new name `bellwether`, with all files in it. It does not move a folder when a `bellwether` folder is already there. If a move fails, the widget starts with its default position and writes one line about it in the log. The widget does not try that move again at a later start. You can move the old folder by hand while the widget does not run. The three old folders are `~/.config/herdr-float`, `~/.local/state/herdr-float` and `~/.cache/herdr-float`; each gets the name `bellwether` in the same place (if a `bellwether` folder is there already, move the files of the old folder into it). The old log files stay in the moved folder with their old names. While a widget of the old name runs, a new widget does not start.
 
 ## Tests
 
@@ -162,6 +176,7 @@ The widget had the name herdr-float before 2026-11-18. At its first start with t
 - The widget reads each icon one time. After an update of the app that changes an icon, start the widget again. If an icon file or the folder of icon copies is deleted, the widget finds or makes the file again at the next change of the list.
 - The widget reads a new list when herdr-core tells of a change (see "How the data stays fresh"). One read takes 3 to 14 ms.
 - The panel redraws at most one time for each frame of your screen, and only when something changes. A drag moves the panel at most one time in two frames of the screen that the panel is on (240 Hz: each 8.3 ms, 144 Hz: each 13.9 ms, 60 Hz: each 20 ms). The second frame gives the compositor time to apply the last move before the next one is calculated.
+- The drag across monitors works because KWin shows a layer surface also on the neighbour monitor. A different compositor can cut the panel at the edge of its monitor during the drag. The tray entry "Move to next screen" always works.
 - A drag across monitors: the panel goes only across an edge that two monitors share. Where a monitor has no neighbour (for example above a smaller monitor that starts lower), the panel stops at the edge. During the drag the panel can be on two monitors. At the release it goes fully to the monitor that holds its middle, and it can blink one time when it changes its monitor: the compositor needs a new surface for a different monitor.
 - If the monitor of the panel is disconnected while the widget runs, the panel shows on a monitor that stays. This was tested with made-up screens only, not with a real cable. The saved monitor does not change, so after a later start with that monitor the panel is there again.
 - A person has not yet dragged the panel to a different monitor with a real mouse. The checks used the same functions without a pointer, and the protocol trace of the compositor.
@@ -176,4 +191,7 @@ The widget had the name herdr-float before 2026-11-18. At its first start with t
 - A person has not yet checked the look on the screen. The checks used an image of the widget's own window.
 - A person has not yet dragged the panel or clicked its rows with a real mouse. The checks used synthesized pointer events. The drag can jitter.
 - A person has not yet checked the widget above full-screen windows.
+- A person has not yet opened the options window from the tray icon with a real mouse. The checks used the menu of the tray icon over D-Bus, synthesized keys and clicks, and the protocol trace of the compositor.
+- The picture of Layout C in the options window is the approved design picture from before the rename: its header says "HERDR".
+- The options window has no icon of its own in the task bar.
 - When an open row makes the panel longer than the space below it, the panel moves up. It does not move back down when the row closes.

@@ -149,7 +149,7 @@ Design:
 Request of the user: "use push events, and named agents first." Before, a new status showed up to one second late.
 
 - **The stream.** `herdr-core events --json` (the API method `events.subscribe` with no filter) writes one JSON object in each line. The first line is the answer of the subscription (`channel`, `seq`, `terminals`: all terminals, 21 to 24 kB here). Each later line is a notification: `method` is `event` (`params`: `type`, `seq`, `terminal`, `data`) or `heartbeat` (each 15 s, `params.seq` only). Types seen with the user's agents: `status`, `turn`, `title`, `labels`, `doc`, `foreground`, `created`, `finished`, `size`. Measured: 0.24 and 0.26 lines each second in 120 s and 180 s (heartbeats included); in a 300 s run, some seconds with about 10 `title` events each second while an agent worked.
-- **An event is a trigger, not data.** `bellwether/events.py` runs the one child process and reads its output in a thread. It looks only for the end of a line and for the fixed start of a heartbeat line. It does not parse, keep or log a line: the lines hold terminal titles and folders. Each line that is not a heartbeat sets the wake of the poll thread, and that thread reads `herdr-app ls` now. Many events during one read start one more read, never a queue. A read that an event starts begins 0.25 s after the start of the read before it at the least (`FLOOR`), so a stream of title changes gives 4 reads each second at most (240 in 60 s on the made-up clock of the tests). An event that comes alone is read at once. The brief asked for 30 to 50 ms; the title bursts are the reason for 0.25 s (first 0.1 s, changed in fix round 1).
+- **An event is a trigger, not data.** `bellwether/events.py` runs the one child process and reads its output in a thread. It looks only for the end of a line and for the fixed start of a heartbeat line. It does not parse, keep or log a line: the lines hold terminal titles and folders. Each line that is not a heartbeat sets the wake of the poll thread, and that thread reads `herdr-app ls` now. Many events during one read start one more read, never a queue. A read that an event starts begins 0.25 s after the start of the read before it at the least (`FLOOR`), so a stream of title changes gives about four to five reads each second at the most (the events start four, 240 in 60 s on the made-up clock of the tests, and the reads of the schedule come between them). An event that comes alone is read usually a few milliseconds after the event, at most 0.25 s after it. The brief asked for 30 to 50 ms; the title bursts are the reason for 0.25 s (first 0.1 s, changed in fix round 1).
 - **The app is later than herdr-core for some changes.** Measured for 9 changes: `herdr-app ls` showed the new status 4, 19, 31, 40, 116, 342, 490, 497 and 1495 ms after the event. So one read at the event is not sufficient. After a wake the poll thread reads again 0.15, 0.4, 0.55, 1.0 and 1.6 s later (`AFTER`); a new event starts this list again. A status that the app holds back shows when the app has it, not a few milliseconds after the event.
 - **The read by time stays, slower.** With a healthy stream: one read each 2 s (`SLOW_INTERVAL`), so a change that gives no event, or that the app shows later than 1.6 s after its event, shows after 2 s at the most. In 300 s, no change of `herdr-app ls` came without an event in the 2 s before it, and the change from done to idle after the person looked at the agent came with a `labels` event of that terminal. But that was seen one time only, so the interval is 2 s and not 5 s (5 s in the first version, changed in fix round 1). With no healthy stream: one read each second, as before.
 - **Health and retries.** The stream is healthy from the first line of a child to the end of that child. The backoff starts again at 1 s only after a stream that lived 20 s (`MIN_LIFE`): a child that writes one line and ends at each start (for example an error line) is tried after 1, 2, 5 and then each 10 seconds, and "events: connected" is then written only when a child has lived 20 s. An error at the start of the child (also between fork and exec) is a failed start with the same backoff. The child ends, its pipe closes, or no byte comes for 45 s (three heartbeats): the stream is not healthy at once, the poll thread is woken and reads each second, and the next child starts after 1, 2, 5 and then each 10 seconds. A new stream starts a read at once (its first line). The log gets "events: connected", "events: lost (exit code N)" and "events: retry in Ns"; a long time with no stream writes each of these one time. One thread starts and reaps the child, so there is never more than one.
@@ -157,6 +157,106 @@ Request of the user: "use push events, and named agents first." Before, a new st
 - **Measured with the real app and core (a scratch program with no window).** The numbers of this point are from the first version (floor 0.1 s, read by time each 5 s). Event to applied snapshot: median 3.9 ms, largest 103 ms (the floor), 8 events. Reads: 18 in a quiet minute, 40 in a minute with 7 events, 60 with the old polling. With the values of fix round 1 (floor 0.25 s, each 2 s): 30 reads in a quiet minute. Processor time of the process and its children in 60 s: 0.19 s quiet and 0.47 s with events, 0.40 to 0.44 s with the old polling. So the widget does less work when nothing changes, and about the same while agents change.
 - **Not verified.** What the stream does when herdr-core stops or restarts (the core of the user was not stopped). The code handles an exit, a closed pipe and a silent stream. The notification `missed` of the API was not seen; it is a line as the others, so it starts a read.
 - **Row order.** In an open group: first the agents whose terminal has a name, in the order of the name; then the agents with no name, in the order of the label that shows; both without regard to capital letters. Rows with the same text are in the natural order of the address (`t2` before `t10`). The rule "rows that look the same also show the address" is applied after the sort. Made-up example: names "Mid" and "zed", and no name in the spaces "alpha", "Beta", "zeta" give Mid, zed, alpha, Beta, zeta.
+
+## Change on 2026-11-18: options window and layout skins
+
+Request of the user: "we need a options menu for it. this option menu must be open by the system tray and it must let us chosse the UI version." The UI versions are the five approved designs in `design/layouts/`: A Refined list, B Tiles, C Techno / HUD, D Signal strip, E Ring. This change is step 1 of 2: the behaviour of the panel is separated from its look, the options window exists, and the layout is saved and changes while the widget runs. Layout C is the only built skin. Step 2 builds the skins A, B, D and E against the contract of this section.
+
+### The parts
+
+| File | Owns |
+|---|---|
+| `bellwether/ui/Main.qml` | The window: layer-shell properties, place and screen (`posX`, `posY`, `screenName`, `rehome`, `settle`, `moveToNextScreen`, `recover`), `clampPosition`, the one pointer handler (click or drag, hover, wheel), the drag step `minMoveMs`. It shows the skin in a `Loader` and has the size of the skin. No drawing. |
+| `bellwether/ui/PanelModel.qml` | The controller: the state and the rules that every skin uses (the list below). The only QML file other than `Main.qml` and `Options.qml` that reads `backend`. |
+| `bellwether/ui/AgentList.qml` | The agent rows of one group: at most 8 rows on the screen, scroll with the wheel, the scroll position stays when new data comes. The skin gives the look of a row and an optional decoration. |
+| `bellwether/ui/AgentRow.qml` | The base of one agent row: its size, its click target, its states (`failed`, `opening`, `hovered`, `last`) and its name for a screen reader. |
+| `bellwether/ui/skins/<letter>.qml` | One skin: only drawing. `C.qml` now. |
+| `bellwether/ui/Options.qml` | The options window. |
+| `bellwether/ui/previews/<letter>.png` | One picture of each design for the options window (360 px wide, shown 180 px wide). Made from the approved frames `design/out/herdr-float-layout-<letter>-1-closed.png`: the panel of the dark half, cropped. |
+| `bellwether/layouts.py` | The catalogue of the five designs (letter, name, one line), the default (`"C"`), and `built_skins()`: a design is built when `ui/skins/<letter>.qml` exists. |
+| `bellwether/options.py` | `Options(engine).open()`: makes the options window at the first call, and shows the same window at each later call. |
+| `bellwether/settings.py` | The state file. Each save reads the file and changes only its own keys. |
+| `bellwether/backend.py` | New for QML: `layout`, `skinSource`, `layouts`, `setLayout(letter)`, `skinFailed()`, `saveScreen(name)`, signal `layoutChanged`. |
+
+The controller is a QML object, not a Python object. Reasons: its rules were QML already (bindings to `backend.groups`, a `Timer`, a `Connections`), so they moved with no change of their text and the existing QML tests still check them; the values that a skin reads are bindings, so a skin needs no signal code; and Python keeps one job in the interface, the data (`backend`). The layout name and its file are in Python, because Python owns the settings file.
+
+### The controller: what a skin can read (`PanelModel.qml`)
+
+A skin gets the controller as its property `panel`. All of these are read-only for a skin, except the two functions.
+
+- `online` (bool).
+- `groups`: always four objects in the display order blocked, done, working, idle. Each has `state`, `label` ("Blocked"), `count`, `attention` (the state is blocked or done), `alert` (`attention` and `count > 0`: the mock-ups call this `attention`), `color` ("#rrggbb"), `share` (`count / total`, 0 to 1, for a share bar or a ring) and `agents` (the rows, sorted by the backend: `key`, `icon`, `label`, `detail`, `address`, `spoken`). Offline every count is 0. A skin that must keep its items when the data changes uses `Repeater { model: 4 }` and `panel.groups[index]`, as `C.qml` does.
+- `total` (0 offline), `parts` (the number of states with an agent).
+- `topState` ("blocked", "done", "idle", "working", "none", "offline"), `quiet` (true for "none" and "offline": the skin then uses its own neutral colour), `topColor`, `topLabel` ("Blocked", "No agents", "Offline"), `topCount`, `topBadge` ("1 blocked", "No agents", "Offline").
+- `cells`: the states of the lit cells of a cell bar (one for each agent up to `cellLimit` = 60, then shares, and a state with an agent keeps one cell). Empty with no agents and offline.
+- `stateColors`: the colours by state name.
+- `openState` ("" or a state): one group is open at a time. `openGroup`, `openLabel`, `openColor`, `agents` (the rows of the open group), `maxAgentRows` (8), `shown` (rows on the screen), `scrolls` (the open group has more rows).
+- `opening`: the key of the agent that a jump goes to now, or "".
+- `failedKey`, `failedMessage`: the last failed jump, for 3 seconds. `failedAlone`: true when the failed agent has no row (it is gone, or Herdr is offline).
+- `hoverItem`: the status row or agent row under the pointer (the window sets it).
+- `toggle(state)`: open the group, or close it when it is open. It does nothing for a group with no agents and offline.
+- `jump(key)`: show the agent in the Herdr app. One jump at a time: the backend ignores a call while a jump runs.
+- Helpers: `groupOf(state)`, `countOf(state)`, `stateOf(key)`, `spokenStatus(group)` ("Blocked, 1 agent"), `pad2(n)`, `faded(hex, alpha)`.
+
+Rules that the controller applies with no help of the skin: the open group closes when its count goes to 0 and when Herdr goes offline; a failed jump opens the group of its agent one time, and again only when that agent goes to a different group (`failedShownIn`); the message ends after 3 seconds.
+
+### The skin contract
+
+A skin is one file `bellwether/ui/skins/<letter>.qml`. The file name is the letter of the design in `layouts.py`. When the file exists, the design is built: the options window lets the user choose it. No list has to change.
+
+A skin must:
+
+1. Have an `Item` as its root, with `import ".."` and `required property PanelModel panel`.
+2. Set `implicitWidth` and `implicitHeight` to the size of the panel that it draws, for every state. The window takes this size. The size must never be 0.
+3. Mark its click targets with the property `hitRole` (the one hit-test convention):
+   - a status row, tile, tab or legend row: `readonly property string hitRole: "status"` and `readonly property string stateName` (the state). A click calls `panel.toggle(stateName)`.
+   - an agent row: use `AgentRow` (it has `hitRole: "agent"` and `key`). A click calls `panel.jump(key)`.
+   - the list that scrolls: use `AgentList` (its `Flickable` has `hitRole: "scroll"`). The wheel calls `scrollBy`.
+4. Show the agents of the open group with `AgentList`, and give it a `delegate` that is an `AgentRow` with `view` set to the list. Two ways: one list for the open group (the default `stateName: panel.openState`; for the skins that show the agents below or beside the statuses: B, D, E), or one list in each group with `stateName` set to the state of that group (A, C). With one list, a different group starts at its first row.
+5. Show `panel.failedMessage` in the row where `failed` is true, "opening…" in the row where `opening` is true, and `panel.failedMessage` in a line of its own while `panel.failedAlone` is true. Show a scroll hint while `longer` of the list is true. Show the offline state and the state with no agents. The mock-ups have no line for `failedAlone` and no look for the row under the pointer (`hovered` of an `AgentRow`, `panel.hoverItem === item` for a status item): the skin adds them in its own style.
+6. Give each status item `Accessible.role: Accessible.Button`, `Accessible.name: panel.spokenStatus(group)` and `Accessible.onPressAction: panel.toggle(stateName)`. `AgentRow` has its own.
+
+A skin must not: read `backend`; have a `Timer`, a `Connections` or other code for rules; have a `MouseArea` or other pointer handler; change the place or the size of the window; keep state that must stay when the skin changes (that state is in the controller).
+
+How the window finds a target: from the root of the skin it takes `childAt(x, y)` again and again, and stops at the first item whose `hitRole` is one that it looks for ("status" and "agent" for a click and for the hover; "scroll" for the wheel). So `childAt` decides: at each level it is the top visible child with a size that holds the point. An item that lies over a target and is not its child takes the click away. Put a decoration over the rows (a scroll track, a fade) in the `overlay` of the `AgentList`: its parent has no size, so the search does not find it, and the click or wheel turn goes to the row below it.
+
+`AgentList` (an `Item`): in `panel` (required), `stateName`, `rowHeight` (default 28), `delegate`, `overlay`. Out: `group`, `open`, `count`, `shown`, `longer`, `first` (the number of the first row on the screen, from 0), `atEnd`, `contentY`, `contentHeight`. Its `implicitHeight` is `shown * rowHeight`. The skin sets its width.
+`AgentRow` (an `Item`): in `view` (required, the list), and `modelData` and `index` from the list. Out: `key`, `failed`, `opening`, `hovered`, `last`. Its size is the width of the list and `rowHeight`. The skin puts the drawing in it as children.
+
+The example of a second skin is `tests/skins/T.qml` (40 lines, used only by the tests): four status rows and one list for the open group. The tests of the layout change in `tests/test_qml.py` use it.
+
+### Changing the layout
+
+- `backend.setLayout(letter)` sets `backend.layout`, tells `layoutChanged`, and saves the key `"layout"` in `state.json`. A letter with no skin file is ignored.
+- `Main.qml` then loads the new skin in the same `Loader` (`setSource` with `panel`). The window is the same window: it is not hidden, the layer surface is the same, and the place, the screen, the open group and the online state stay (they are in the window and in the controller). The window takes the new size with one `setGeometry` call: the trace has one `zwlr_layer_surface_v1.set_size` and then one commit for each change of the layout. `clampPosition` then keeps the panel on its screen, and a panel at the default corner stays at the corner with its new width.
+- The window is not visible until the first skin is there: a layer surface must not have the size 0. So the start makes one surface, with its size, its margins and its output (before this change the window showed first and got its place after).
+- A skin that does not load (an error in its file): `backend.skinFailed()` writes one line to the log and shows Layout C, now and at the next start.
+- At the start: no `"layout"` key (a file of an older version) gives C with no log line. A value that is not text, a letter with no skin file, or an unknown letter gives C with one log line ("the saved layout is not available: the layout is C"); the file is not changed.
+- `state.json` now has `x`, `y`, `screen` and `layout`. Saving one of them keeps the others, and keeps keys that this version does not know.
+
+### The options window
+
+- The tray menu has "Options…" above "Hide widget". It opens one window. A second click shows the same window: when it is behind a different window, the widget hides it and shows it again, because on Wayland a program cannot raise its window without a click in one of its own windows, and a window that shows again comes to the front.
+- It is a normal window: `Options.qml` has no `LayerShell` properties, and it is loaded with the same engine (`engine.load`). Trace on this machine: `xdg_wm_base.get_xdg_surface`, `xdg_surface.get_toplevel`, `set_title("Bellwether — Options")`, `set_min_size` and `set_max_size` with the same size (1076 × 305), a server-side decoration; the panel stays the one `zwlr_layer_surface_v1`. The window takes the keyboard focus (`active` true); the panel never does. `QT_WAYLAND_SHELL_INTEGRATION` is not set.
+- Esc and the close button of the title bar hide the window. The widget continues (`setQuitOnLastWindowClosed(False)`).
+- Content: a column of sections. One section now, "Layout": five cards in a row. A card has the picture, the letter and name ("C — Techno / HUD"), one line of text, and a tag: "SELECTED" (the card also has a blue border), or "COMING NEXT" for a design that is not built (the card is dim and cannot be chosen).
+- A click on a built card applies the layout at once and saves it.
+- Keyboard: Tab and Shift+Tab move between the built cards (a white ring shows the focus), Enter, Return and Space select, Esc closes. At each open the focus is on the selected card. Each card has a name for a screen reader: "Layout C, Techno / HUD, selected", "Layout A, Refined list, coming next".
+
+### Review findings that this change fixes
+
+- Data source: one failed read of `herdr-app ls` no longer changes the source. The client returns the last list of the app (no read of herdr-core, not offline). Two failed reads one after the other change the source to herdr-core; the first answer of the app changes it back and starts the count again. With no list of the app yet (the start with the app closed), the first failed read goes to herdr-core at once.
+- "events: connected" is now also written for a later stream that lived 20 s and then ended, or was silent, before its next line.
+- The read rate, stated more exactly: a read that an event starts comes usually a few milliseconds after the event and at most 0.25 s after it; a stream of events gives about four to five reads each second at the most (four that the events start, and the reads of the schedule between them).
+- A start that ends because a widget runs already writes "bellwether: already running" to its error output, so `start.log` has the line also when no log folder exists.
+- "Move to next screen" for a panel at its default corner saves only the screen (`backend.saveScreen`): the file then has no `x` and `y`, so at the next start the panel is at the default corner of that screen and follows the width of the screen and of the layout.
+- Not done: the reads of the schedule still start after the first line of a new event stream (the answer of the subscription). The first line is also the wake that starts the read of a new stream, and three tests state that contract; a change needs a second kind of wake between `events.py` and `backend.py`.
+
+### Not verified
+
+- A person has not yet opened the options window from the tray icon with a real mouse, and has not yet looked at it on the screen. The checks used the tray menu over D-Bus, the window's own image, synthesized keys and clicks, and the protocol trace.
+- The picture of Layout C in the options window is the approved frame from before the rename: its header says "HERDR", the built panel says "BELLWETHER".
+- The options window has the application name of the Python program ("python") and no icon of its own in the task bar.
 
 ## Goal
 
@@ -273,11 +373,16 @@ Each part has one job.
 | `bellwether/state.py` | Convert the rows of `herdr-app ls` or `herdr-core ls --json` to a sorted agent list. Return the four counts. No reads of Herdr. | nothing |
 | `bellwether/client.py` | Run `herdr-app` (or `herdr-core` as the fallback). Return the agents or an error. Run the jump: start a closed app, show the agent, raise the window. | `state.py`, `window.py`, the two programs, `systemd-run` |
 | `bellwether/window.py` | Ask KWin to restore and activate the app window. | `busctl`, KWin |
-| `bellwether/settings.py` | Save and load the window position. | nothing |
+| `bellwether/settings.py` | Save and load the state file: the window position and the layout. | nothing |
+| `bellwether/layouts.py` | The five designs and which of them are built. | nothing |
+| `bellwether/options.py` | Open the options window. | the QML engine |
 | `bellwether/paths.py` | The XDG folders of the widget. At start, move the folders of the old name herdr-float to the new name. | nothing |
 | `bellwether/events.py` | One child process `herdr-core events --json` and one thread. Each line of the child starts a read now. Keeps and logs no text of a line. | herdr-core |
 | `bellwether/backend.py` | Qt object. Reads a snapshot at each event of `events.py`, and by time as a safety net (each 2 s with a healthy stream, each second without one). Gives counters and status groups to the interface. Runs one jump at a time on a worker thread. | `client.py`, `state.py`, `settings.py` |
-| `bellwether/ui/Main.qml` | Layer-shell overlay window, status rows, agent rows of the open group, drag. | `backend.py` |
+| `bellwether/ui/Main.qml` | Layer-shell overlay window, place and screen, drag, the pointer handler. Shows one skin. | `backend.py`, `PanelModel.qml` |
+| `bellwether/ui/PanelModel.qml`, `AgentList.qml`, `AgentRow.qml` | The state and the rules of the panel, and the agent list, for every skin. | `backend.py` |
+| `bellwether/ui/skins/C.qml` | The drawing of Layout C. | `PanelModel.qml`, `AgentList.qml` |
+| `bellwether/ui/Options.qml` | The options window: the layout choice. | `backend.py` |
 | `bellwether/tray.py` | System tray icon and menu. The one source of the state colours. | Qt, `backend.py` |
 | `bellwether/__main__.py` | Connect the parts. Start the Qt application. | all parts |
 | `scripts/start.sh` | Starts the widget as an independent process. | nothing |
