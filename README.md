@@ -86,28 +86,31 @@ If the empty block stays in the window after that, remove it from your layout in
 
 ## Use
 
-- The panel shows four rows: Blocked, Done, Working, Idle. Each row shows the number of agents in that state. They are the states that the Herdr app shows.
+- The panel is a dark box, 320 px wide, with text in a monospace font (Hack, or a different monospace font if Hack is not installed).
+- The top line shows the number of all agents ("AGENTS 10") and, at the right, the most important state that has agents (for example "BLOCKED").
+- The bar below it has one cell for each agent, in the colour of the state of the agent. It has 10 cells or more. With more than 60 agents, the 60 cells show the share of each state, and a state with an agent keeps one cell or more.
+- The panel shows four rows: Blocked, Done, Working, Idle. Each row shows the number of agents in that state with two digits ("03"). They are the states that the Herdr app shows. A row with 0 agents is dim.
 - "Done" means that an agent finished while you did not look at it. It becomes "Idle" after you look at it in the app.
 - A terminal that runs no agent (a plain shell) is not counted.
 - Click a row to show its agents below it. Click the row again to hide them. Only one row is open at a time. A row with 0 agents does not open.
 - Each agent line starts with the icon that the Herdr app shows for the program of the agent (for example Claude Code). The program name is not shown as text.
   - If the terminal has a name, the line shows the name, and the space at the right (with the tab name when the space has more than one tab).
   - If the terminal has no name, the line shows the space.
-  - If two lines look the same, each one also shows its terminal address (for example `t1c`).
+  - If two lines look the same, each one also shows its terminal address in brackets (for example `[t1c]`).
   - The lines of one row are in the order of the text that they show (A to Z).
   - A program that has no icon in the app gets the generic agent icon. If the widget cannot find the icons of the app, the line shows the program name as text.
-- The border of the panel has the colour of the most important state that has agents. The order is: blocked (red), done (yellow), idle (green), working (blue). Idle is above working here, so a green border tells you that an agent waits for you. With no agents, or offline, the border is grey.
-- An open row shows 8 agents at most. Turn the mouse wheel on the list to see the others.
+- The four corner brackets of the panel and the word at the top right have the colour of the most important state that has agents. The order is: blocked (red), done (yellow), idle (green), working (blue). Idle is above working here, so green brackets tell you that an agent waits for you. With no agents ("NO AGENTS"), or offline, they are grey.
+- An open row shows 8 agents at most. Turn the mouse wheel on the list to see the others. A line below the list shows which rows you see ("ROWS 01–08 / 12"), and marks at the right edge show the place in the list.
 - Click an agent to go to it. The Herdr app window comes to the front and shows that agent:
   - If the window is behind other windows or minimized, the widget brings it to the front.
-  - If the app is closed, the widget starts it. This takes about 1 second. The line shows "opening…" during that time.
+  - If the app is closed, the widget starts it. This takes about 1 second. The line shows "> opening…" during that time.
   - During a jump, more clicks on agents do nothing.
-- If a jump fails, the line shows a short message for 3 seconds: "Herdr app did not start", "could not raise the window", "agent is gone", "Herdr is offline" or "jump failed" (an error that has no message of its own). If the agent has no line any more, the message shows at the bottom of the panel.
+- If a jump fails, the line shows a short message in red, after a "!", for 3 seconds: "Herdr app did not start", "could not raise the window", "agent is gone", "Herdr is offline" or "jump failed" (an error that has no message of its own). If the agent has no line any more, the message shows at the bottom of the panel.
 - Drag the panel to move it. You can start the drag on any row. The widget saves the position.
-- The tray icon is the Herdr app icon in one colour (the tile in the status colour, the ram cut out). If the widget cannot find the Herdr app icon, the tray icon is a circle.
+- The tray icon is the Herdr app icon in one colour (the tile in the status colour, the ram cut out). If the widget cannot find or cannot use the Herdr app icon, the tray icon is a circle. The tray icon is the only icon of the widget: the widget has no application icon.
 - Click the tray icon to hide or show the widget.
 - Right-click the tray icon to open the menu with "Quit".
-- The tray icon has the same colour as the border of the panel when at least one agent exists. With no agents, or offline, the two are grey (the tray icon is a lighter grey than the border).
+- The tray icon has the same colour as the corner brackets of the panel when at least one agent exists. With no agents, or offline, the two are grey (two different greys).
 
 ### When the Herdr app window is closed
 
@@ -117,7 +120,7 @@ Your agents continue to run in herdr-core. The widget then reads herdr-core:
 - The agent lines show the program icon and the terminal address, with no terminal name and no space name.
 - A click on an agent starts the Herdr app and shows that agent.
 
-The panel shows "offline" when the app and herdr-core do not answer.
+The panel shows "OFFLINE" when the app and herdr-core do not answer.
 An open row closes when the widget goes offline.
 
 ### How the widget opens the app window
@@ -146,6 +149,7 @@ An open row closes when the widget goes offline.
 - The widget finds the icon of a program by the file name. It tries, in this order: a short list of other names from the program table of the app (for example `github-copilot` gives `copilot.svg`), `icons/<program>.svg`, the part before the first `-` (`claude-code` gives `claude.svg`), `agent.svg`. A program name longer than 64 characters gets `agent.svg`. The app does not give its program table to other programs, so the widget does not read `programs.json`: an icon that you changed there does not show in the widget.
 - The widget reads each icon one time. After an update of the app that changes an icon, start the widget again. If an icon file or the folder of icon copies is deleted, the widget finds or makes the file again at the next change of the list.
 - The widget reads a new list one time each second. One read takes 3 to 14 ms.
+- The panel draws at the refresh rate of your screen, and a drag moves the panel one time in each frame of the screen. The agent data is still read one time each second.
 - The widget works on KDE Plasma on Wayland only.
 - The jump was tested on 2026-11-18 on this machine (one virtual desktop): window behind a different window, window minimized, app closed. A window on a different virtual desktop was not tested.
 - The jump needs `systemd-run` (a part of systemd). Without it the widget cannot start a closed app and has no second method to raise the window. `busctl` and KWin are the first method to raise the window; the jump also works without them (see "How the widget opens the app window").
