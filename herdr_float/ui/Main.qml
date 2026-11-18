@@ -269,7 +269,7 @@ Window {
                                             anchors.right: parent.right
                                             anchors.rightMargin: 10
                                             anchors.verticalCenter: parent.verticalCenter
-                                            width: Math.min(implicitWidth, agentRow.failed ? 150 : 100)
+                                            width: Math.min(implicitWidth, agentRow.failed ? 165 : 100)
                                             elide: Text.ElideRight
                                             text: agentRow.failed ? root.failedMessage
                                                 : backend.opening === agentRow.key ? "opening…"
