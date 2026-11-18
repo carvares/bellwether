@@ -6,9 +6,9 @@ import time
 
 import pytest
 
-from herdr_float.backend import AFTER, FLOOR, SLOW_INTERVAL, Backend
-from herdr_float.events import BACKOFF, MIN_LIFE, EventSource
-from herdr_float.state import Agent
+from bellwether.backend import AFTER, FLOOR, SLOW_INTERVAL, Backend
+from bellwether.events import BACKOFF, MIN_LIFE, EventSource
+from bellwether.state import Agent
 
 SECRET = b"title-of-a-terminal /home/person/folder"
 LINE = b'{"method":"event","params":{"title":"' + SECRET + b'"}}\n'
@@ -114,7 +114,7 @@ def source_of():
 
 
 def test_a_line_wakes_the_reader_and_makes_the_stream_healthy(source_of, caplog):
-    caplog.set_level(logging.INFO, logger="herdr_float")
+    caplog.set_level(logging.INFO, logger="bellwether")
     child, wakes = FakeChild(), []
     factory = Factory(child)
     source = source_of(factory, lambda: wakes.append(1))
@@ -167,7 +167,7 @@ def test_a_heartbeat_keeps_the_stream_alive_and_starts_no_read(source_of):
 
 
 def test_the_end_of_the_child_makes_the_stream_unhealthy_and_wakes_the_reader(source_of, caplog):
-    caplog.set_level(logging.INFO, logger="herdr_float")
+    caplog.set_level(logging.INFO, logger="bellwether")
     child, wakes, pauses = FakeChild(), [], Pauses()
     source = source_of(Factory(child), lambda: wakes.append(source.healthy()), pause=pauses)
     source.start()
@@ -182,7 +182,7 @@ def test_the_end_of_the_child_makes_the_stream_unhealthy_and_wakes_the_reader(so
 
 
 def test_retries_use_the_backoff_and_a_new_stream_starts_a_read_at_once(source_of, caplog):
-    caplog.set_level(logging.INFO, logger="herdr_float")
+    caplog.set_level(logging.INFO, logger="bellwether")
     first, second, wakes, pauses = FakeChild(), FakeChild(), [], Pauses()
     factory = Factory(first)
     now = [100.0]
@@ -222,7 +222,7 @@ def test_retries_use_the_backoff_and_a_new_stream_starts_a_read_at_once(source_o
 
 def test_children_that_write_one_line_and_end_do_not_reset_the_backoff_or_fill_the_log(source_of, caplog):
     """For example herdr-core that is not reachable and writes one error line at each start."""
-    caplog.set_level(logging.INFO, logger="herdr_float")
+    caplog.set_level(logging.INFO, logger="bellwether")
     children = [FakeChild() for _ in range(7)]
     for child in children:
         child.write(b'{"error":{"kind":"x"}}\n')
@@ -247,7 +247,7 @@ def test_children_that_write_one_line_and_end_do_not_reset_the_backoff_or_fill_t
 
 def test_an_error_at_the_start_of_the_child_is_a_failed_start_with_backoff(source_of, caplog):
     import subprocess
-    caplog.set_level(logging.INFO, logger="herdr_float")
+    caplog.set_level(logging.INFO, logger="bellwether")
     calls, pauses = [], Pauses()
 
     def spawn(argv):
@@ -266,7 +266,7 @@ def test_an_error_at_the_start_of_the_child_is_a_failed_start_with_backoff(sourc
 
 
 def test_a_child_that_ends_before_it_writes_is_never_healthy(source_of, caplog):
-    caplog.set_level(logging.INFO, logger="herdr_float")
+    caplog.set_level(logging.INFO, logger="bellwether")
     child, wakes, pauses = FakeChild(), [], Pauses()
     source = source_of(Factory(child), lambda: wakes.append(source.healthy()), pause=pauses)
     child.exit(2)
@@ -277,7 +277,7 @@ def test_a_child_that_ends_before_it_writes_is_never_healthy(source_of, caplog):
 
 
 def test_a_stream_with_no_heartbeat_is_ended_and_started_again(source_of, caplog):
-    caplog.set_level(logging.INFO, logger="herdr_float")
+    caplog.set_level(logging.INFO, logger="bellwether")
     child, pauses = FakeChild(), Pauses()
     source = source_of(Factory(child), pause=pauses, quiet=0.05)
     source.start()
@@ -337,7 +337,7 @@ def test_a_child_that_does_not_end_on_terminate_is_killed(source_of):
 
 
 def test_an_error_in_the_thread_ends_it_with_the_stream_unhealthy_and_its_class_in_the_log(source_of, caplog):
-    caplog.set_level(logging.INFO, logger="herdr_float")
+    caplog.set_level(logging.INFO, logger="bellwether")
     wakes = []
 
     def spawn(argv):
@@ -359,7 +359,7 @@ def test_the_real_child_reads_no_input_and_ends_when_its_parent_is_killed(tmp_pa
 
     program = (
         "import sys, time\n"
-        "from herdr_float.events import _spawn\n"
+        "from bellwether.events import _spawn\n"
         "child = _spawn([sys.executable, '-c', 'import sys, time; print(repr(sys.stdin.read()), flush=True); "
         "time.sleep(30)'])\n"
         "print(child.pid, child.stdout.readline().decode().strip(), flush=True)\n"

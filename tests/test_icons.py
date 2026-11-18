@@ -4,7 +4,7 @@ from urllib.parse import unquote, urlparse
 
 import pytest
 
-from herdr_float.icons import Icons, find_icon, is_glyph, tinted
+from bellwether.icons import Icons, find_icon, is_glyph, tinted
 
 BLACK = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M2 2h20v20H2z"/></svg>'
 STROKE = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor"><path d="M2 2h20"/></svg>'
@@ -101,7 +101,7 @@ def test_url_is_read_one_time_for_each_word(home, tmp_path):
 
 
 def test_missing_icon_is_logged_one_time_with_the_word_and_no_path(home, tmp_path, caplog):
-    caplog.set_level(logging.INFO, logger="herdr_float")
+    caplog.set_level(logging.INFO, logger="bellwether")
     icons = Icons(home, tmp_path / "cache")
     for _ in range(3):
         icons.url("gemini")
@@ -111,7 +111,7 @@ def test_missing_icon_is_logged_one_time_with_the_word_and_no_path(home, tmp_pat
 
 
 def test_no_folder_gives_no_url_and_one_log_line(tmp_path, caplog):
-    caplog.set_level(logging.INFO, logger="herdr_float")
+    caplog.set_level(logging.INFO, logger="bellwether")
     icons = Icons(tmp_path / "no app", tmp_path / "cache")
     assert [icons.url("pi"), icons.url("pi"), icons.url("")] == ["", "", ""]
     assert [r.getMessage() for r in caplog.records] == [
@@ -130,7 +130,7 @@ def test_an_icon_that_cannot_be_read_as_text_is_shown_as_it_is(home, tmp_path):
 
 
 def test_home_follows_the_environment(monkeypatch, tmp_path):
-    from herdr_float.icons import app_home
+    from bellwether.icons import app_home
 
     monkeypatch.setenv("HERDR_APP_HOME", str(tmp_path))
     assert app_home() == tmp_path
@@ -146,7 +146,7 @@ def test_find_icon_takes_a_word_of_64_characters_and_no_longer_word(home):
 
 
 def test_a_file_error_in_the_lookup_gives_the_fallback_and_is_read_one_time(home, tmp_path, monkeypatch, caplog):
-    caplog.set_level(logging.INFO, logger="herdr_float")
+    caplog.set_level(logging.INFO, logger="bellwether")
     real, asked = Path.is_file, []
 
     def is_file(path, **options):
@@ -172,7 +172,7 @@ def test_a_file_error_in_the_lookup_gives_the_fallback_and_is_read_one_time(home
 
 
 def test_a_copy_that_was_deleted_is_made_again(home, tmp_path, caplog):
-    caplog.set_level(logging.INFO, logger="herdr_float")
+    caplog.set_level(logging.INFO, logger="bellwether")
     icons = Icons(home, tmp_path / "cache")
     first = icons.url("gemini")  # the generic icon: a glyph, so a copy
     import shutil

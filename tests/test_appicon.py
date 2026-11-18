@@ -4,9 +4,9 @@ import pytest
 from PySide6.QtCore import QRect, Qt
 from PySide6.QtGui import QColor, QImage, QPainter
 
-from herdr_float import appicon
-from herdr_float.appicon import SIZES, SOURCE_SIZE, default_dirs, find_app_icon, load_app_icon, load_source, tinted_icon
-from herdr_float.tray import TrayIcons, make_icon
+from bellwether import appicon
+from bellwether.appicon import SIZES, SOURCE_SIZE, default_dirs, find_app_icon, load_app_icon, load_source, tinted_icon
+from bellwether.tray import TrayIcons, make_icon
 
 PLATE, GLYPH = "#f4f1e9", "#303438"
 RED, BLUE = "#f28b82", "#8ab4f8"
@@ -210,7 +210,7 @@ def test_without_a_source_the_tray_icon_is_the_circle(app):
 
 
 def test_load_app_icon_logs_one_line_without_a_path_when_the_icon_is_missing(tmp_path, app, caplog):
-    with caplog.at_level(logging.INFO, logger="herdr_float"):
+    with caplog.at_level(logging.INFO, logger="bellwether"):
         assert load_app_icon([tmp_path / "applications"], [tmp_path / "hicolor"]) is None
     assert len(caplog.records) == 1
     assert str(tmp_path) not in caplog.records[0].getMessage()
@@ -220,7 +220,7 @@ def test_load_app_icon_logs_one_line_when_the_icon_cannot_be_read(tree, caplog):
     desktop, icons = tree
     (icons[1] / "scalable" / "apps").mkdir(parents=True)
     (icons[1] / "scalable" / "apps" / "herdr-app.svg").write_text("not an svg")
-    with caplog.at_level(logging.INFO, logger="herdr_float"):
+    with caplog.at_level(logging.INFO, logger="bellwether"):
         assert load_app_icon(desktop, icons) is None
     assert len(caplog.records) == 1
     assert "herdr-app" not in caplog.records[0].getMessage()
@@ -229,7 +229,7 @@ def test_load_app_icon_logs_one_line_when_the_icon_cannot_be_read(tree, caplog):
 def test_load_app_icon_gives_the_image_and_no_log(tree, caplog):
     desktop, icons = tree
     write_svg(icons[1] / "scalable" / "apps" / "herdr-app.svg")
-    with caplog.at_level(logging.INFO, logger="herdr_float"):
+    with caplog.at_level(logging.INFO, logger="bellwether"):
         assert load_app_icon(desktop, icons) is not None
     assert caplog.records == []
 
@@ -334,7 +334,7 @@ def full_tile(size=64):
     ],
 )
 def test_a_mark_that_is_empty_or_a_plain_tile_gives_the_circle_and_one_log_line(app, caplog, source):
-    with caplog.at_level(logging.INFO, logger="herdr_float"):
+    with caplog.at_level(logging.INFO, logger="bellwether"):
         icons = TrayIcons(source())
     assert icons.icon(RED).pixmap(64).toImage() == make_icon(RED).pixmap(64).toImage()
     assert len(caplog.records) == 1 and "circle" in caplog.records[0].getMessage()
@@ -348,7 +348,7 @@ def test_any_failure_while_the_icon_loads_gives_the_circle_and_one_log_line(tree
         raise RuntimeError(f"cannot draw {path}")
 
     monkeypatch.setattr(appicon, "load_source", broken)
-    with caplog.at_level(logging.INFO, logger="herdr_float"):
+    with caplog.at_level(logging.INFO, logger="bellwether"):
         made = TrayIcons.load(desktop, icons)
     assert made.icon(RED).pixmap(64).toImage() == make_icon(RED).pixmap(64).toImage()
     assert len(caplog.records) == 1
@@ -364,7 +364,7 @@ def test_any_failure_while_the_mark_is_made_gives_the_circle_and_one_log_line(tr
         raise MemoryError
 
     monkeypatch.setattr(appicon, "mark", broken)
-    with caplog.at_level(logging.INFO, logger="herdr_float"):
+    with caplog.at_level(logging.INFO, logger="bellwether"):
         made = TrayIcons.load(desktop, icons)
     assert made.icon(BLUE).pixmap(64).toImage() == make_icon(BLUE).pixmap(64).toImage()
     assert len(caplog.records) == 1 and "MemoryError" in caplog.records[0].getMessage()
@@ -373,7 +373,7 @@ def test_any_failure_while_the_mark_is_made_gives_the_circle_and_one_log_line(tr
 def test_tray_icons_load_gives_the_mark_of_a_good_icon_with_no_log(tree, caplog):
     desktop, icons = tree
     write_svg(icons[1] / "scalable" / "apps" / "herdr-app.svg")
-    with caplog.at_level(logging.INFO, logger="herdr_float"):
+    with caplog.at_level(logging.INFO, logger="bellwether"):
         made = TrayIcons.load(desktop, icons)
     red = made.icon(RED).pixmap(32).toImage()
     assert red.pixelColor(16, 16) == QColor(RED) and alpha(red, 2, 2) == 0  # the square of the test SVG

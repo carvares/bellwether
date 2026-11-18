@@ -4,10 +4,10 @@ import time
 
 import pytest
 
-from herdr_float.backend import Backend
-from herdr_float.client import HerdrError, HerdrOffline
-from herdr_float.icons import Icons
-from herdr_float.state import Agent
+from bellwether.backend import Backend
+from bellwether.client import HerdrError, HerdrOffline
+from bellwether.icons import Icons
+from bellwether.state import Agent
 
 
 @pytest.fixture
@@ -134,7 +134,7 @@ def test_opening_ends_after_a_failed_jump(app, backend):
 
 
 def test_an_unexpected_error_in_a_jump_shows_a_fixed_message_and_logs_its_class_only(app, backend, caplog, capsys):
-    caplog.set_level(logging.INFO, logger="herdr_float")
+    caplog.set_level(logging.INFO, logger="bellwether")
     failures = []
     backend.focusFailed.connect(lambda key, message: failures.append((key, message)))
     backend._client.focus_error = RuntimeError("text from a program")
@@ -181,7 +181,7 @@ def wait_for(app, condition, timeout=2.0):
 
 
 def test_polling_continues_after_an_unexpected_error(app, fake_client, tmp_path, caplog):
-    caplog.set_level(logging.INFO, logger="herdr_float")
+    caplog.set_level(logging.INFO, logger="bellwether")
     backend = Backend(fake_client, interval=0.02, settings_path=tmp_path / "state.json")
     backend.start()
     try:

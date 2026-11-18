@@ -13,7 +13,7 @@ from .client import HerdrError, HerdrOffline
 from .settings import DEFAULT_PATH, load_position, save_position
 from .state import ATTENTION, STATES, Agent, count_states, top_state
 
-log = logging.getLogger("herdr_float")
+log = logging.getLogger("bellwether")
 
 # Seconds between two reads while the event stream is healthy. The changes come as events, so these reads
 # only repair a missed one. With no healthy stream, `interval` (one second) is used.

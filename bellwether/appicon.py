@@ -11,7 +11,7 @@ from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QImageReader, QPainter, QPainterPath
 from PySide6.QtSvg import QSvgRenderer
 
-log = logging.getLogger("herdr_float")
+log = logging.getLogger("bellwether")
 
 DESKTOP_FILE = "herdr-app.desktop"
 SIZES = (16, 22, 24, 32, 44, 48, 64)  # The tray takes the size it needs, at 1x and 2x.

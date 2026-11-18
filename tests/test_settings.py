@@ -1,4 +1,4 @@
-from herdr_float.settings import load_position, save_position
+from bellwether.settings import load_position, save_position
 
 
 def test_missing_file_gives_none(tmp_path):

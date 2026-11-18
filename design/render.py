@@ -25,7 +25,7 @@ from PySide6.QtQuick import QQuickView  # noqa: E402
 from PySide6.QtSvg import QSvgRenderer  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from herdr_float.icons import Icons  # noqa: E402
+from bellwether.icons import Icons  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 OUT = HERE / "out"

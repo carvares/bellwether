@@ -16,7 +16,7 @@ import subprocess
 import threading
 import time
 
-log = logging.getLogger("herdr_float")
+log = logging.getLogger("bellwether")
 
 # Seconds before the next try to start the stream. The last one repeats.
 BACKOFF = (1.0, 2.0, 5.0, 10.0)

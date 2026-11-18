@@ -6,9 +6,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from herdr_float import client as client_module
-from herdr_float.client import HerdrClient, HerdrError, HerdrOffline, find_executables
-from herdr_float.state import Agent
+from bellwether import client as client_module
+from bellwether.client import HerdrClient, HerdrError, HerdrOffline, find_executables
+from bellwether.state import Agent
 
 APP = "/fake/herdr-app"
 CORE = "/fake/herdr-core"
@@ -71,7 +71,7 @@ TIMEOUT = subprocess.TimeoutExpired(cmd="x", timeout=2)
 
 
 def test_list_reads_the_app(caplog):
-    caplog.set_level(logging.INFO, logger="herdr_float")
+    caplog.set_level(logging.INFO, logger="bellwether")
     client, runner = make(app=reply(APP_LIST), core=reply(CORE_LIST))
     assert client.list_agents() == [Agent("t1", "done", "reviewer", "Main", "claude-code")]
     assert client.list_agents() == [Agent("t1", "done", "reviewer", "Main", "claude-code")]
@@ -115,7 +115,7 @@ def test_an_executable_that_was_not_found_is_not_run():
 
 
 def test_source_change_is_logged_one_time_for_each_change(caplog):
-    caplog.set_level(logging.INFO, logger="herdr_float")
+    caplog.set_level(logging.INFO, logger="bellwether")
     client, runner = make(app=reply(APP_LIST), core=reply(CORE_LIST))
     client.list_agents()
     runner.answers[APP] = APP_DOWN
@@ -500,7 +500,7 @@ def test_focus_without_the_app_program_runs_nothing():
 
 
 def test_focus_logs_steps_and_exit_codes_only(caplog):
-    caplog.set_level(logging.INFO, logger="herdr_float")
+    caplog.set_level(logging.INFO, logger="bellwether")
     client, _ = jump(running=False, minimized=True)
     client.focus_agent("t1")
     client, _ = jump()

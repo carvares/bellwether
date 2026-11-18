@@ -78,7 +78,7 @@ Window {
     width: panel.width
     height: panel.height
 
-    LayerShell.Window.scope: "herdr-float"
+    LayerShell.Window.scope: "bellwether"
     LayerShell.Window.layer: LayerShell.Window.LayerOverlay
     LayerShell.Window.anchors: LayerShell.Window.AnchorTop | LayerShell.Window.AnchorLeft
     LayerShell.Window.keyboardInteractivity: LayerShell.Window.KeyboardInteractivityNone

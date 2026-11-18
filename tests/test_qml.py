@@ -1,4 +1,4 @@
-"""Smoke test of the real Main.qml, loaded the same way as herdr_float/__main__.py (off screen)."""
+"""Smoke test of the real Main.qml, loaded the same way as bellwether/__main__.py (off screen)."""
 import json
 import threading
 import time
@@ -11,11 +11,11 @@ from PySide6.QtQml import QQmlApplicationEngine, QQmlExpression, qmlContext
 from PySide6.QtQuick import QQuickWindow
 from PySide6.QtTest import QTest
 
-from herdr_float.__main__ import IMPORT_PATH, UI_PATH, follow_refresh_rate
-from herdr_float.backend import Backend
-from herdr_float.icons import Icons
-from herdr_float.state import Agent
-from herdr_float.tray import STATE_COLORS
+from bellwether.__main__ import IMPORT_PATH, UI_PATH, follow_refresh_rate
+from bellwether.backend import Backend
+from bellwether.icons import Icons
+from bellwether.state import Agent
+from bellwether.tray import STATE_COLORS
 
 LAYERSHELL_QMLDIR = Path("/usr/lib/qt6/qml/org/kde/layershell/qmldir")
 # layer-shell-qt says this for every window on a platform that is not Wayland. It is expected off screen.

@@ -2,8 +2,8 @@ import logging
 
 import pytest
 
-from herdr_float import state
-from herdr_float.state import ATTENTION, PRIORITY, STATES, Agent, count_states, parse_app, parse_core, top_state
+from bellwether import state
+from bellwether.state import ATTENTION, PRIORITY, STATES, Agent, count_states, parse_app, parse_core, top_state
 
 
 @pytest.fixture(autouse=True)
@@ -140,7 +140,7 @@ def test_core_sub_agent_is_never_done():
 
 
 def test_status_word_that_is_not_known_is_skipped_and_logged_one_time(caplog):
-    caplog.set_level(logging.WARNING, logger="herdr_float")
+    caplog.set_level(logging.WARNING, logger="bellwether")
     spaces = [space("Main", tab("1", term("t1", "sleeping", name="reviewer"), term("t2", "idle")))]
     assert [a.key for a in parse_app(spaces)] == ["t2"]
     assert [a.key for a in parse_app(spaces)] == ["t2"]

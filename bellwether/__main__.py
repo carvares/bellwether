@@ -1,4 +1,4 @@
-"""Start the herdr-float widget."""
+"""Start the Bellwether widget."""
 from __future__ import annotations
 
 import fcntl
@@ -69,15 +69,15 @@ def main() -> int:
     setup_logging()
     lock = take_single_instance_lock()
     if lock is None:
-        logging.getLogger("herdr_float").info("a widget is already running, exit")
+        logging.getLogger("bellwether").info("a widget is already running, exit")
         return 0
 
     os.environ.setdefault("QT_QPA_PLATFORM", "wayland")
     app = QApplication(sys.argv)
-    app.setApplicationName("herdr-float")
+    app.setApplicationName("bellwether")
     app.setQuitOnLastWindowClosed(False)
     if app.platformName() != "wayland":
-        logging.getLogger("herdr_float").warning(
+        logging.getLogger("bellwether").warning(
             "the Qt platform is %s, not wayland: the widget cannot be an overlay", app.platformName()
         )
     signal.signal(signal.SIGINT, signal.SIG_DFL)
@@ -94,23 +94,23 @@ def main() -> int:
     if (IMPORT_PATH / "org" / "kde" / "layershell" / "qmldir").is_file():
         engine.load(UI_PATH / "Main.qml")
     if not engine.rootObjects():
-        logging.getLogger("herdr_float").error(
+        logging.getLogger("bellwether").error(
             "the QML interface did not load: it needs the QML module org.kde.layershell (package layer-shell-qt)"
         )
         return 1
 
     follow_refresh_rate(engine.rootObjects()[0])
-    logging.getLogger("herdr_float").info("screen refresh rate: %.0f Hz", engine.rootObjects()[0].property("refreshRate"))
+    logging.getLogger("bellwether").info("screen refresh rate: %.0f Hz", engine.rootObjects()[0].property("refreshRate"))
 
     tray = None
     if QSystemTrayIcon.isSystemTrayAvailable():
         tray = Tray(backend, engine.rootObjects()[0], app)
     else:
-        logging.getLogger("herdr_float").warning("no system tray, the widget has no tray icon")
+        logging.getLogger("bellwether").warning("no system tray, the widget has no tray icon")
 
     backend.start()
     app.aboutToQuit.connect(backend.stop)
-    logging.getLogger("herdr_float").info("started")
+    logging.getLogger("bellwether").info("started")
     code = app.exec()
     # Delete the QML engine (and its window) first: its bindings read the backend until they are gone.
     del engine

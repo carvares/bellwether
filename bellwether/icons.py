@@ -7,7 +7,7 @@ import os
 import re
 from pathlib import Path
 
-log = logging.getLogger("herdr_float")
+log = logging.getLogger("bellwether")
 
 CACHE_PATH = Path.home() / ".cache" / "herdr-float" / "icons"
 TEXT_COLOR = "#e8eaed"  # The colour of the row text in Main.qml.

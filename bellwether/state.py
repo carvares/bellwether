@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-log = logging.getLogger("herdr_float")
+log = logging.getLogger("bellwether")
 
 STATES: tuple[str, ...] = ("blocked", "done", "working", "idle")  # The order of the rows.
 # Which state the border and the tray dot show. The user chose idle above working.

@@ -16,7 +16,7 @@ from pathlib import Path
 from .state import Agent, parse_app, parse_core
 from .window import raise_app_window
 
-log = logging.getLogger("herdr_float")
+log = logging.getLogger("bellwether")
 
 TIMEOUT = 2.0
 # One jump ends this many seconds after the click, also when it has to start the app.

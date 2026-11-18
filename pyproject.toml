@@ -1,5 +1,5 @@
 [project]
-name = "herdr-float"
+name = "bellwether"
 version = "0.1.0"
 description = "Floating status widget for Herdr agents"
 requires-python = ">=3.12"

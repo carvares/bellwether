@@ -11,7 +11,7 @@ from . import appicon
 from .appicon import tint
 from .state import PRIORITY
 
-log = logging.getLogger("herdr_float")
+log = logging.getLogger("bellwether")
 
 STATE_COLORS: dict[str, str] = {
     "blocked": "#f28b82",
@@ -25,9 +25,9 @@ STATE_COLORS: dict[str, str] = {
 
 def tooltip_text(online: bool, counters: list[dict]) -> str:
     if not online:
-        return "Herdr Float: offline"
+        return "Bellwether: offline"
     counts = {c["state"]: c["count"] for c in counters}
-    return "Herdr Float: " + ", ".join(f"{counts[state]} {state}" for state in PRIORITY)
+    return "Bellwether: " + ", ".join(f"{counts[state]} {state}" for state in PRIORITY)
 
 
 def make_icon(color: str) -> QIcon:
