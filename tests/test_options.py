@@ -15,7 +15,8 @@ from bellwether.layouts import built_skins
 from bellwether.options import Options
 
 # Layout C of the program, and the test skin in the place of design B: a second layout that can be chosen.
-SKINS = {**built_skins(), "B": Path(__file__).parent / "skins" / "T.qml"}
+# A, D and E have no skin here: the window must show a design that is not built as "coming next".
+SKINS = {"C": built_skins()["C"], "B": Path(__file__).parent / "skins" / "T.qml"}
 
 
 def walk(item):
