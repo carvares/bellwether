@@ -167,7 +167,7 @@ def test_the_open_group_closes_when_it_is_empty_or_herdr_is_offline(app, window)
     settle(app)
     assert root.property("openState") == ""
     assert rows(root, "status") == [] and rows(root, "agent") == []
-    assert visible_texts(root) == ["HERDR", "NO LINK", "OFFLINE", "OFFLINE"]  # the header, the tag and the plate
+    assert visible_texts(root) == ["BELLWETHER", "NO LINK", "OFFLINE", "OFFLINE"]  # the header, the tag and the plate
     assert root.height() == OFFLINE
     backend.apply(AGENTS)  # back online: the group does not open by itself
     settle(app)
@@ -372,6 +372,20 @@ def test_the_header_total_is_the_sum_of_the_counts_and_the_counts_have_two_digit
     backend.apply(many(working=7))
     settle(app)
     assert total.property("text") == "AGENTS 07"
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def test_the_header_parts_do_not_touch_in_the_widest_case(app, window):
+    """The name, a three-digit total and the longest top tag with its lamp: in this order, a gap between each."""
+    root, backend, messages = window
+    backend.apply(many(blocked=1, working=120))
+    settle(app)
+    header = next(i for i in walk(root.contentItem()) if i.property("isTotal")).parentItem()
+    name, total, tag, lamp = header.childItems()
+    assert (name.property("text"), total.property("text"), tag.property("text")) == ("BELLWETHER", "AGENTS 121", "BLOCKED")
+    spans = [(i.x(), i.x() + i.property("contentWidth" if i is not lamp else "width")) for i in (name, total, lamp, tag)]
+    assert spans[0][0] == 0 and spans[-1][1] <= header.width()
+    assert all(left[1] + 4 <= right[0] for left, right in zip(spans, spans[1:])), spans
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 

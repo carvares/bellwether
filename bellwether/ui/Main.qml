@@ -423,14 +423,16 @@ Window {
                 width: parent.width
                 height: 22
                 Text {
+                    id: nameWord
                     anchors.verticalCenter: parent.verticalCenter
-                    text: "HERDR"
+                    text: "BELLWETHER"
                     color: root.dim
                     font { family: root.mono; pixelSize: 10; letterSpacing: 2; weight: Font.Bold }
                 }
                 Text {
                     readonly property bool isTotal: true
-                    x: 52
+                    anchors.left: nameWord.right
+                    anchors.leftMargin: 12
                     anchors.verticalCenter: parent.verticalCenter
                     text: backend.online ? "AGENTS " + root.pad2(root.total) : "NO LINK"
                     color: root.dim
