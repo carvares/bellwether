@@ -1,7 +1,10 @@
 # herdr-float
 
-A small always-on-top window that shows the states of your Herdr agents.
+A small always-on-top window that shows how many agents of the Herdr desktop app are in each state.
 For KDE Plasma 6 on Wayland only.
+
+The widget reads the Herdr desktop app (`herdr-app`) and its `herdr-core`.
+It does not read the `herdr` 0.9 terminal program.
 
 ## Install
 
@@ -27,67 +30,86 @@ Then the widget does not show, and the log file names the missing module.
 To fix it, change the pin in `pyproject.toml` to the new minor version (for example `pyside6-essentials==6.13.*`).
 Then run `uv sync`.
 
-## Start with Herdr
+## Start
 
-Link the plugin one time. Run this in the repository folder:
+Run this in the repository folder:
 
-    herdr plugin link "$PWD/plugin"
-    herdr plugin list --plugin carvares.herdr-float
+    ./scripts/start.sh
 
-Herdr runs the start command of the plugin when Herdr starts.
-A person has not yet checked if Herdr runs it at each start or only when the Herdr server starts.
-The widget stays on the screen after you close Herdr.
+The widget starts in the background and stays on the screen until you log out or stop it.
+It stays also after you close the Herdr app.
 A second start does not open a second widget.
 
-The Herdr server possibly runs already when you link the plugin.
-Then start the widget one time by hand. Run this in the repository folder:
-
-    ./plugin/start.sh
-
-Do not restart the Herdr server to start the widget. A restart can stop your running agents.
-
 Stop the widget: right-click the tray icon, then click "Quit".
-To start the widget again after "Quit", run `./plugin/start.sh` again.
 If there is no tray icon, stop the widget with this command:
 
-    pkill -f 'python -m herdr_float'
+    pkill -f -x '(.*/)?python[0-9.]* -m herdr_float'
 
-Remove the automatic start:
-
-    herdr plugin unlink carvares.herdr-float
-
-## Nothing shows?
-
-- Read the log file `~/.local/state/herdr-float/herdr-float.log`.
-- Read the start log `~/.local/state/herdr-float/start.log`. It holds the output of the widget process that `plugin/start.sh` starts, for example a Qt error before the log file opens.
-- Read the Herdr logs of the plugin command:
-
-      herdr plugin log list --plugin carvares.herdr-float
-
-- `plugin/start.sh` stops with exit code 1 and a message when `.venv/bin/python` does not exist. Then run `uv sync` in the repository folder.
-
-## Start manually
+To run the widget in the foreground:
 
     uv run python -m herdr_float
 
+## Start with the Herdr app (optional)
+
+The folder `mod/` is a small Herdr app mod. It runs `scripts/start.sh` one time when the app starts.
+The mod runs a program on your machine (`start.sh`). It does not use the network.
+
+Install it. Run this in the repository folder:
+
+    ln -s "$PWD/mod" ~/.config/herdr-app/mods/herdr-float
+    herdr-app check ~/.config/herdr-app/mods/herdr-float
+
+The link must stay a link: the mod finds the repository through it.
+Do not move the repository after this, or make the link again.
+
+What is known and not known about the mod:
+
+- `herdr-app check` passes for `mod/`.
+- A mod starts only when the app shows it. So the app puts the mod into the window as a block at the bottom, 1 pixel high, with nothing in it.
+- A person has not yet installed the mod. These things are not checked: how the block looks, if the app accepts a linked mod folder, and if the app starts the mod again at each start.
+
+Remove the automatic start:
+
+    rm ~/.config/herdr-app/mods/herdr-float
+
+If the empty block stays in the window after that, remove it from your layout in the app.
+
+## Nothing shows?
+
+- Read the log file `~/.local/state/herdr-float/herdr-float.log`. The line `source: app`, `source: core` or `source: none` shows where the counts come from.
+- Read the start log `~/.local/state/herdr-float/start.log`. It holds the output of the widget process that `scripts/start.sh` starts, for example a Qt error before the log file opens.
+- `scripts/start.sh` stops with exit code 1 and a message when `.venv/bin/python` does not exist. Then run `uv sync` in the repository folder.
+- If the mod does not start the widget, run `herdr-app status` and read its `errors`.
+
 ## Use
 
-- The pill shows five counts: blocked, done, working, idle, unknown.
+- The pill shows four counts: blocked, done, working, idle. They are the states that the Herdr app shows.
+- "done" means that an agent finished while you did not look at it. It becomes "idle" after you look at it in the app.
+- A terminal that runs no agent (a plain shell) is not counted.
 - Click the pill to open the agent list. Click the pill again to close it.
-- Click an agent in the list to go to its pane in Herdr.
+- Each row shows the agent, its state, and its space (with the tab name when the space has more than one tab).
+- Click an agent in the list to go to it in the Herdr app.
 - Drag the pill to move it. The widget saves the position.
 - Click the tray icon to hide or show the widget.
 - Right-click the tray icon to open the menu with "Quit".
 - The colour of the tray icon shows the most important state that has agents.
-- The pill shows "offline" when the Herdr server does not answer.
-- The list closes when Herdr goes offline.
-- A click on the pill does nothing while Herdr is offline.
+
+### When the Herdr app window is closed
+
+Your agents continue to run in herdr-core. The widget then reads herdr-core:
+
+- The counts stay. The rows show the program name only, with no space name.
+- "done" then means that the agent itself reported "done". It can be an agent that you saw before.
+- A click on a row shows "Herdr app is not open". Open the app to go to an agent.
+
+The pill shows "offline" when the app and herdr-core do not answer.
+The list closes when the widget goes offline, and a click on the pill does nothing then.
 
 ## Files
 
 - Position: `~/.config/herdr-float/state.json`
 - Log: `~/.local/state/herdr-float/herdr-float.log`
-- Start log (output of `plugin/start.sh` starts): `~/.local/state/herdr-float/start.log`
+- Start log (output of `scripts/start.sh` starts): `~/.local/state/herdr-float/start.log`
 
 ## Tests
 
@@ -95,11 +117,15 @@ Remove the automatic start:
 
 ## Limits
 
-- The widget reads the default local Herdr session only.
+- The widget reads the Herdr app that uses the default folder `~/.config/herdr-app`, and the default herdr-core.
+- The widget looks for `herdr-app` and `herdr-core` one time, at its start. If you install one of them later, start the widget again.
+- The widget reads a new list one time each second. One read takes 3 to 14 ms.
 - The widget works on KDE Plasma on Wayland only.
-- The jump focuses the pane inside Herdr. It possibly does not raise the terminal window. This is not tested.
-- All checks so far are automated: protocol traces, D-Bus, and the window image of the widget.
-- A person has not yet checked the look on the screen.
+- The jump shows the agent inside the Herdr app. It possibly does not raise the app window. This is not tested.
+- The jump was run for real one time, to the agent that had the focus already. The app accepted the command. A jump to an agent in a different space or tab is not yet checked by a person.
+- Sub-agents (terminals that an agent starts with `hc run`) are counted as agents, as in the agent list of the app. No real sub-agent was available for a test.
+- An agent that reports "error" is counted as blocked, as in the agent list of the app.
+- The state when the app window is closed was tested with a simulation only (an empty app folder), not with the real window closed.
+- A person has not yet checked the look on the screen. The checks used an image of the widget's own window.
 - A person has not yet dragged the pill with a real mouse. The drag can jitter.
 - A person has not yet checked the widget above full-screen windows.
-- The counts were only seen with 0 real agents.
