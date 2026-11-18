@@ -127,6 +127,74 @@ def test_source_change_is_logged_one_time_for_each_change(caplog):
     assert [r.getMessage() for r in caplog.records] == ["source: app", "source: core", "source: none"]
 
 
+# ----- one read of the app that fails does not change the source -----
+
+APP_AGENTS = [Agent("t1", "done", "reviewer", "Main", "claude-code")]
+CORE_AGENTS = [Agent("t1", "working", "", "", "claude-code")]
+
+
+def test_one_failed_read_of_the_app_keeps_the_last_list_and_the_source(caplog):
+    caplog.set_level(logging.INFO, logger="bellwether")
+    client, runner = make(app=reply(APP_LIST), core=reply(CORE_LIST))
+    assert client.list_agents() == APP_AGENTS
+    runner.answers[APP] = APP_DOWN
+    assert client.list_agents() == APP_AGENTS  # the last good list: not the core, not offline
+    runner.answers[APP] = reply(APP_LIST)
+    assert client.list_agents() == APP_AGENTS
+    assert runner.calls == [[APP, "ls"]] * 3  # no read of the core
+    assert [r.getMessage() for r in caplog.records] == ["source: app"]  # no line for the one failure
+
+
+def test_two_failed_reads_of_the_app_one_after_the_other_change_the_source_to_the_core(caplog):
+    caplog.set_level(logging.INFO, logger="bellwether")
+    client, runner = make(app=reply(APP_LIST), core=reply(CORE_LIST))
+    client.list_agents()
+    runner.answers[APP] = TIMEOUT
+    assert client.list_agents() == APP_AGENTS
+    assert client.list_agents() == CORE_AGENTS
+    assert client.list_agents() == CORE_AGENTS  # the app is asked first each time, and the core answers
+    assert runner.calls == [[APP, "ls"], [APP, "ls"], [APP, "ls"], [CORE, "ls", "--json"], [APP, "ls"], [CORE, "ls", "--json"]]
+    assert [r.getMessage() for r in caplog.records] == ["source: app", "source: core"]
+
+
+def test_the_app_is_the_source_again_at_its_first_answer_and_the_count_of_failures_starts_again(caplog):
+    caplog.set_level(logging.INFO, logger="bellwether")
+    client, runner = make(app=reply(APP_LIST), core=reply(CORE_LIST))
+    client.list_agents()
+    runner.answers[APP] = APP_DOWN
+    client.list_agents()
+    assert client.list_agents() == CORE_AGENTS
+    renamed = json.loads(json.dumps(APP_LIST))
+    renamed["spaces"][0]["tabs"][0]["terminals"][0]["name"] = "builder"
+    runner.answers[APP] = reply(renamed)
+    new_list = [Agent("t1", "done", "builder", "Main", "claude-code")]
+    assert client.list_agents() == new_list  # recovery at the first answer
+    del runner.calls[:]
+    for _ in range(3):  # a failure, an answer, a failure: never two failures one after the other
+        runner.answers[APP] = APP_DOWN
+        assert client.list_agents() == new_list  # the last good list is the new one
+        runner.answers[APP] = reply(renamed)
+        assert client.list_agents() == new_list
+    assert runner.calls == [[APP, "ls"]] * 6
+    assert [r.getMessage() for r in caplog.records] == ["source: app", "source: core", "source: app"]
+
+
+def test_with_no_list_of_the_app_yet_the_first_failed_read_goes_to_the_core(caplog):
+    """At the start with the app window closed: the widget is not offline for one read."""
+    caplog.set_level(logging.INFO, logger="bellwether")
+    client, runner = make(app=APP_DOWN, core=reply(CORE_LIST))
+    assert client.list_agents() == CORE_AGENTS
+    assert runner.calls == [[APP, "ls"], [CORE, "ls", "--json"]]
+    assert [r.getMessage() for r in caplog.records] == ["source: core"]
+
+
+def test_the_last_list_of_the_app_is_a_copy_that_the_caller_cannot_change():
+    client, runner = make(app=reply(APP_LIST), core=reply(CORE_LIST))
+    client.list_agents().clear()
+    runner.answers[APP] = APP_DOWN
+    assert client.list_agents() == APP_AGENTS
+
+
 # ----- the jump: show the agent, start the app when it is closed, bring the window to the front -----
 
 BUSCTL = "/fake/busctl"

@@ -1,7 +1,8 @@
 """Read the agents of the Herdr desktop app through its command-line programs.
 
 `herdr-app ls` is the source: it has the status that the app shows. When the app window does not
-answer, `herdr-core ls --json` is the source: herdr-core keeps the terminals alive without the window.
+answer two times one after the other, `herdr-core ls --json` is the source: herdr-core keeps the terminals
+alive without the window. One read that fails changes nothing: the last list of the app stays.
 The jump shows an agent in the app window. It starts the app first when the window is closed.
 """
 from __future__ import annotations
@@ -62,12 +63,20 @@ class HerdrClient:
         self._busctl = busctl
         self._systemd_run = systemd_run
         self._source: str | None = None  # "app", "core" or "none": where the last list came from
+        self._app_failures = 0  # reads of the app that failed, one after the other
+        self._app_agents: list[Agent] | None = None  # the last list of the app; None before its first answer
 
     def list_agents(self) -> list[Agent]:
         rows = self._read(self._app, ["ls"], "spaces")
         if rows is not None:
             self._set_source("app")
-            return parse_app(rows)
+            self._app_failures = 0
+            self._app_agents = parse_app(rows)
+            return list(self._app_agents)
+        self._app_failures += 1
+        if self._app_failures == 1 and self._app_agents is not None:
+            # One read that failed (the app was busy for a moment): the source does not go to the core and back.
+            return list(self._app_agents)
         rows = self._read(self._core, ["ls", "--json"], "terminals")
         if rows is not None:
             self._set_source("core")
