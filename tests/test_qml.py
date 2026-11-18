@@ -382,11 +382,14 @@ def cells(root):
     "counts, lit",
     [
         ({"blocked": 1, "done": 2, "working": 3, "idle": 4}, [1, 2, 3, 4]),  # one cell for each agent
-        ({"working": 2}, [0, 0, 2, 0]),  # 8 empty cells stay: the bar has 10 cells or more
+        ({"working": 2}, [0, 0, 2, 0]),  # 2 cells fill the bar: no empty cells
+        ({"idle": 1}, [0, 0, 0, 1]),
+        ({"blocked": 1, "done": 1, "idle": 1}, [1, 1, 0, 1]),
+        ({"done": 20, "working": 39}, [0, 20, 39, 0]),
+        ({"done": 20, "working": 40}, [0, 20, 40, 0]),
         ({"blocked": 1, "done": 2, "working": 3, "idle": 12}, [1, 2, 3, 12]),
         ({"blocked": 1, "idle": 299}, [1, 0, 0, 59]),  # more agents than cells: a state with an agent keeps a cell
         ({"blocked": 100, "done": 1, "working": 100, "idle": 1}, [29, 1, 29, 1]),
-        ({}, [0, 0, 0, 0]),  # no agents: an empty track
     ],
 )
 def test_the_bar_shows_the_share_of_each_state_and_a_state_with_an_agent_is_never_invisible(app, window, counts, lit):
@@ -397,11 +400,15 @@ def test_the_bar_shows_the_share_of_each_state_and_a_state_with_an_agent_is_neve
     states = [state for state, _, _ in bar if state]
     assert [states.count(s) for s in ("blocked", "done", "working", "idle")] == lit
     assert states == sorted(states, key=("blocked", "done", "working", "idle").index)  # the row order
-    assert [state for state, _, _ in bar[len(states):]] == [""] * (len(bar) - len(states))  # lit cells first
-    assert len(bar) == max(10, sum(lit)) <= 60
+    assert len(bar) == len(states) == min(sum(counts.values()), 60)  # one cell for each agent, and every cell is lit
+    assert empty_tracks(root) == []
     widths = {round(width, 3) for _, _, width in bar}
     assert len(widths) == 1 and min(widths) >= 3  # equal cells, so the width of a state is its share
-    assert bar[0][1] == 0 and bar[-1][1] + bar[-1][2] == pytest.approx(WIDTH - 2 * 14)  # the bar fills the row
+    gap = 1 if len(bar) > 24 else 2
+    assert sum(width for _, _, width in bar) + gap * (len(bar) - 1) == pytest.approx(WIDTH - 2 * 14)
+    assert bar[0][1] == 0 and bar[-1][1] + bar[-1][2] == pytest.approx(WIDTH - 2 * 14)  # the last cell ends at the edge
+    for (_, x, width), (_, next_x, _) in zip(bar, bar[1:]):
+        assert next_x - (x + width) == pytest.approx(gap)
     image = root.grabWindow()
     for state, x, width in bar:  # each lit cell shows in the colour of its state
         if state:
@@ -409,11 +416,26 @@ def test_the_bar_shows_the_share_of_each_state_and_a_state_with_an_agent_is_neve
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
-def test_offline_the_bar_is_an_empty_track(app, window):
+def empty_tracks(root):
+    return [i for i in walk(root.contentItem()) if i.property("isEmptyTrack") and i.isVisible()]
+
+
+@pytest.mark.parametrize("agents", [[], None])  # no agents, and offline
+def test_with_no_agents_the_bar_is_one_empty_track(app, window, agents):
     root, backend, messages = window
-    backend.apply(None)
+    backend.apply(many(working=3))
     settle(app)
-    assert [state for state, _, _ in cells(root)] == [""] * 10
+    backend.apply(agents)
+    settle(app)
+    assert cells(root) == []
+    (track,) = empty_tracks(root)
+    assert (track.x(), track.width(), track.height()) == (0, WIDTH - 2 * 14, 8)
+    image = root.grabWindow()
+    y = 11 + 22 + 5
+    assert [image.pixelColor(x, y).name() for x in (14, 100, 160, WIDTH - 15)] == [FRAME] * 4  # the outline
+    inside = {image.pixelColor(x, y + 4).name() for x in range(15, WIDTH - 15)}
+    assert len(inside) == 1 and FRAME not in inside  # one bar: no lines between cells, nothing lit
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
 def test_a_drag_from_a_row_moves_the_widget_and_does_not_click(app, window):

@@ -88,7 +88,7 @@ If the empty block stays in the window after that, remove it from your layout in
 
 - The panel is a dark box, 320 px wide, with text in a monospace font (Hack, or a different monospace font if Hack is not installed).
 - The top line shows the number of all agents ("AGENTS 10") and, at the right, the most important state that has agents (for example "BLOCKED").
-- The bar below it has one cell for each agent, in the colour of the state of the agent. It has 10 cells or more. With more than 60 agents, the 60 cells show the share of each state, and a state with an agent keeps one cell or more.
+- The bar below it has one cell for each agent, in the colour of the state of the agent. The cells fill the width of the bar: 2 agents give 2 wide cells. With no agents, and offline, the bar is one empty outline. With more than 60 agents, the 60 cells show the share of each state, and a state with an agent keeps one cell or more.
 - The panel shows four rows: Blocked, Done, Working, Idle. Each row shows the number of agents in that state with two digits ("03"). They are the states that the Herdr app shows. A row with 0 agents is dim.
 - "Done" means that an agent finished while you did not look at it. It becomes "Idle" after you look at it in the app.
 - A terminal that runs no agent (a plain shell) is not counted.

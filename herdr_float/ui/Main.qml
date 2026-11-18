@@ -278,30 +278,38 @@ Window {
                 }
             }
 
-            // Cell bar: one cell for each agent, in the colour of its status. At least 10 cells.
+            // Cell bar: one cell for each agent, in the colour of its status. The cells fill the width.
+            // With no agents, and offline: one empty track.
             Item {
                 id: cells
                 readonly property int limit: 60
                 readonly property var states: root.cellStates(backend.online ? backend.groups : [], limit)
-                readonly property int n: Math.max(states.length, 10)
+                readonly property int n: states.length
                 readonly property real cellGap: n > 24 ? 1 : 2
                 readonly property real cell: (width - cellGap * (n - 1)) / n
                 width: parent.width
                 height: 20
+                Rectangle {
+                    readonly property bool isEmptyTrack: true
+                    visible: cells.n === 0
+                    y: 5
+                    width: parent.width
+                    height: 8
+                    color: "transparent"
+                    border.width: 1
+                    border.color: root.line
+                }
                 Repeater {
                     model: cells.n
                     Rectangle {
                         required property int index
-                        // The state of the cell. "" for an empty cell.
-                        readonly property string cellState: index < cells.states.length ? cells.states[index] : ""
+                        readonly property string cellState: cells.states[index]
                         readonly property bool isCell: true
                         x: index * (cells.cell + cells.cellGap)
                         y: 5
                         width: cells.cell
                         height: 8
-                        color: cellState !== "" ? root.stateColors[cellState] : "transparent"
-                        border.width: cellState !== "" ? 0 : 1
-                        border.color: root.line
+                        color: root.stateColors[cellState]
                     }
                 }
             }
