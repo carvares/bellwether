@@ -380,3 +380,58 @@ def test_layout_a_sizes_and_the_frame_in_the_colour_of_the_top_status(app, layou
     settle(app)
     assert (root.width(), root.height()) == (296, 54) and frame_colour(root) == "#3c4043"
     assert visible_texts(root) == ["Herdr is offline"]
+
+
+# ----- Layout B: Tiles -----
+
+def marked(root, name):
+    return [i for i in walk(root.contentItem()) if i.property(name) and i.isVisible()]
+
+
+@only("B")
+def test_layout_b_marks_the_open_tile_and_the_card_names_the_group_and_its_number_of_agents(app, layout):
+    root, backend, messages = layout
+    backend.apply(many(blocked=1, done=0, working=3, idle=12))
+    settle(app)
+    assert (root.width(), root.height()) == (304, 176)
+    tiles = status_items(root)
+    assert [(t.width(), t.height()) for t in tiles] == [(138, 74)] * 4
+    assert [(t.x(), t.y()) for t in tiles] == [(0, 0), (146, 0), (0, 82), (146, 82)]  # a grid of 2 × 2
+    assert [t.property("solid") for t in tiles] == [True, False, False, False]  # only an attention status with agents
+    assert marked(root, "isOpenMark") == [] and marked(root, "isListTitle") == []
+    click(app, root, tiles[2])
+    assert [t.property("open") for t in tiles] == [False, False, True, False]
+    image = root.grabWindow()
+    edges = [image.pixelColor(t.mapToScene(QPointF(0, 37)).toPoint()).name() for t in tiles]
+    assert edges[0] == STATE_COLORS["blocked"] and edges[1] == "#3c4043"  # a solid tile, and the line of an empty one
+    assert edges[2] == STATE_COLORS["working"] and edges[3] not in ("#3c4043", STATE_COLORS["idle"])  # open, tinted
+    assert [m.parentItem() for m in marked(root, "isOpenMark")] == [tiles[2]]
+    assert [t.property("text") for t in marked(root, "isListTitle") + marked(root, "isListRange")] == ["Working", "3 agents"]
+    assert root.height() == 176 + 8 + 30 + 3 * 30 + 6
+    click(app, root, tiles[0])
+    assert [t.property("text") for t in marked(root, "isListTitle") + marked(root, "isListRange")] == ["Blocked", "1 agent"]
+    assert [m.parentItem() for m in marked(root, "isOpenMark")] == [tiles[0]]
+    assert marked(root, "isOpenMark")[0].property("color").name() == "#202124"  # dark on the solid tile
+    click(app, root, tiles[3])
+    assert [t.property("text") for t in marked(root, "isListTitle") + marked(root, "isListRange")] == ["Idle", "1–8 of 12"]
+    assert root.height() == 176 + 8 + 30 + 8 * 30 + 6 and len(hints(root)) == 1
+    flick = flickable(root)
+    wheel(app, root, flick.mapToScene(QPointF(100, 100)).toPoint())
+    assert marked(root, "isListRange")[0].property("text") == "3–10 of 12"
+    wheel(app, root, flick.mapToScene(QPointF(100, 100)).toPoint())
+    assert marked(root, "isListRange")[0].property("text") == "5–12 of 12"
+
+
+@only("B")
+def test_layout_b_frame_colour_and_the_offline_tiles(app, layout):
+    root, backend, messages = layout
+    for agents, colour in ((many(blocked=1, working=3), STATE_COLORS["blocked"]), (many(done=1, idle=2), STATE_COLORS["done"]),
+                           (many(working=3, idle=1), STATE_COLORS["idle"]), (many(working=2), STATE_COLORS["working"]),
+                           ([], "#3c4043"), (None, "#3c4043")):
+        backend.apply(agents)
+        settle(app)
+        assert frame_colour(root) == colour
+    assert (root.width(), root.height()) == (304, 176 + 8 + 22)  # offline: the four tiles and one line
+    numerals = [i.property("text") for i in walk(root.contentItem()) if i.property("countFor") and i.isVisible()]
+    assert numerals == ["–"] * 4 and "Herdr is offline" in visible_texts(root)
+    assert [t.property("solid") for t in status_items(root)] == [False] * 4
