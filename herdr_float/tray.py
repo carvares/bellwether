@@ -7,7 +7,8 @@ from PySide6.QtCore import QObject, Qt
 from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
-from .appicon import SIZES, load_app_icon, mark, plate_tone, tint
+from . import appicon
+from .appicon import tint
 from .state import PRIORITY
 
 log = logging.getLogger("herdr_float")
@@ -45,9 +46,17 @@ class TrayIcons:
     """The tray icon of each colour: the Herdr app icon in that colour, or the circle without it. Made once."""
 
     def __init__(self, source: QImage | None) -> None:
-        tone = None if source is None else plate_tone(source)
-        self._shapes = None if source is None else [mark(source, size, tone) for size in SIZES]
+        self._shapes = None if source is None else appicon.shapes(source)
         self._icons: dict[str, QIcon] = {}
+
+    @classmethod
+    def load(cls, desktop_dirs=None, icon_dirs=None) -> "TrayIcons":
+        """The icons from the installed Herdr app icon. Any failure gives the circle: the widget must start."""
+        try:
+            return cls(appicon.load_app_icon(desktop_dirs, icon_dirs))
+        except Exception as exc:  # The class name only: the text of an error can hold a path.
+            log.info("the Herdr app icon cannot be used (%s): the tray icon is a circle", type(exc).__name__)
+            return cls(None)
 
     def icon(self, color: str) -> QIcon:
         if color not in self._icons:
@@ -67,7 +76,7 @@ class Tray(QObject):
         self._backend = backend
         self._window = window
         self._shown_state: str | None = None
-        self._icons = TrayIcons(load_app_icon())
+        self._icons = TrayIcons.load()
 
         self._menu = QMenu()
         self._toggle_action = self._menu.addAction("Hide widget")

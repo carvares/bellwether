@@ -15,7 +15,11 @@ log = logging.getLogger("herdr_float")
 
 DESKTOP_FILE = "herdr-app.desktop"
 SIZES = (16, 22, 24, 32, 44, 48, 64)  # The tray takes the size it needs, at 1x and 2x.
-SOURCE_SIZE = 256  # An SVG is drawn at this size one time; each tray size is made from that image.
+SOURCE_SIZE = 256  # An SVG is drawn at this size one time and a bigger PNG is scaled down to it.
+CLIP_KEEPS = 0.1  # A clip that keeps less than this part of the drawing is a clip for a detail, not for the tile.
+# A usable mark covers this part of its square: less is nearly empty, more is a plain square.
+MARK_COVER = (0.03, 0.97)
+MARK_HOLE = 0.02  # On a plate, the picture that is cut out is at least this part of the square.
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,127}")
 _ARGB = QImage.Format.Format_ARGB32
 _SVG_NS = "{http://www.w3.org/2000/svg}"
@@ -54,7 +58,10 @@ def _icon_entry(desktop_dirs) -> str | None:
 
 
 def find_app_icon(desktop_dirs, icon_dirs) -> Path | None:
-    """The icon file of the Herdr app: an SVG if one exists, else the largest PNG."""
+    """The icon file of the Herdr app: an SVG if one exists, else the largest PNG.
+
+    An absolute Icon= path is taken only when it is an existing .svg or .png file.
+    """
     entry = _icon_entry(desktop_dirs)
     if entry is None:
         return None
@@ -63,13 +70,17 @@ def find_app_icon(desktop_dirs, icon_dirs) -> Path | None:
         return path if path.suffix.lower() in (".svg", ".png") and _is_file(path) else None
     if not _NAME.fullmatch(entry):
         return None
+    if entry.lower().endswith((".svg", ".png", ".xpm")):
+        entry = entry[:-4]  # Some desktop files give the name with an extension. The desktop ignores it.
     svgs, pngs = [], []
     for folder in map(Path, icon_dirs):
-        svgs += [folder / "scalable" / "apps" / f"{entry}.svg", folder / f"{entry}.svg"]
+        svgs.append(folder / "scalable" / "apps" / f"{entry}.svg")
         try:
+            svgs += sorted(folder.glob(f"*/apps/{entry}.svg"))  # An SVG in a size folder, for example 48x48.
             pngs += sorted(folder.glob(f"*/apps/{entry}.png"))
         except OSError:
             pass
+        svgs.append(folder / f"{entry}.svg")
         pngs.append(folder / f"{entry}.png")
     for path in svgs:
         if _is_file(path):
@@ -101,8 +112,17 @@ def _rect_clips(svg: bytes) -> list[tuple[float, float, float, float, float, flo
     return rects
 
 
+def _opaque(image: QImage) -> int:
+    """The number of pixels that are more opaque than transparent."""
+    return sum(1 for a in _pixels(image)[3::4] if a >= 128)
+
+
 def _render_svg(path: Path) -> QImage | None:
-    """The SVG at SOURCE_SIZE. Qt does not apply clip paths, so a used clip of one rectangle clips the drawing here."""
+    """The SVG at SOURCE_SIZE. Qt does not apply clip paths, so a used clip of one rectangle clips the drawing here.
+
+    All the rectangle clips together clip the whole drawing: correct for a clip that is the tile of the icon.
+    A clip for one detail would cut most of the icon away, so the drawing then stays as Qt draws it.
+    """
     try:
         svg = Path(path).read_bytes()
     except OSError:
@@ -111,13 +131,21 @@ def _render_svg(path: Path) -> QImage | None:
     if not renderer.isValid():
         return None
     renderer.setAspectRatioMode(Qt.AspectRatioMode.KeepAspectRatio)
+    clips = _rect_clips(svg)
+    plain = _draw_svg(renderer, [])
+    if not clips:
+        return plain
+    clipped = _draw_svg(renderer, clips)
+    return clipped if _opaque(clipped) >= CLIP_KEEPS * _opaque(plain) else plain
+
+
+def _draw_svg(renderer: QSvgRenderer, clips) -> QImage:
     box = renderer.viewBoxF()
     scale = SOURCE_SIZE / max(box.width(), box.height(), 1e-9)
     image = QImage(SOURCE_SIZE, SOURCE_SIZE, _ARGB)
     image.fill(Qt.GlobalColor.transparent)
     painter = QPainter(image)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    clips = _rect_clips(svg)
     if clips:
         # The same mapping as the renderer: the view box, scaled to fit, in the centre of the image.
         dx = (SOURCE_SIZE - box.width() * scale) / 2 - box.x() * scale
@@ -138,6 +166,10 @@ def load_source(path: Path) -> QImage | None:
     picture = QImage(str(path))
     if picture.isNull():
         return None
+    if max(picture.width(), picture.height()) > SOURCE_SIZE:
+        # A big PNG: the work on each pixel that follows must not run on a million pixels.
+        picture = picture.scaled(SOURCE_SIZE, SOURCE_SIZE, Qt.AspectRatioMode.KeepAspectRatio,
+                                 Qt.TransformationMode.SmoothTransformation)
     side = max(picture.width(), picture.height())
     image = QImage(side, side, _ARGB)
     image.fill(Qt.GlobalColor.transparent)
@@ -236,6 +268,20 @@ def mark(source: QImage, size: int, tone: float | None) -> QImage:
     data = bytearray(4 * len(alpha))
     data[3::4] = alpha
     return QImage(bytes(data), size, size, size * 4, _ARGB).copy()
+
+
+def shapes(source: QImage) -> list[QImage] | None:
+    """The mark at each tray size, or None (with one log line) when the mark does not show the icon."""
+    tone = plate_tone(source)
+    made = [mark(source, size, tone) for size in SIZES]
+    big = made[-1]
+    area = big.width() * big.height()
+    cover = _opaque(big) / area
+    hole = _opaque(_drawn(source, big.width())) / area - cover
+    if not MARK_COVER[0] <= cover <= MARK_COVER[1] or (tone is not None and hole < MARK_HOLE):
+        log.info("the Herdr app icon gives no clear mark: the tray icon is a circle")
+        return None
+    return made
 
 
 def tint(shape: QImage, color: str) -> QImage:
