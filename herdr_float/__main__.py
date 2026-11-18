@@ -9,11 +9,12 @@ import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
 from .backend import Backend
 from .client import HerdrClient
+from .tray import STATE_COLORS, Tray
 
 LOG_PATH = Path.home() / ".local" / "state" / "herdr-float" / "herdr-float.log"
 UI_PATH = Path(__file__).parent / "ui"
@@ -48,8 +49,9 @@ def main() -> int:
         return 0
 
     os.environ.setdefault("QT_QPA_PLATFORM", "wayland")
-    app = QGuiApplication(sys.argv)
+    app = QApplication(sys.argv)
     app.setApplicationName("herdr-float")
+    app.setQuitOnLastWindowClosed(False)
     if app.platformName() != "wayland":
         logging.getLogger("herdr_float").warning(
             "the Qt platform is %s, not wayland: the widget cannot be an overlay", app.platformName()
@@ -60,6 +62,7 @@ def main() -> int:
     backend = Backend(HerdrClient())
     engine = QQmlApplicationEngine()
     engine.rootContext().setContextProperty("backend", backend)
+    engine.rootContext().setContextProperty("stateColors_", STATE_COLORS)
     engine.addImportPath(str(IMPORT_PATH))
     if (IMPORT_PATH / "org" / "kde" / "layershell" / "qmldir").is_file():
         engine.load(UI_PATH / "Main.qml")
@@ -69,10 +72,21 @@ def main() -> int:
         )
         return 1
 
+    tray = None
+    if QSystemTrayIcon.isSystemTrayAvailable():
+        tray = Tray(backend, engine.rootObjects()[0], app)
+    else:
+        logging.getLogger("herdr_float").warning("no system tray, the widget has no tray icon")
+
     backend.start()
     app.aboutToQuit.connect(backend.stop)
     logging.getLogger("herdr_float").info("started")
-    return app.exec()
+    code = app.exec()
+    # Delete the QML engine (and its window) first: its bindings read the backend until they are gone.
+    del engine
+    del tray
+    del backend
+    return code
 
 
 if __name__ == "__main__":

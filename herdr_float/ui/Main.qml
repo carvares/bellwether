@@ -11,13 +11,7 @@ Window {
     // True until the user moves the pill: it then stays at the top-right corner when its size changes.
     property bool atDefault: false
     readonly property int edge: 16
-    readonly property var stateColors: ({
-        "blocked": "#f28b82",
-        "done": "#fdd663",
-        "working": "#8ab4f8",
-        "idle": "#81c995",
-        "unknown": "#9aa0a6"
-    })
+    readonly property var stateColors: stateColors_
 
     visible: true
     color: "transparent"
@@ -59,6 +53,15 @@ Window {
     }
     onWidthChanged: clampPosition()
     onHeightChanged: clampPosition()
+
+    // Close the list when Herdr goes offline, so that it does not open by itself when Herdr comes back.
+    Connections {
+        target: backend
+        function onChanged() {
+            if (!backend.online)
+                root.expanded = false
+        }
+    }
 
     Rectangle {
         id: panel
@@ -123,7 +126,8 @@ Window {
                     function onFocusFailed(paneId, message) {
                         list.failedPane = paneId
                         list.failedMessage = message
-                        root.expanded = true
+                        if (backend.online)
+                            root.expanded = true
                         failTimer.restart()
                     }
                 }
@@ -223,7 +227,7 @@ Window {
                 if (moved)
                     backend.savePosition(root.posX, root.posY)
                 else
-                    root.expanded = !root.expanded
+                    root.expanded = backend.online && !root.expanded
             }
         }
     }
