@@ -211,6 +211,10 @@ Window {
             property real startX: 0
             property real startY: 0
             property bool moved: false
+            // Time of the last margin change. At most one change in each 16 ms, so that a pointer event
+            // that comes before the compositor applies the last margin does not count the motion twice.
+            // A dropped event loses nothing: the next one uses the absolute pointer position again.
+            property double lastMoveMs: 0
             onPressed: (mouse) => { startX = mouse.x; startY = mouse.y; moved = false }
             onPositionChanged: (mouse) => {
                 var dx = mouse.x - startX
@@ -218,6 +222,10 @@ Window {
                 if (!moved && Math.abs(dx) + Math.abs(dy) < 6)
                     return
                 moved = true
+                var now = Date.now()
+                if (now - lastMoveMs < 16)
+                    return
+                lastMoveMs = now
                 root.atDefault = false
                 root.posX += dx
                 root.posY += dy

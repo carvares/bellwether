@@ -1,41 +1,16 @@
-import os
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+import logging
+import time
 
 import pytest
-from PySide6.QtCore import QCoreApplication
 
 from herdr_float.backend import Backend
 from herdr_float.client import HerdrError, HerdrOffline
 from herdr_float.state import Agent
 
 
-@pytest.fixture(scope="session")
-def app():
-    return QCoreApplication.instance() or QCoreApplication([])
-
-
-class FakeClient:
-    def __init__(self):
-        self.result = {"type": "agent_list", "agents": []}
-        self.list_error = None
-        self.focus_error = None
-        self.focused = []
-
-    def list_agents(self):
-        if self.list_error:
-            raise self.list_error
-        return self.result
-
-    def focus_agent(self, pane_id):
-        self.focused.append(pane_id)
-        if self.focus_error:
-            raise self.focus_error
-
-
 @pytest.fixture
-def backend(app, tmp_path):
-    return Backend(FakeClient(), settings_path=tmp_path / "state.json")
+def backend(app, fake_client, tmp_path):
+    return Backend(fake_client, settings_path=tmp_path / "state.json")
 
 
 def test_starts_offline_with_five_zero_counters(backend):
@@ -101,10 +76,41 @@ def test_focus_error_emits_focus_failed(backend):
     assert failures[-1] == ("w1:p4", "Herdr is offline")
 
 
-def test_position_is_saved_and_loaded(app, tmp_path):
+def test_position_is_saved_and_loaded(app, fake_client, tmp_path):
     path = tmp_path / "state.json"
-    first = Backend(FakeClient(), settings_path=path)
+    first = Backend(fake_client, settings_path=path)
     assert (first.savedX, first.savedY) == (-1, -1)
     first.savePosition(300, 40)
-    second = Backend(FakeClient(), settings_path=path)
+    second = Backend(fake_client, settings_path=path)
     assert (second.savedX, second.savedY) == (300, 40)
+
+
+def wait_for(app, condition, timeout=2.0):
+    """Deliver Qt events until condition() is true. Return False on timeout."""
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        app.processEvents()
+        if condition():
+            return True
+        time.sleep(0.005)
+    return False
+
+
+def test_polling_continues_after_an_unexpected_error(app, fake_client, tmp_path, caplog):
+    caplog.set_level(logging.INFO, logger="herdr_float")
+    backend = Backend(fake_client, interval=0.02, settings_path=tmp_path / "state.json")
+    backend.start()
+    try:
+        assert wait_for(app, lambda: backend.online), "the first snapshot did not arrive"
+        fake_client.list_error = RuntimeError("text from the server")
+        assert wait_for(app, lambda: not backend.online), "an unexpected error did not set offline"
+        time.sleep(0.1)  # several more failed cycles: the warning must stay one record
+        assert backend._thread.is_alive()
+        warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+        assert warnings == ["snapshot failed: RuntimeError"]
+        assert "text from the server" not in caplog.text
+        fake_client.list_error = None
+        assert wait_for(app, lambda: backend.online), "polling did not recover"
+    finally:
+        backend.stop()
+    assert not backend._thread.is_alive()

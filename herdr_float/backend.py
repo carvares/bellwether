@@ -76,7 +76,7 @@ class Backend(QObject):
         """Read one snapshot. Runs on the worker thread."""
         try:
             agents = parse_agents(self._client.list_agents())
-        except (HerdrOffline, HerdrProtocolError, HerdrError) as exc:
+        except Exception as exc:  # any failure means offline; the poll thread must not end
             failure = type(exc).__name__
             if failure != self._last_failure:
                 log.warning("snapshot failed: %s", failure)
@@ -101,9 +101,12 @@ class Backend(QObject):
 
     def _run(self) -> None:
         while not self._stop.is_set():
-            self._snapshot.emit(self.fetch())
-            self._wake.wait(self._interval)
+            # Clear before the read: a wake that comes during the read starts the next read at once.
             self._wake.clear()
+            self._snapshot.emit(self.fetch())
+            # A stop() that came before the clear above is seen here, so the thread does not wait one interval.
+            if not self._stop.is_set():
+                self._wake.wait(self._interval)
 
     # ----- actions from QML -----
 
