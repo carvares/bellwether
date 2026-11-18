@@ -4,7 +4,7 @@
 
 **Goal:** A small always-on-top window on KDE Wayland that shows how many Herdr agents are in each state and lets the user jump to an agent.
 
-**Architecture:** A Python backend reads `agent.list` from the Herdr socket one time each second and gives the result to a QML interface. The QML window is a layer-shell overlay surface, so the compositor keeps it above other windows. A systemd user service starts the program at desktop login, so it runs all the time and does not depend on Herdr.
+**Architecture:** A Python backend reads `agent.list` from the Herdr socket one time each second and gives the result to a QML interface. The QML window is a layer-shell overlay surface, so the compositor keeps it above other windows. A thin Herdr plugin starts the program when Herdr starts. After the start, the program is an independent process.
 
 **Tech Stack:** Python 3.12+, PySide6 (system package, Qt 6.12), QML, `org.kde.layershell` QML module (package `layer-shell-qt`), pytest, uv.
 
@@ -16,12 +16,13 @@
 - Scope: the default local Herdr session only. Socket: `~/.config/herdr/herdr.sock`.
 - Five states, never merged: `blocked`, `done`, `working`, `idle`, `unknown`. Display order is that order.
 - `blocked` and `done` are the attention states.
+- A system tray icon lets the user hide, show and quit the widget.
 - The widget only reads Herdr state. The one write is `agent.focus` on a user click.
 - Logs: `~/.local/state/herdr-float/herdr-float.log`. IDs and states only. No pane text.
 - Position file: `~/.config/herdr-float/state.json`.
 - PySide6 comes from the system package `pyside6`, not from PyPI. The PyPI wheel has its own Qt and cannot load the system layer-shell plugin.
 - Commits: use the configured git identity. No AI attribution in commit messages. Do not push unless the user asks.
-- The widget runs all the time, also when Herdr is closed. It must not need Herdr to start.
+- The widget starts with Herdr (plugin). It stays on the screen after the Herdr window closes. No systemd service.
 - Do not run `herdr server stop`. Do not close panes, tabs or workspaces.
 - All commands run from `/home/carvares/Projects/Personal/herdr-float`.
 
@@ -32,6 +33,7 @@
 - `agent.list` takes `{}` and returns `{"type": "agent_list", "agents": [AgentInfo]}`.
 - `AgentInfo` required fields: `terminal_id`, `agent_status`, `workspace_id`, `tab_id`, `pane_id`, `focused`, `revision`. Optional: `name`, `agent`, `display_agent`, `title`.
 - `agent.focus` takes `{"target": "<pane id or agent name>"}`.
+- Plugin manifest: `herdr-plugin.toml` with `id`, `name`, `version`, `min_herdr_version`, `platforms`, `[[startup]]`. Local install: `herdr plugin link <path>`.
 - The `pane.agent_status_changed` subscription needs a `pane_id`. There is no global status subscription. This is why the plan uses a 1-second read and not events.
 
 ## Not verified (Task 1 tests these)
@@ -50,8 +52,10 @@
 | `herdr_float/settings.py` | Load and save the window position. |
 | `herdr_float/backend.py` | Qt object: 1-second read thread, properties for QML, focus slot. |
 | `herdr_float/ui/Main.qml` | Layer-shell window, pill, list, drag. |
+| `herdr_float/tray.py` | System tray icon: hide, show, quit. State colours. |
 | `herdr_float/__main__.py` | Logging, single instance, start. |
-| `systemd/herdr-float.service` | systemd user service. Starts the widget at login. |
+| `plugin/herdr-plugin.toml` | Herdr plugin manifest. |
+| `plugin/start.sh` | Start command for the plugin. |
 | `tests/` | pytest files, one for each Python module. |
 | `spike/` | Throwaway test scripts from Task 1. |
 
@@ -1515,73 +1519,385 @@ git commit -m "Add agent list with jump to pane"
 
 ---
 
-### Task 8: Run all the time (systemd user service), README and task notes
+### Task 8: System tray icon (hide, show, quit)
 
 **Files:**
-- Create: `systemd/herdr-float.service`
+- Create: `herdr_float/tray.py`
+- Test: `tests/test_tray.py`
+- Modify: `herdr_float/__main__.py` (the `main` function)
+- Modify: `herdr_float/ui/Main.qml` (the `stateColors` property)
+
+**Interfaces:**
+- Consumes: `Backend.online`, `Backend.counters`, `Backend.changed` (Task 5); the QML root window from `engine.rootObjects()[0]` (Task 6).
+- Produces:
+  - `STATE_COLORS: dict[str, str]` (the one source of the state colours, also given to QML as the context property `stateColors_`)
+  - `top_state(online: bool, counters: list[dict]) -> str`: `"offline"`, the first state in display order with a count above zero, or `"none"`.
+  - `tooltip_text(online: bool, counters: list[dict]) -> str`
+  - `Tray(backend, window, app)`: a `QObject` that owns the tray icon and its menu.
+
+Requirement from the user: an icon in the system tray, as Slack has. From the icon, the user can hide the widget or close it.
+
+Behaviour:
+- A left click on the icon hides the widget. A second left click shows it again.
+- A right click opens a menu: "Hide widget" or "Show widget" (the text follows the state), and "Quit".
+- "Quit" stops the program. The plugin starts it again at the next Herdr start.
+- The icon is a dot. Its colour is the colour of the most important state that has agents. So the icon shows that an agent needs attention when the widget is hidden.
+- The tooltip gives the five counts.
+- The widget is always visible after a start. The hidden state is not saved.
+
+- [ ] **Step 1: Write the failing tests**
+
+`tests/test_tray.py`:
+
+```python
+from herdr_float.state import STATES
+from herdr_float.tray import STATE_COLORS, tooltip_text, top_state
+
+
+def counters(**counts):
+    return [{"state": s, "count": counts.get(s, 0), "attention": s in ("blocked", "done")} for s in STATES]
+
+
+def test_every_state_and_offline_and_none_has_a_colour():
+    assert set(STATE_COLORS) == set(STATES) | {"offline", "none"}
+
+
+def test_top_state_is_offline_when_not_online():
+    assert top_state(False, counters(blocked=3)) == "offline"
+
+
+def test_top_state_is_none_with_no_agents():
+    assert top_state(True, counters()) == "none"
+
+
+def test_top_state_follows_display_order():
+    assert top_state(True, counters(idle=5, working=2)) == "working"
+    assert top_state(True, counters(idle=5, done=1, working=2)) == "done"
+    assert top_state(True, counters(idle=5, done=1, blocked=1)) == "blocked"
+    assert top_state(True, counters(unknown=1)) == "unknown"
+
+
+def test_tooltip_text():
+    assert tooltip_text(False, counters()) == "Herdr Float: offline"
+    assert tooltip_text(True, counters(blocked=1, idle=2)) == (
+        "Herdr Float: 1 blocked, 0 done, 0 working, 2 idle, 0 unknown"
+    )
+```
+
+- [ ] **Step 2: Run the tests and confirm that they fail**
+
+Run: `uv run pytest tests/test_tray.py -v`
+Expected: FAIL with `ModuleNotFoundError: No module named 'herdr_float.tray'`.
+
+- [ ] **Step 3: Write the implementation**
+
+`herdr_float/tray.py`:
+
+```python
+"""System tray icon: hide, show and quit."""
+from __future__ import annotations
+
+import logging
+
+from PySide6.QtCore import QObject, Qt
+from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
+from PySide6.QtWidgets import QMenu, QSystemTrayIcon
+
+log = logging.getLogger("herdr_float")
+
+STATE_COLORS: dict[str, str] = {
+    "blocked": "#f28b82",
+    "done": "#fdd663",
+    "working": "#8ab4f8",
+    "idle": "#81c995",
+    "unknown": "#9aa0a6",
+    "offline": "#5f6368",
+    "none": "#5f6368",
+}
+
+
+def top_state(online: bool, counters: list[dict]) -> str:
+    if not online:
+        return "offline"
+    for counter in counters:
+        if counter["count"] > 0:
+            return counter["state"]
+    return "none"
+
+
+def tooltip_text(online: bool, counters: list[dict]) -> str:
+    if not online:
+        return "Herdr Float: offline"
+    return "Herdr Float: " + ", ".join(f'{c["count"]} {c["state"]}' for c in counters)
+
+
+def make_icon(color: str) -> QIcon:
+    pixmap = QPixmap(64, 64)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(color))
+    painter.drawEllipse(8, 8, 48, 48)
+    painter.end()
+    return QIcon(pixmap)
+
+
+class Tray(QObject):
+    def __init__(self, backend, window, app) -> None:
+        super().__init__()
+        self._backend = backend
+        self._window = window
+        self._shown_state: str | None = None
+
+        self._menu = QMenu()
+        self._toggle_action = self._menu.addAction("Hide widget")
+        self._toggle_action.triggered.connect(self.toggle)
+        self._menu.addSeparator()
+        self._menu.addAction("Quit").triggered.connect(app.quit)
+
+        self._icon = QSystemTrayIcon(self)
+        self._icon.setContextMenu(self._menu)
+        self._icon.activated.connect(self._on_activated)
+
+        backend.changed.connect(self.refresh)
+        window.visibleChanged.connect(self._sync_label)
+        self.refresh()
+        self._sync_label()
+        self._icon.show()
+
+    def toggle(self, *_args) -> None:
+        visible = not self._window.isVisible()
+        self._window.setVisible(visible)
+        log.info("widget %s from tray", "shown" if visible else "hidden")
+
+    def refresh(self) -> None:
+        online, counters = self._backend.online, self._backend.counters
+        state = top_state(online, counters)
+        if state != self._shown_state:
+            self._icon.setIcon(make_icon(STATE_COLORS[state]))
+            self._shown_state = state
+        self._icon.setToolTip(tooltip_text(online, counters))
+
+    def _sync_label(self, *_args) -> None:
+        self._toggle_action.setText("Hide widget" if self._window.isVisible() else "Show widget")
+
+    def _on_activated(self, reason) -> None:
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            self.toggle()
+```
+
+- [ ] **Step 4: Run the tests and confirm that they pass**
+
+Run: `uv run pytest tests/test_tray.py -v`
+Expected: 5 passed.
+
+- [ ] **Step 5: Use the tray in the program start**
+
+A tray icon needs `QApplication` from `QtWidgets`. `QGuiApplication` is not sufficient.
+
+In `herdr_float/__main__.py`, replace the import line:
+
+```python
+from PySide6.QtGui import QGuiApplication
+```
+
+with:
+
+```python
+from PySide6.QtWidgets import QApplication, QSystemTrayIcon
+```
+
+Add this import below `from .client import HerdrClient`:
+
+```python
+from .tray import STATE_COLORS, Tray
+```
+
+Replace this block in `main`:
+
+```python
+    app = QGuiApplication(sys.argv)
+    app.setApplicationName("herdr-float")
+```
+
+with:
+
+```python
+    app = QApplication(sys.argv)
+    app.setApplicationName("herdr-float")
+    app.setQuitOnLastWindowClosed(False)
+```
+
+Replace this line:
+
+```python
+    engine.rootContext().setContextProperty("backend", backend)
+```
+
+with:
+
+```python
+    engine.rootContext().setContextProperty("backend", backend)
+    engine.rootContext().setContextProperty("stateColors_", STATE_COLORS)
+```
+
+Replace this block:
+
+```python
+    backend.start()
+    app.aboutToQuit.connect(backend.stop)
+```
+
+with:
+
+```python
+    tray = None
+    if QSystemTrayIcon.isSystemTrayAvailable():
+        tray = Tray(backend, engine.rootObjects()[0], app)
+    else:
+        logging.getLogger("herdr_float").warning("no system tray, the widget has no tray icon")
+
+    backend.start()
+    app.aboutToQuit.connect(backend.stop)
+```
+
+Notes for the implementer:
+- `setQuitOnLastWindowClosed(False)` is necessary. Without it, Qt stops the program when the hidden widget is the last window.
+- Keep the `tray` variable. If Python deletes the object, the icon goes away.
+- Without a system tray, the widget runs as before. The user then stops it with `pkill`.
+
+- [ ] **Step 6: Use the one colour source in QML**
+
+In `herdr_float/ui/Main.qml`, replace this block:
+
+```qml
+    readonly property var stateColors: ({
+        "blocked": "#f28b82",
+        "done": "#fdd663",
+        "working": "#8ab4f8",
+        "idle": "#81c995",
+        "unknown": "#9aa0a6"
+    })
+```
+
+with:
+
+```qml
+    readonly property var stateColors: stateColors_
+```
+
+The context property has the name `stateColors_` (Step 5). The different name prevents a binding loop between the window property and the context property.
+
+- [ ] **Step 7: Run the widget and check it (the user must look at the screen)**
+
+Run: `uv run python -m herdr_float`
+
+Check each point:
+- A dot icon shows in the system tray. If it is in the hidden part of the tray, the user can pin it in the KDE tray settings.
+- A left click on the icon hides the widget. A second left click shows it at the same position.
+- A right click opens the menu. The first entry is "Hide widget" when the widget is visible and "Show widget" when it is hidden.
+- With the widget hidden, an agent that changes to `blocked` changes the icon colour in less than 2 seconds.
+- The tooltip shows the five counts.
+- Hide, then show, then drag: the drag and the saved position work as before.
+- After a show, the widget is still above a maximized window.
+- "Quit" removes the widget and the icon, and the process ends (`pgrep -f "python -m herdr_float"` prints nothing).
+- With the widget hidden, a second `uv run python -m herdr_float` exits and does not make a second icon.
+
+Fix each point that fails before the commit.
+
+- [ ] **Step 8: Run all tests**
+
+Run: `uv run pytest -v`
+Expected: 40 passed.
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add herdr_float/tray.py tests/test_tray.py herdr_float/__main__.py herdr_float/ui/Main.qml
+git commit -m "Add system tray icon with hide, show and quit"
+```
+
+---
+
+### Task 9: Herdr plugin, README and task notes
+
+**Files:**
+- Create: `plugin/herdr-plugin.toml`, `plugin/start.sh`
 - Create: `README.md`
 - Create: Obsidian task notes (see Step 5)
 
 **Interfaces:**
 - Consumes: `python -m herdr_float` (Task 6). The single-instance lock makes a second start safe.
-- Produces: the widget starts at desktop login and runs until logout. It does not depend on Herdr. With Herdr closed or stopped, the pill shows "offline" or the last server state, and it recovers without a restart.
+- Produces: the widget starts when Herdr starts. After that it is an independent process: it stays on the screen when the Herdr window closes, and it stops at desktop logout.
 
-Requirement from the user: "I want it to run all the time, even when the herdr desktop app is closed." For this reason there is no Herdr plugin. A plugin starts only when the Herdr server starts.
+Decision from the user: the widget is a Herdr plugin that starts only when Herdr starts. There is no systemd service and no start at desktop login.
 
-- [ ] **Step 1: Write the service file**
+- [ ] **Step 1: Write the plugin files**
 
-`systemd/herdr-float.service`:
+`plugin/herdr-plugin.toml`:
 
-```ini
-[Unit]
-Description=herdr-float agent status widget
-PartOf=graphical-session.target
-After=graphical-session.target
+```toml
+# herdr-float plugin manifest.
 
-[Service]
-WorkingDirectory=%h/Projects/Personal/herdr-float
-ExecStart=%h/Projects/Personal/herdr-float/.venv/bin/python -m herdr_float
-Restart=on-failure
-RestartSec=3
+id = "carvares.herdr-float"
+name = "Herdr Float"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "Starts the floating agent status widget"
+platforms = ["linux"]
 
-[Install]
-WantedBy=graphical-session.target
+# A one-shot launch. The widget keeps itself alive and allows one instance only.
+[[startup]]
+platforms = ["linux"]
+command = ["./start.sh"]
 ```
 
-Notes for the implementer:
-- `%h` is the home directory of the user.
-- `PartOf=graphical-session.target` stops the widget at logout.
-- `Restart=on-failure` starts the widget again after a crash. A second instance exits with code 0, so it does not cause a restart loop.
-
-- [ ] **Step 2: Install and start the service (ask the user first)**
-
-This step changes the user's login session. Ask the user before you run it. Stop a manually started widget first.
+`plugin/start.sh`:
 
 ```bash
-pkill -f "python -m herdr_float"
-mkdir -p ~/.config/systemd/user
-ln -sf /home/carvares/Projects/Personal/herdr-float/systemd/herdr-float.service ~/.config/systemd/user/herdr-float.service
-systemctl --user daemon-reload
-systemctl --user enable --now herdr-float.service
-systemctl --user status herdr-float.service --no-pager
+#!/bin/sh
+# Start herdr-float as an independent background process and return immediately.
+root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$root" || exit 1
+setsid -f "$root/.venv/bin/python" -m herdr_float >/dev/null 2>&1
 ```
 
-Expected: `Active: active (running)`, and the pill shows on the screen.
+Then: `chmod +x plugin/start.sh`
 
-If the status shows a failure to connect to the display, the user service manager does not have `WAYLAND_DISPLAY`. Check with `systemctl --user show-environment | grep WAYLAND`. If it is missing, tell the user. Do not write the variable into the service file with a fixed value.
+Notes for the implementer:
+- `setsid -f` puts the widget in its own session. So the widget does not stop when the plugin command ends or when Herdr closes.
+- A second start is safe. The widget allows one instance only and the second process exits with code 0.
 
-- [ ] **Step 3: Check that it runs without Herdr (the user must look at the screen)**
+- [ ] **Step 2: Link the plugin (ask the user first)**
+
+This step changes the user's Herdr configuration. Ask the user before you run it.
+
+```bash
+herdr plugin link /home/carvares/Projects/Personal/herdr-float/plugin
+herdr plugin list --plugin carvares.herdr-float
+```
+
+Expected: the plugin shows as enabled with no warnings.
+
+If `herdr plugin link` rejects the manifest, read the error, compare with `~/.config/herdr/plugins/github/herdr.auto-title-*/herdr-plugin.toml`, and correct the manifest.
+
+- [ ] **Step 3: Check the start and the life of the widget (the user does these steps)**
+
+Not verified before this step: the moment when Herdr runs a `[[startup]]` command. It is possibly at server start only, and not each time the Herdr window opens. This step finds the answer.
 
 Do not stop the Herdr server yourself. Ask the user to do these steps at a time that is safe for their running agents.
 
-Check each point:
-- Close the Herdr window (detach the client). The pill stays on the screen. Record what it shows: the counts (the server continues) or "offline".
-- Open Herdr again. The counts are correct in less than 2 seconds, with no widget restart.
-- If the user agrees to stop the Herdr server: the pill shows "offline". After Herdr starts again, the counts come back in less than 2 seconds.
-- `systemctl --user kill --signal=SIGKILL herdr-float.service`: the pill comes back in about 3 seconds.
-- Log out and log in: the pill shows without a manual start.
+1. Stop the widget: tray icon, "Quit".
+2. Close the Herdr window and open it again. Does the widget show? Record the answer.
+3. If it does not show, restart the Herdr server. Confirm that the widget shows.
+4. Run `herdr plugin log list --plugin carvares.herdr-float --limit 5` and confirm that the startup command succeeded.
+5. Close the Herdr window. Confirm that the widget stays on the screen. Record what the pill shows: the counts or "offline".
+6. Open Herdr again. Confirm that there is one widget only, and that the counts are correct in less than 2 seconds.
 
-Mark each point that the user did not do as **not verified** in the final report.
+If step 2 shows that the widget does not start when the window opens, tell the user. The user decides if a start at server start only is sufficient.
+
+Mark each step that the user did not do as **not verified** in the final report.
 
 - [ ] **Step 4: Write the README**
 
@@ -1599,26 +1915,25 @@ For KDE Plasma on Wayland only.
     uv venv --system-site-packages --python /usr/bin/python3
     uv sync
 
-## Run one time
+## Start with Herdr
+
+    herdr plugin link "$PWD/plugin"
+
+The widget starts when Herdr starts. It stays on the screen after you close Herdr.
+Stop it: right-click the tray icon, then "Quit".
+Remove the automatic start: `herdr plugin unlink carvares.herdr-float`
+
+## Start manually
 
     uv run python -m herdr_float
-
-## Run all the time
-
-    mkdir -p ~/.config/systemd/user
-    ln -sf "$PWD/systemd/herdr-float.service" ~/.config/systemd/user/
-    systemctl --user daemon-reload
-    systemctl --user enable --now herdr-float.service
-
-Stop it: `systemctl --user disable --now herdr-float.service`
-
-The service file expects the repository at `~/Projects/Personal/herdr-float`.
 
 ## Use
 
 - The pill shows five counts: blocked, done, working, idle, unknown.
 - Click the pill to open the agent list. Click an agent to go to its pane.
 - Drag the pill to move it. The position is saved.
+- Click the tray icon to hide or show the widget. Right-click it for the menu with "Quit".
+- The tray icon colour shows the most important state that has agents.
 - The pill shows "offline" when the Herdr server does not answer.
 
 ## Files
@@ -1636,7 +1951,7 @@ The service file expects the repository at `~/Projects/Personal/herdr-float`.
 - The jump focuses the pane in Herdr. On Wayland it possibly does not raise the terminal window.
 ```
 
-Update the "Limits" section with the result of Task 1 Step 6.
+Update the "Limits" section with the result of Task 1 Step 6, and the "Start with Herdr" section with the result of Step 3.
 
 - [ ] **Step 5: Write the Obsidian task notes**
 
@@ -1653,18 +1968,18 @@ git rm -r spike
 uv run pytest -v
 ```
 
-Expected: 35 passed.
+Expected: 40 passed.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add systemd README.md
-git commit -m "Add systemd user service and README"
+git add plugin README.md
+git commit -m "Add Herdr plugin wrapper and README"
 ```
 
 ---
 
-### Task 9: Private GitHub repository (only when the user asks)
+### Task 10: Private GitHub repository (only when the user asks)
 
 **Files:** none.
 
@@ -1698,5 +2013,5 @@ Expected: `"visibility":"PRIVATE"`.
 
 - Push updates in place of the 1-second read. This needs one `pane.agent_status_changed` subscription for each pane, plus `pane.created` and `pane.closed` to keep the subscriptions correct. Do this only if the 1-second delay is a problem.
 - A KWin script to raise the terminal window after a jump.
-- A Herdr plugin. It is not necessary, because the systemd service starts the widget.
+- A start at desktop login (systemd user service). The user decided on a plugin start.
 - Other named sessions and SSH machines.

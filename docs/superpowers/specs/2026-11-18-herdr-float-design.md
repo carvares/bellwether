@@ -13,12 +13,13 @@ It lets the user jump to an agent.
 
 | Topic | Decision |
 |---|---|
-| Form | Standalone program. A systemd user service starts it at desktop login. |
-| Run time | All the time, also when Herdr is closed. The widget does not need Herdr to start. |
+| Form | Standalone program. A thin Herdr plugin starts it when Herdr starts. |
+| Run time | From the Herdr start until desktop logout. The widget stays on the screen after the Herdr window closes. No start at desktop login. |
 | Scope | The default local Herdr session only. |
 | States | Five counters, one for each Herdr state: `idle`, `working`, `blocked`, `done`, `unknown`. No state is merged into another. |
 | Attention | `blocked` and `done` use the attention colour. |
 | Interaction | Compact counters. A click expands an agent list. A click on an agent focuses its pane. |
+| Tray | A system tray icon. Left click hides or shows the widget. The menu has "Hide widget" / "Show widget" and "Quit". |
 | Stack | Python, Qt6 (PySide6), KDE layer-shell library. |
 | Platform | Linux, KDE Plasma on Wayland. No other platform. |
 
@@ -27,8 +28,8 @@ It lets the user jump to an agent.
 Herdr plugin panes have these placements: `overlay`, `popup`, `split`, `tab`, `zoomed`.
 All of them are inside the Herdr terminal.
 None is an operating-system window, so a plugin cannot float above other applications.
-A plugin can run a command at startup, but only when the Herdr server starts.
-The widget must run all the time, so a systemd user service starts it. There is no plugin.
+A plugin can run a command at startup. The plugin uses that to start the widget.
+The user decided on 2026-11-18 that a start with Herdr is sufficient. There is no systemd service.
 
 ## Facts from the Herdr API schema
 
@@ -61,8 +62,9 @@ Each part has one job.
 | `herdr_float/settings.py` | Save and load the window position. | nothing |
 | `herdr_float/backend.py` | Qt object. Reads a snapshot each second. Gives counters and agents to the interface. | `client.py`, `state.py`, `settings.py` |
 | `herdr_float/ui/Main.qml` | Layer-shell overlay window, compact pill, expanded list, drag. | `backend.py` |
+| `herdr_float/tray.py` | System tray icon and menu. The one source of the state colours. | Qt, `backend.py` |
 | `herdr_float/__main__.py` | Connect the parts. Start the Qt application. | all parts |
-| `systemd/herdr-float.service` | systemd user service. Starts the widget at login and after a crash. | systemd |
+| `plugin/` | Herdr plugin manifest and start script. Starts the widget as an independent process. | Herdr |
 
 ## Data flow
 
@@ -110,6 +112,16 @@ Push updates (one subscription for each pane) are a later option, only if the 1-
 - The position is saved to `~/.config/herdr-float/state.json` and loaded at start.
 - If the saved position is outside the screen, the widget uses the top-right corner.
 
+**System tray icon**
+
+- The icon is a dot. Its colour is the colour of the first state, in display order, that has agents. With no agents or with Herdr offline it is grey.
+- The tooltip gives the five counts.
+- A left click hides the widget. A second left click shows it at the same position.
+- A right click opens a menu: "Hide widget" or "Show widget", and "Quit".
+- "Quit" stops the program. The plugin starts it again at the next Herdr start.
+- The widget is always visible after a start. The hidden state is not saved.
+- If the desktop has no system tray, the widget runs without an icon.
+
 ## Failure cases
 
 | Case | Behaviour |
@@ -149,5 +161,6 @@ Logs contain IDs and states only. They do not contain pane text.
 3. `client.py` with tests.
 4. Window and compact pill.
 5. Expanded list and jump.
-6. systemd user service.
-7. Live check. Handoff notes in Obsidian.
+6. System tray icon.
+7. Herdr plugin wrapper.
+8. Live check. Handoff notes in Obsidian.
