@@ -11,4 +11,6 @@ logdir="$state/bellwether"
 # stop the widget from moving the old one. The widget moves the old folder, with this start.log, to the new name.
 [ ! -e "$logdir" ] && [ -d "$state/herdr-float" ] && logdir="$state/herdr-float"
 mkdir -p "$logdir"
+# start.log only grows: empty it when it is larger than 1 MiB.
+[ -f "$logdir/start.log" ] && [ "$(wc -c <"$logdir/start.log")" -gt 1048576 ] && : >"$logdir/start.log"
 setsid -f "$root/.venv/bin/python" -m bellwether </dev/null >>"$logdir/start.log" 2>&1
