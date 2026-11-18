@@ -15,6 +15,7 @@ from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
 from .backend import Backend
 from .client import HerdrClient, find_executables
+from .events import EventSource
 from .icons import Icons
 from .tray import STATE_COLORS, Tray
 
@@ -82,7 +83,10 @@ def main() -> int:
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
 
-    backend = Backend(HerdrClient(*find_executables()), icons=Icons())
+    app_path, core_path = find_executables()
+    # herdr-core tells of each change, so a change shows at once. Without herdr-core: one read each second.
+    events = (lambda wake: EventSource([core_path, "events", "--json"], wake)) if core_path else None
+    backend = Backend(HerdrClient(app_path, core_path), icons=Icons(), events=events)
     engine = QQmlApplicationEngine()
     engine.rootContext().setContextProperty("backend", backend)
     engine.rootContext().setContextProperty("stateColors_", STATE_COLORS)

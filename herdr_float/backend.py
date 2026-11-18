@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import re
 import threading
+import time
 from pathlib import Path
 
 from PySide6.QtCore import Property, QObject, Signal, Slot
@@ -13,6 +14,16 @@ from .settings import DEFAULT_PATH, load_position, save_position
 from .state import ATTENTION, STATES, Agent, count_states, top_state
 
 log = logging.getLogger("herdr_float")
+
+# Seconds between two reads while the event stream is healthy. Each change comes as an event, so these
+# reads only repair a missed one. With no healthy stream, `interval` (one second) is used.
+SLOW_INTERVAL = 5.0
+# The shortest time from the start of one read to the start of the next.
+# Titles can change ten times each second while an agent works: this keeps the reads at ten each second.
+FLOOR = 0.1
+# After a wake: the waits before more reads. The app shows some changes up to 0.5 s (one time 1.5 s) later
+# than herdr-core tells of them. The reads come 0.15, 0.4, 0.55, 1.0 and 1.6 s after the read of the wake.
+AFTER = (0.15, 0.25, 0.15, 0.45, 0.6)
 
 
 def _natural(address: str) -> list:
@@ -27,16 +38,23 @@ class Backend(QObject):
     _snapshot = Signal(object)
     _focusDone = Signal()
 
-    def __init__(self, client, interval: float = 1.0, settings_path: Path = DEFAULT_PATH, icons=None) -> None:
+    def __init__(self, client, interval: float = 1.0, settings_path: Path = DEFAULT_PATH, icons=None,
+                 events=None, slow_interval: float = SLOW_INTERVAL, floor: float = FLOOR,
+                 after: tuple[float, ...] = AFTER) -> None:
         super().__init__()
         self._client = client
         self._icons = icons  # None: the agent rows show text and no icon.
-        self._interval = interval
+        self._interval = interval  # seconds between two reads when no event stream tells of changes
+        self._slow_interval = slow_interval  # the same, while the event stream is healthy
+        self._floor = floor
+        self._after = after
         self._settings_path = Path(settings_path)
         self._agents: list[Agent] = []
         self._online = False
         self._stop = threading.Event()
         self._wake = threading.Event()
+        # `events` makes the event source from the function that starts a read now. None: reads by time only.
+        self._events = events(self._wake.set) if events else None
         self._thread: threading.Thread | None = None
         self._last_failure: str | None = None
         self._opening = ""  # the key of the agent that a jump is going to; "" when no jump runs
@@ -147,21 +165,39 @@ class Backend(QObject):
     def start(self) -> None:
         self._thread = threading.Thread(target=self._run, name="herdr-poll", daemon=True)
         self._thread.start()
+        if self._events is not None:
+            self._events.start()
 
     def stop(self) -> None:
         self._stop.set()
         self._wake.set()
+        if self._events is not None:
+            self._events.stop()  # Ends the child process of the event stream.
         if self._thread is not None:
             self._thread.join(timeout=3)
 
     def _run(self) -> None:
+        after: tuple[float, ...] = ()  # the waits before the reads that follow a wake and are not done yet
         while not self._stop.is_set():
+            began = time.monotonic()
             # Clear before the read: a wake that comes during the read starts the next read at once.
+            # Many wakes during one read start one read: there is never a queue of reads.
             self._wake.clear()
             self._snapshot.emit(self.fetch())
             # A stop() that came before the clear above is seen here, so the thread does not wait one interval.
-            if not self._stop.is_set():
-                self._wake.wait(self._interval)
+            if self._stop.is_set():
+                break
+            if after:
+                seconds, after = after[0], after[1:]
+            elif self._events is not None and self._events.healthy():
+                seconds = self._slow_interval  # The stream tells of each change: this read is only a net.
+            else:
+                seconds = self._interval
+            if self._wake.wait(seconds):
+                # The app can show a change a short time after herdr-core tells of it: read again later.
+                after = self._after
+                # A stream that never stops must not start reads without a pause.
+                self._stop.wait(self._floor - (time.monotonic() - began))
 
     # ----- actions from QML -----
 
