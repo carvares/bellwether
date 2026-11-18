@@ -6,8 +6,12 @@ import org.kde.layershell as LayerShell
 Window {
     id: root
 
-    // The state whose agents show ("blocked", ...). "" means that no group is open. One group at a time.
-    property string openState: ""
+    // The state and the rules that every layout uses.
+    // (QtObject: Python reads this property, and it has no converter for a QML type.)
+    readonly property QtObject panel: panelModel
+    // The open group and the row under the pointer, for tests and scripts.
+    property alias openState: panelModel.openState
+    property alias hoverRow: panelModel.hoverItem
     // The place of the panel, from the top-left corner of its screen (screenName).
     property int posX: 0
     property int posY: 0
@@ -26,15 +30,6 @@ Window {
     property bool closedByCompositor: false
     // True until the user moves the widget: it then stays at the top-right corner when its size changes.
     property bool atDefault: false
-    // The agent of the last failed jump and the message for it. Empty again after 3 seconds.
-    property string failedKey: ""
-    property string failedMessage: ""
-    // The group that holds the failed agent now. "" when the agent is in no group (gone, or offline).
-    readonly property string failedState: failedKey === "" ? "" : stateOf(failedKey)
-    // The group of the failed agent that was opened for the message. The message opens a group one time,
-    // and again only when the agent goes to a different group, so the person can close or change the group.
-    property string failedShownIn: ""
-    property Item hoverRow: null
     // The refresh rate of the screen of the window, in Hz. The program sets it (QML does not have it). 0: unknown.
     property real refreshRate: 0
     // The shortest time between two moves of a drag: two frames of the screen, from 4 ms to 20 ms. A new margin
@@ -44,21 +39,10 @@ Window {
     readonly property int edge: 16
     readonly property int statusRowHeight: 32
     readonly property int agentRowHeight: 28
-    readonly property int maxAgentRows: 8
     readonly property int inset: 14
-    readonly property var stateColors: stateColors_
-    // The sum of the four counts. 0 when Herdr is offline.
-    readonly property int total: {
-        var sum = 0
-        var groups = backend.online ? backend.groups : []
-        for (var i = 0; i < groups.length; i++)
-            sum += groups[i].count
-        return sum
-    }
     // The colour of the top status: the corner brackets and the tag in the header. Neutral with no agents
     // and when Herdr is offline.
-    readonly property color signalColor: backend.topState === "none" || backend.topState === "offline" ? "#6b747d"
-        : stateColors[backend.topState]
+    readonly property color signalColor: panel.quiet ? "#6b747d" : panel.topColor
     // Hack, or the first monospace font that this system has.
     readonly property string mono: {
         var have = Qt.fontFamilies()
@@ -75,8 +59,8 @@ Window {
     visible: true
     color: "transparent"
     flags: Qt.FramelessWindowHint | Qt.WindowDoesNotAcceptFocus
-    width: panel.width
-    height: panel.height
+    width: frame.width
+    height: frame.height
 
     LayerShell.Window.scope: "bellwether"
     LayerShell.Window.layer: LayerShell.Window.LayerOverlay
@@ -243,70 +227,6 @@ Window {
         }
     }
 
-    function countOf(stateName) {
-        var groups = backend.groups
-        for (var i = 0; i < groups.length; i++)
-            if (groups[i].state === stateName)
-                return groups[i].count
-        return 0
-    }
-
-    function stateOf(key) {
-        var groups = backend.online ? backend.groups : []
-        for (var i = 0; i < groups.length; i++)
-            for (var j = 0; j < groups[i].agents.length; j++)
-                if (groups[i].agents[j].key === key)
-                    return groups[i].state
-        return ""
-    }
-
-    // Open the group, or close it when it is open. A group without agents does not open.
-    function toggle(stateName) {
-        if (openState === stateName)
-            openState = ""
-        else if (backend.online && countOf(stateName) > 0)
-            openState = stateName
-    }
-
-    function pad2(n) {
-        return n < 10 ? "0" + n : "" + n
-    }
-
-    // "#rrggbb" with an alpha from 0 to 1.
-    function faded(hex, alpha) {
-        var c = Qt.color(hex)
-        return Qt.rgba(c.r, c.g, c.b, alpha)
-    }
-
-    // The states of the lit cells of the bar, in the row order. One cell for each agent up to `limit` agents.
-    // With more agents the `limit` cells are shared in proportion, and a state with an agent has at least one.
-    function cellStates(groups, limit) {
-        var sum = 0
-        var i
-        for (i = 0; i < groups.length; i++)
-            sum += groups[i].count
-        var share = []
-        for (i = 0; i < groups.length; i++)
-            share.push(sum <= limit ? groups[i].count
-                : groups[i].count === 0 ? 0 : Math.max(1, Math.floor(groups[i].count * limit / sum)))
-        if (sum > limit) {
-            var used = share.reduce((a, b) => a + b, 0)
-            while (used !== limit) {  // Give the cells that are left to, or take the extra ones from, the biggest state.
-                var big = 0
-                for (i = 1; i < share.length; i++)
-                    if (share[i] > share[big])
-                        big = i
-                share[big] += used < limit ? 1 : -1
-                used += used < limit ? 1 : -1
-            }
-        }
-        var out = []
-        for (i = 0; i < groups.length; i++)
-            for (var k = 0; k < share[i]; k++)
-                out.push(groups[i].state)
-        return out
-    }
-
     // The first item at (x, y) of `item`, from the outside in, where the property `name` is set:
     // a row ("rowKind"), or a list that scrolls ("scrolls").
     function findAt(item, x, y, name) {
@@ -353,43 +273,12 @@ Window {
         onTriggered: root.recover()
     }
 
-    Connections {
-        target: backend
-        function onChanged() {
-            // Close the group when Herdr goes offline, so that it does not open by itself when Herdr comes back.
-            if (!backend.online) {
-                root.openState = ""
-                return
-            }
-            // The failed agent can change its state: keep its message on the screen.
-            // stateOf() and not failedState: that binding can be older than this signal.
-            var failedNow = root.failedKey === "" ? "" : root.stateOf(root.failedKey)
-            if (failedNow !== root.failedShownIn) {
-                root.failedShownIn = failedNow
-                if (failedNow !== "")
-                    root.openState = failedNow
-            }
-            if (root.openState !== "" && root.countOf(root.openState) === 0)
-                root.openState = ""
-        }
-        function onFocusFailed(key, message) {
-            root.failedKey = key
-            root.failedMessage = message
-            root.failedShownIn = root.stateOf(key)
-            if (root.failedShownIn !== "")
-                root.openState = root.failedShownIn
-            failTimer.restart()
-        }
-    }
-
-    Timer {
-        id: failTimer
-        interval: 3000
-        onTriggered: { root.failedKey = ""; root.failedMessage = ""; root.failedShownIn = "" }
+    PanelModel {
+        id: panelModel
     }
 
     Rectangle {
-        id: panel
+        id: frame
         width: 320
         height: column.height + 22
         color: "#f00b0e11"
@@ -404,8 +293,8 @@ Window {
                 required property int index
                 readonly property bool atRight: index % 2 === 1
                 readonly property bool atBottom: index > 1
-                x: atRight ? panel.width - 14 : 0
-                y: atBottom ? panel.height - 14 : 0
+                x: atRight ? frame.width - 14 : 0
+                y: atBottom ? frame.height - 14 : 0
                 width: 14; height: 14
                 Rectangle { x: 0; y: bracket.atBottom ? 12 : 0; width: 14; height: 2; color: root.signalColor }
                 Rectangle { x: bracket.atRight ? 12 : 0; y: 0; width: 2; height: 14; color: root.signalColor }
@@ -434,7 +323,7 @@ Window {
                     anchors.left: nameWord.right
                     anchors.leftMargin: 12
                     anchors.verticalCenter: parent.verticalCenter
-                    text: backend.online ? "AGENTS " + root.pad2(root.total) : "NO LINK"
+                    text: root.panel.online ? "AGENTS " + root.panel.pad2(root.panel.total) : "NO LINK"
                     color: root.dim
                     font { family: root.mono; pixelSize: 10; letterSpacing: 1 }
                 }
@@ -443,7 +332,7 @@ Window {
                     readonly property bool isTopTag: true
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
-                    text: backend.topState === "none" ? "NO AGENTS" : backend.topState.toUpperCase()
+                    text: root.panel.topLabel.toUpperCase()
                     color: root.signalColor
                     font { family: root.mono; pixelSize: 10; letterSpacing: 1.5; weight: Font.Bold }
                 }
@@ -460,8 +349,7 @@ Window {
             // With no agents, and offline: one empty track.
             Item {
                 id: cells
-                readonly property int limit: 60
-                readonly property var states: root.cellStates(backend.online ? backend.groups : [], limit)
+                readonly property var states: root.panel.cells
                 readonly property int n: states.length
                 readonly property real cellGap: n > 24 ? 1 : 2
                 readonly property real cell: (width - cellGap * (n - 1)) / n
@@ -487,14 +375,14 @@ Window {
                         y: 5
                         width: cells.cell
                         height: 8
-                        color: root.stateColors[cellState]
+                        color: root.panel.stateColors[cellState]
                     }
                 }
             }
 
             // Offline body: a hatched plate with one word.
             Item {
-                visible: !backend.online
+                visible: !root.panel.online
                 width: parent.width
                 height: 44
                 Rectangle {
@@ -526,15 +414,15 @@ Window {
 
             Repeater {
                 // The four groups stay the same items when the agents change, so a list keeps its scroll position.
-                model: backend.online ? 4 : 0
+                model: root.panel.online ? 4 : 0
 
                 Column {
                     id: groupItem
                     required property int index
-                    readonly property var group: backend.groups[index]
-                    readonly property bool open: root.openState === group.state
+                    readonly property var group: root.panel.groups[index]
+                    readonly property bool open: root.panel.openState === group.state
                     readonly property bool empty: group.count === 0
-                    readonly property color tone: root.stateColors[group.state]
+                    readonly property color tone: group.color
                     width: column.width
 
                     Item {
@@ -544,18 +432,17 @@ Window {
                         width: parent.width
                         height: root.statusRowHeight
                         Accessible.role: Accessible.Button
-                        Accessible.name: groupItem.group.label + ", " + groupItem.group.count
-                            + (groupItem.group.count === 1 ? " agent" : " agents")
-                        Accessible.onPressAction: root.toggle(stateName)
+                        Accessible.name: root.panel.spokenStatus(groupItem.group)
+                        Accessible.onPressAction: root.panel.toggle(stateName)
 
                         // The plate of the open row, with the accent at the left. A lighter plate under the pointer.
                         Rectangle {
-                            readonly property bool hovered: root.hoverRow === statusRow && !groupItem.empty
+                            readonly property bool hovered: root.panel.hoverItem === statusRow && !groupItem.empty
                             visible: groupItem.open || hovered
                             x: -6; y: 2
                             width: parent.width + 12
                             height: parent.height - 4
-                            color: root.faded(groupItem.tone, groupItem.open ? (hovered ? 0.16 : 0.10) : 0.06)
+                            color: root.panel.faded(groupItem.tone, groupItem.open ? (hovered ? 0.16 : 0.10) : 0.06)
                             Rectangle { visible: groupItem.open; width: 2; height: parent.height; color: groupItem.tone }
                         }
                         // Marker: a filled square when the status has agents, an empty one when it has none.
@@ -613,9 +500,9 @@ Window {
 
                     Item {
                         id: listBox
-                        readonly property int shown: Math.min(groupItem.group.count, root.maxAgentRows)
+                        readonly property int shown: Math.min(groupItem.group.count, root.panel.maxAgentRows)
                         // More rows than fit: the list scrolls, and a line under it says so.
-                        readonly property bool longer: groupItem.group.count > root.maxAgentRows
+                        readonly property bool longer: groupItem.group.count > root.panel.maxAgentRows
                         visible: groupItem.open
                         width: parent.width
                         height: shown * root.agentRowHeight + (longer ? 20 : 4)
@@ -648,17 +535,17 @@ Window {
                                         required property int index
                                         readonly property string rowKind: "agent"
                                         readonly property string key: modelData.key
-                                        readonly property bool failed: root.failedKey === key
-                                        readonly property bool opening: backend.opening === key
+                                        readonly property bool failed: root.panel.failedKey === key
+                                        readonly property bool opening: root.panel.opening === key
                                         readonly property bool last: index === groupItem.group.agents.length - 1
                                         width: agentRows.width
                                         height: root.agentRowHeight
                                         Accessible.role: Accessible.Button
                                         Accessible.name: modelData.spoken
-                                        Accessible.onPressAction: backend.focus(key)
+                                        Accessible.onPressAction: root.panel.jump(key)
 
                                         Rectangle {
-                                            visible: root.hoverRow === agentRow
+                                            visible: root.panel.hoverItem === agentRow
                                             x: 14; y: 2
                                             width: parent.width - 14 + 6
                                             height: parent.height - 4
@@ -714,7 +601,7 @@ Window {
                                             anchors.verticalCenter: parent.verticalCenter
                                             width: Math.min(implicitWidth, agentRow.failed ? 200 : 120)
                                             elide: Text.ElideRight
-                                            text: agentRow.failed ? "! " + root.failedMessage
+                                            text: agentRow.failed ? "! " + root.panel.failedMessage
                                                 : agentRow.opening ? "> opening…"
                                                 : agentRow.modelData.detail
                                             color: agentRow.failed ? "#f28b82" : agentRow.opening ? "#8ab4f8" : root.dim
@@ -770,8 +657,8 @@ Window {
                             visible: listBox.longer
                             x: 20
                             y: agentList.height + 2
-                            text: "ROWS " + root.pad2(agentList.first + 1) + "–" + root.pad2(agentList.first + listBox.shown)
-                                + " / " + root.pad2(groupItem.group.count) + (atEnd ? "  ▲ SCROLL" : "  ▼ SCROLL")
+                            text: "ROWS " + root.panel.pad2(agentList.first + 1) + "–" + root.panel.pad2(agentList.first + listBox.shown)
+                                + " / " + root.panel.pad2(groupItem.group.count) + (atEnd ? "  ▲ SCROLL" : "  ▼ SCROLL")
                             color: "#68727c"
                             font { family: root.mono; pixelSize: 10; letterSpacing: 1 }
                         }
@@ -781,13 +668,13 @@ Window {
 
             // The message of a failed jump when its agent has no row (the agent is gone, or Herdr is offline).
             Text {
-                visible: root.failedKey !== "" && root.failedState === ""
+                visible: root.panel.failedAlone
                 width: parent.width
                 height: 24
                 leftPadding: 2
                 verticalAlignment: Text.AlignVCenter
                 elide: Text.ElideRight
-                text: "! " + root.failedMessage
+                text: "! " + root.panel.failedMessage
                 color: "#f28b82"
                 font { family: root.mono; pixelSize: 11 }
             }
@@ -814,7 +701,7 @@ Window {
             onPressed: (mouse) => { startX = mouse.x; startY = mouse.y; moved = false; lastMoveMs = 0 }
             onPositionChanged: (mouse) => {
                 if (!pressed) {
-                    root.hoverRow = under(mouse, "rowKind")
+                    root.panel.hoverItem = under(mouse, "rowKind")
                     return
                 }
                 var dx = mouse.x - startX
@@ -822,7 +709,7 @@ Window {
                 if (!moved && Math.abs(dx) + Math.abs(dy) < 6)
                     return
                 moved = true
-                root.hoverRow = null
+                root.panel.hoverItem = null
                 var now = Date.now()
                 if (now - lastMoveMs < root.minMoveMs)
                     return
@@ -842,11 +729,11 @@ Window {
                 }
                 var row = under(mouse, "rowKind")
                 if (row && row.rowKind === "status")
-                    root.toggle(row.stateName)
+                    root.panel.toggle(row.stateName)
                 else if (row)
-                    backend.focus(row.key)
+                    root.panel.jump(row.key)
             }
-            onExited: root.hoverRow = null
+            onExited: root.panel.hoverItem = null
             onWheel: (wheel) => {
                 var list = under(wheel, "scrolls")
                 if (!list)

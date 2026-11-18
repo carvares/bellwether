@@ -362,7 +362,7 @@ def test_the_header_total_is_the_sum_of_the_counts_and_the_counts_have_two_digit
     settle(app)
     total = next(i for i in walk(root.contentItem()) if i.property("isTotal"))
     assert total.property("text") == "AGENTS 16"
-    assert root.property("total") == sum(g["count"] for g in backend.groups) == 16
+    assert root.property("panel").property("total") == sum(g["count"] for g in backend.groups) == 16
     numerals = {}
     for item in walk(root.contentItem()):
         if item.property("countFor"):
