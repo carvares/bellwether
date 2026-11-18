@@ -20,7 +20,7 @@ It lets the user jump to an agent.
 | Attention | `blocked` and `done` use the attention colour. |
 | Interaction | Compact counters. A click expands an agent list. A click on an agent focuses its pane. |
 | Tray | A system tray icon. Left click hides or shows the widget. The menu has "Hide widget" / "Show widget" and "Quit". |
-| Stack | Python, Qt6 (PySide6), KDE layer-shell library. |
+| Stack | Python, Qt6 (PySide6), KDE layer-shell library. PySide6 comes from PyPI (`pyside6-essentials`), pinned to the minor version of the system Qt (6.12), because `sudo` was not available to install the system package. The layer-shell library comes from the system package `layer-shell-qt`. A system Qt upgrade to a new minor version can break the load of the layer-shell QML module until the pin moves too. |
 | Platform | Linux, KDE Plasma on Wayland. No other platform. |
 
 ## Why not a Herdr plugin only
@@ -54,12 +54,51 @@ Tested against Herdr 0.9.5 (protocol 22) with `spike/wire.py` and a structure-on
    - `agent.list` does not return panes that have no agent. In the test, `pane.list` gave 17 panes, all with `agent_status` `unknown` and no `agent` field. `agent.list` gave 0 rows.
    - Agent rows: no live row was available in the test. The bundled schema (`herdr api schema --json`, `AgentInfo`) gives `agent`, `display_agent` and `name` as string or null. They are not in the required list. In `pane.list` rows the server leaves out `agent` and `display_agent` when there is no agent, and does not send `null`. So read these three fields as optional: missing or `null` means "no value".
 
+2. The layer-shell overlay on this KDE desktop with PySide6.
+   Tested with `spike/overlay.py` and `spike/Overlay.qml`: `pyside6-essentials` 6.12.0 from PyPI, system `qt6-base` 6.12.0, system `layer-shell-qt` 6.8.2, KWin on Wayland.
+   The check was a Wayland protocol trace (`WAYLAND_DEBUG=1`) only. The visual result (position on the screen, stays above full-screen windows, no focus steal) still needs a look by the user.
+   - Result 1, overlay surface: yes. The QML loads. The client sends `zwlr_layer_shell_v1.get_layer_surface(..., 3, "herdr-float-spike")` (3 = overlay) and the compositor replies with `zwlr_layer_surface_v1.configure(serial, 220, 48)`. The trace has no `xdg_surface` and no `xdg_toplevel`.
+   - Result 2, QML lines: the lines below work as written. The trace shows `set_anchor(5)` (top + left), `set_exclusive_zone(-1)`, `set_margin(120, 0, 0, 200)` (order: top, right, bottom, left) and `set_keyboard_interactivity(0)`.
+     ```qml
+     import org.kde.layershell as LayerShell
+
+     Window {
+         id: root
+         flags: Qt.FramelessWindowHint | Qt.WindowDoesNotAcceptFocus
+         property int posX: 200
+         property int posY: 120
+         LayerShell.Window.scope: "herdr-float"
+         LayerShell.Window.layer: LayerShell.Window.LayerOverlay
+         LayerShell.Window.anchors: LayerShell.Window.AnchorTop | LayerShell.Window.AnchorLeft
+         LayerShell.Window.keyboardInteractivity: LayerShell.Window.KeyboardInteractivityNone
+         LayerShell.Window.exclusionZone: -1
+         LayerShell.Window.margins.left: root.posX
+         LayerShell.Window.margins.top: root.posY
+     }
+     ```
+   - Result 2, margins: the grouped form `LayerShell.Window.margins.left: <binding>` works. A change of the bound property at run time (`root.posX += 40` from a `Timer`) sends a new `set_margin(120, 0, 0, 240)` on the same surface. A direct write from JavaScript also works: `root.LayerShell.Window.margins.left += 40`. Do not use `Qt.margins(...)`: it does not exist in QML and gives a `TypeError`.
+   - Result 3, `QT_WAYLAND_SHELL_INTEGRATION`: not necessary. The attached property alone gives the layer surface. With the variable set to `layer-shell` and the system plugin on the plugin path, the result is the same. The system plugin `liblayer-shell.so` is not loaded and not necessary: the process maps only `libLayerShellQtQml.so` and `/usr/lib/libLayerShellQtInterface.so.6` from the system.
+   - Result 4, hide and show: `visible = false` sends `zwlr_layer_surface_v1.destroy()`. `visible = true` sends a new `get_layer_surface` on the overlay layer with the same scope, anchors and the last margins (`set_margin(120, 0, 0, 240)`), and a new `configure` comes back.
+   - Result 5, `QApplication`: the trace is the same as with `QGuiApplication`. `QSystemTrayIcon.isSystemTrayAvailable()` returns `True`. `pyside6-essentials` has QtWidgets, QtQml, QtQuick and the Wayland platform plugin, so the full `pyside6` package is not necessary.
+   - Result 6, start-up recipe. The bundled Qt does not find `org.kde.layershell` by default (`module "org.kde.layershell" is not installed`). Give it an import directory that holds only a symlink to the system module. Do not add `/usr/lib/qt6/qml` as an import path: that mixes other system Qt modules into the bundled Qt.
+     ```python
+     os.environ.setdefault("QT_QPA_PLATFORM", "wayland")  # before the application object
+
+     bridge = tempfile.TemporaryDirectory(prefix="herdr-float-qml-")  # keep a reference until exit
+     (Path(bridge.name) / "org" / "kde").mkdir(parents=True)
+     (Path(bridge.name) / "org" / "kde" / "layershell").symlink_to("/usr/lib/qt6/qml/org/kde/layershell")
+
+     app = QApplication(sys.argv)
+     engine = QQmlApplicationEngine()
+     engine.addImportPath(bridge.name)  # before engine.load()
+     engine.load(...)
+     ```
+     No other environment variable, library path or plugin path is necessary. In the test, the platform was `wayland` also without `QT_QPA_PLATFORM`; the line makes that sure.
+   - Limit: the system libraries bind to the Qt libraries of the wheel at load time. They ask for the symbol versions `Qt_6`, `Qt_6.12` and `Qt_6_PRIVATE_API` (private Qt Wayland API). So the wheel must have the same Qt minor version as the system Qt. The pin is `pyside6-essentials==6.12.*` in `pyproject.toml`.
+
 ## Not verified
 
-Step 1 of the build order tests these. The design changes if a test fails.
-
-2. The layer-shell overlay on this KDE desktop with PySide6.
-3. A method to raise the terminal window after a jump.
+3. A method to raise the terminal window after a jump. This test needs the user and a live agent. If the test fails, the known limit stays.
 
 ## Parts
 

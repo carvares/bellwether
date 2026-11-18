@@ -3,7 +3,9 @@ name = "herdr-float"
 version = "0.1.0"
 description = "Floating status widget for Herdr agents"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "pyside6-essentials==6.12.*",
+]
 
 [dependency-groups]
 dev = ["pytest>=8"]
