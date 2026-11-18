@@ -75,6 +75,8 @@ def main() -> int:
     # The lock comes first: a widget that runs (of the old name too) still uses its folders.
     lock = take_single_instance_lock()
     if lock is None:
+        # For start.log: this line is there also when no log folder exists yet.
+        print("bellwether: already running", file=sys.stderr)
         # Make no log folder here: it would stop the move of the old one at the next start.
         if LOG_PATH.parent.is_dir():
             setup_logging()

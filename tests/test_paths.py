@@ -132,14 +132,56 @@ def test_the_lock_is_refused_while_a_widget_of_either_name_runs(homes, tmp_path)
             handle.close()
 
 
-def test_with_an_old_widget_running_the_start_exits_and_moves_and_makes_nothing(homes, tmp_path, monkeypatch):
+def no_real_folders(homes, monkeypatch):
+    """The paths that the modules made at import are in tmp_path, and a start that goes past the lock fails at
+    once: a regression in main() cannot read or write the real home folder."""
+    from bellwether import backend, icons, settings
+
     monkeypatch.setattr(start, "LOG_PATH", homes["state"] / "bellwether" / "bellwether.log")
+    monkeypatch.setattr(settings, "DEFAULT_PATH", homes["config"] / "bellwether" / "state.json")
+    monkeypatch.setattr(backend, "DEFAULT_PATH", homes["config"] / "bellwether" / "state.json")
+    monkeypatch.setattr(icons, "CACHE_PATH", homes["cache"] / "bellwether" / "icons")
+
+    def past_the_lock(*args, **kwargs):
+        raise AssertionError("the start went past the lock")
+
+    # The default arguments of Backend and Icons hold the real paths from the import: stop before them.
+    for name in ("move_old_folders", "QApplication", "Backend", "Icons", "HerdrClient"):
+        monkeypatch.setattr(start, name, past_the_lock)
+
+
+@pytest.mark.parametrize("lock", ["herdr-float.lock", "bellwether.lock"])
+def test_with_a_widget_running_the_start_exits_and_moves_and_makes_nothing(homes, tmp_path, monkeypatch, capsys, lock):
+    no_real_folders(homes, monkeypatch)
     for base in homes.values():
         (base / "herdr-float").mkdir()
-    old = held(tmp_path / "herdr-float.lock")
+    old = held(tmp_path / lock)
     try:
         assert start.main() == 0
     finally:
         old.close()
     for base in homes.values():
         assert tree(base) == ["herdr-float"]
+    # One line for start.log: no log folder exists here, so the log file has no line.
+    assert capsys.readouterr() == ("", "bellwether: already running\n")
+
+
+def test_an_old_folder_that_is_a_link_keeps_its_target_under_the_new_name(homes, tmp_path):
+    target = tmp_path / "elsewhere"
+    target.mkdir()
+    (target / "state.json").write_text('{"x": 5, "y": 6}')
+    (homes["config"] / "herdr-float").symlink_to(target)
+    assert paths.move_old_folders() == [(logging.INFO, "moved the config folder herdr-float to bellwether")]
+    new = homes["config"] / "bellwether"
+    assert new.is_symlink() and new.resolve() == target  # the link has the new name: its target did not move
+    assert not (homes["config"] / "herdr-float").is_symlink()
+    assert tree(target) == ["state.json"] and load_position(new / "state.json") == (5, 6, "")
+
+
+def test_a_new_folder_that_is_a_link_to_nothing_is_not_replaced(homes, tmp_path):
+    (homes["config"] / "herdr-float").mkdir()
+    (homes["config"] / "herdr-float" / "state.json").write_text('{"x": 5, "y": 6}')
+    (homes["config"] / "bellwether").symlink_to(tmp_path / "not-there")
+    assert paths.move_old_folders() == []
+    assert (homes["config"] / "bellwether").is_symlink() and not (homes["config"] / "bellwether").exists()
+    assert tree(homes["config"] / "herdr-float") == ["state.json"]
