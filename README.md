@@ -137,7 +137,7 @@ An open row closes when the widget goes offline.
 
 ### How the data stays fresh
 
-The widget follows the changes of herdr-core with one child process, `herdr-core events --json`. Each change starts a read of `herdr-app ls` at once, so a new status shows in less than 150 ms after the Herdr app has it. The app shows some changes up to 0.5 s after herdr-core tells of them, so the widget reads again some times in the 1.6 s after a change. While this stream works, the widget also reads one time each 5 seconds as a safety net. If herdr-core does not run, or the stream ends, the widget reads one time each second, as before, and tries to start the stream again after 1, 2, 5 and then each 10 seconds. The widget does not keep or log the text of a change. The child process ends with the widget, also when the widget is killed.
+The widget follows the changes of herdr-core with one child process, `herdr-core events --json`. The widget reads `herdr-app ls` as soon as herdr-core reports a change (a few milliseconds; at most four reads each second). The Herdr app itself sometimes shows a change 0.3 to 1.5 s after herdr-core reports it. So the widget reads again five times in the first 1.6 s after a change. While the stream works, the widget also reads one time each 2 seconds: a change that gives no event, or that the app shows later than 1.6 s, shows after at most 2 s. If herdr-core does not run, or the stream ends, the widget reads one time each second, as before, and tries to start the stream again after 1, 2, 5 and then each 10 seconds. The widget does not keep or log the text of a change. The child process ends with the widget, also when the widget is killed.
 
 ## Files
 
