@@ -1,0 +1,13 @@
+# herdr-float plugin manifest.
+
+id = "carvares.herdr-float"
+name = "Herdr Float"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "Starts the floating agent status widget"
+platforms = ["linux"]
+
+# A one-shot launch. The widget keeps itself alive and allows one instance only.
+[[startup]]
+platforms = ["linux"]
+command = ["./start.sh"]

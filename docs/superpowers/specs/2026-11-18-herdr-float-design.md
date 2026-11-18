@@ -196,6 +196,8 @@ Logs contain IDs and states only. They do not contain pane text.
 
 - The jump focuses the pane inside Herdr. It possibly does not raise the terminal window, because Wayland blocks an application from activating another application's window. Step 1 tests a KWin method. If no method works, the limit stays.
 - `agent.focus` marks a `done` agent as viewed. This is the expected Herdr behaviour.
+- The drag can jitter. The pointer positions are relative to the surface, and the surface moves one frame late. A person has not yet seen this on the screen.
+- The list closes when Herdr goes offline. Decision of 2026-11-18.
 
 ## Not in scope
 
