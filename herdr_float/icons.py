@@ -21,7 +21,7 @@ ALIASES = {
     "oh-my-pi": "omp",
     "qodercli": "qoder",
 }
-_WORD = re.compile(r"[a-z0-9][a-z0-9._+-]*")
+_WORD = re.compile(r"[a-z0-9][a-z0-9._+-]{0,63}")  # A longer word is not a file name.
 _PAINT = re.compile(r"""\b(fill|stroke|stop-color)(\s*[=:]\s*["']?\s*)([^"';\s>]+)""", re.IGNORECASE)
 _ONE_COLOUR = {"none", "currentcolor", "black", "white", "#000", "#fff", "#000000", "#ffffff"}
 _ROOT = re.compile(r"<svg\b[^>]*>", re.IGNORECASE)
@@ -35,10 +35,13 @@ def find_icon(app: str, folder: Path) -> Path | None:
     """The icon file for a program word: its alias, its own name, its first part, then the generic agent icon."""
     word = app.lower()
     names = [ALIASES.get(word, word), word, word.split("-")[0]] if _WORD.fullmatch(word) else []
-    for name in [*names, GENERIC]:
+    for name in dict.fromkeys([*names, GENERIC]):
         path = Path(folder) / f"{name}.svg"
-        if path.is_file():
-            return path
+        try:
+            if path.is_file():
+                return path
+        except OSError:
+            continue  # A file system error for this name: the next name, at the end no icon.
     return None
 
 
@@ -66,25 +69,29 @@ class Icons:
         self._folder = Path(home or app_home()) / "icons"
         self._cache = Path(cache)
         self._color = color
-        self._urls: dict[str, str] = {}
+        self._files: dict[str, Path | None] = {}  # program word -> the file that QML gets
+        self._logged: set[str] = set()
 
     def url(self, app: str) -> str:
-        if app not in self._urls:
-            self._urls[app] = self._load(app)
-        return self._urls[app]
+        file = self._files.get(app)
+        # A file that is gone (the cache was deleted, or the app changed its icons) is made or found again.
+        if app not in self._files or (file is not None and not os.path.exists(file)):
+            file = self._files[app] = self._load(app)
+        return file.as_uri() if file else ""
 
-    def _load(self, app: str) -> str:
+    def _load(self, app: str) -> Path | None:
         path = find_icon(app, self._folder)
-        if path is None or (path.stem == GENERIC and app.lower() != GENERIC):
+        if (path is None or (path.stem == GENERIC and app.lower() != GENERIC)) and app not in self._logged:
+            self._logged.add(app)
             log.info("no icon for program %r: %s", app[:32], "the generic icon is used" if path else "the row shows text")
         if path is None:
-            return ""
+            return None
         try:
             svg = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
-            return path.as_uri()
+            return path
         if not is_glyph(svg):
-            return path.as_uri()
+            return path
         # A black glyph does not show on the dark panel, so QML gets a copy in the text colour.
         svg = tinted(svg, self._color)
         copy = self._cache / f"{path.stem}-{hashlib.sha1(svg.encode()).hexdigest()[:12]}.svg"
@@ -95,5 +102,5 @@ class Icons:
                 temporary.write_text(svg, encoding="utf-8")
                 os.replace(temporary, copy)
         except OSError:
-            return ""
-        return copy.as_uri()
+            return None
+        return copy

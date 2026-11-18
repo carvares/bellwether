@@ -68,7 +68,7 @@ def test_app_each_state_has_its_own_count():
 def test_app_name_is_only_the_name_of_the_terminal_and_the_program_word_is_apart():
     rows = [term("t1", "idle", app="codex"), term("t2", "idle", app=None), term("t3", "idle", name="rev", app="pi")]
     agents = parse_app([space("Main", tab("1", *rows))])
-    assert [(a.key, a.name, a.app) for a in agents] == [("t2", "", ""), ("t1", "", "codex"), ("t3", "rev", "pi")]
+    assert [(a.key, a.name, a.app) for a in agents] == [("t1", "", "codex"), ("t2", "", ""), ("t3", "rev", "pi")]
 
 
 def test_program_word_that_is_not_text_is_dropped():
@@ -86,22 +86,11 @@ def test_app_workspace_has_the_tab_name_only_when_the_space_has_more_tabs():
     assert {a.key: a.workspace for a in agents} == {"t1": "Main", "t2": "api / 1", "t3": "api / fix login"}
 
 
-def test_sort_is_state_order_then_name():
-    agents = parse_app(
-        [
-            space(
-                "Main",
-                tab(
-                    "1",
-                    term("t1", "idle", name="b"),
-                    term("t2", "blocked", name="z"),
-                    term("t3", "idle", name="A"),
-                    term("t4", "done", name="m"),
-                ),
-            )
-        ]
-    )
-    assert [a.key for a in agents] == ["t2", "t4", "t3", "t1"]
+def test_sort_is_state_order_then_address():
+    # The order inside a state is the address here. The backend sorts the rows of a group by their label.
+    rows = [term("t3", "idle", name="b"), term("t2", "blocked", name="z"), term("t1", "idle", name="c"), term("t4", "done")]
+    agents = parse_app([space("Main", tab("1", *rows))])
+    assert [a.key for a in agents] == ["t2", "t4", "t1", "t3"]
 
 
 def test_app_sub_agents_are_rows_with_the_mapping_of_the_app_list():

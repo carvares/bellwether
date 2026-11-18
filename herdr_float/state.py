@@ -44,7 +44,7 @@ def _text(value: object) -> str:
 
 
 def _sorted(agents) -> list[Agent]:
-    return sorted(agents, key=lambda a: (STATES.index(a.status), (a.name or a.app).lower(), a.key))
+    return sorted(agents, key=lambda a: (STATES.index(a.status), a.key))
 
 
 def parse_app(spaces: list) -> list[Agent]:

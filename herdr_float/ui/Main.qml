@@ -268,7 +268,8 @@ Window {
                                         Image {
                                             id: programIcon
                                             readonly property bool isProgramIcon: true
-                                            visible: agentRow.modelData.icon !== ""
+                                            // An icon that does not load is not shown: the row has no gap.
+                                            visible: agentRow.modelData.icon !== "" && status !== Image.Error
                                             x: 8
                                             width: 16
                                             height: 16

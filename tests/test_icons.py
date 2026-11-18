@@ -39,6 +39,8 @@ def name_of(path):
         ("../../etc/passwd", "agent.svg"),  # not a program word
         ("pi/../claude", "agent.svg"),
         (".hidden", "agent.svg"),
+        ("pi" + "x" * 298, "agent.svg"),  # 300 characters: longer than a file name can be
+        ("p" * 65, "agent.svg"),
     ],
 )
 def test_find_icon(home, word, expected):
@@ -134,3 +136,54 @@ def test_home_follows_the_environment(monkeypatch, tmp_path):
     assert app_home() == tmp_path
     monkeypatch.delenv("HERDR_APP_HOME")
     assert app_home().name == "herdr-app" and app_home().parent.name == ".config"
+
+
+def test_find_icon_takes_a_word_of_64_characters_and_no_longer_word(home):
+    (home / "icons" / ("p" * 64 + ".svg")).write_text(BLACK)
+    assert name_of(find_icon("p" * 64, home / "icons")) == "p" * 64 + ".svg"
+    (home / "icons" / ("p" * 65 + ".svg")).write_text(BLACK)
+    assert name_of(find_icon("p" * 65, home / "icons")) == "agent.svg"
+
+
+def test_a_file_error_in_the_lookup_gives_the_fallback_and_is_read_one_time(home, tmp_path, monkeypatch, caplog):
+    caplog.set_level(logging.INFO, logger="herdr_float")
+    real, asked = Path.is_file, []
+
+    def is_file(path, **options):
+        asked.append(path.name)
+        if path.name == "pi.svg":
+            raise OSError(36, "File name too long")
+        return real(path, **options)
+
+    monkeypatch.setattr(Path, "is_file", is_file)
+    assert name_of(find_icon("pi", home / "icons")) == "agent.svg"
+
+    def broken(path, **options):
+        asked.append(path.name)
+        raise OSError(5, "Input/output error")
+
+    monkeypatch.setattr(Path, "is_file", broken)
+    assert find_icon("pi", home / "icons") is None
+    icons = Icons(home, tmp_path / "cache")
+    del asked[:]
+    assert [icons.url("pi"), icons.url("pi"), icons.url("pi")] == ["", "", ""]
+    assert asked.count("pi.svg") == 1  # the failure is kept: no new read for each list
+    assert [r.getMessage() for r in caplog.records] == ["no icon for program 'pi': the row shows text"]
+
+
+def test_a_copy_that_was_deleted_is_made_again(home, tmp_path, caplog):
+    caplog.set_level(logging.INFO, logger="herdr_float")
+    icons = Icons(home, tmp_path / "cache")
+    first = icons.url("gemini")  # the generic icon: a glyph, so a copy
+    import shutil
+
+    shutil.rmtree(tmp_path / "cache")
+    assert icons.url("gemini") == first and Path(path_of(first)).read_text() == tinted(STROKE, "#e8eaed")
+    assert len(caplog.records) == 1  # one log line for the word, also after the new copy
+
+
+def test_a_picture_of_the_app_that_was_deleted_is_looked_for_again(home, tmp_path):
+    icons = Icons(home, tmp_path / "cache")
+    assert path_of(icons.url("claude-code")).endswith("/claude.svg")
+    (home / "icons" / "claude.svg").unlink()
+    assert "agent-" in icons.url("claude-code")

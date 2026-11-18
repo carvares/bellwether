@@ -141,7 +141,8 @@ class Desk:
 
     def __init__(self, running=True, minimized=False, window_class="herdr-app", launcher_exit=0,
                  answers_after=2, raise_works=True, focus_answer=None, busctl_error=None,
-                 not_ready=0, others_first=(), no_window=False, hang=(), cost=0.0):
+                 not_ready=0, others_first=(), no_window=False, hang=(), cost=0.0,
+                 clock_at=None, tick=0.0, match_reply=None):
         self.running = running
         self.minimized = minimized
         self.window_class = window_class
@@ -155,6 +156,9 @@ class Desk:
         self.no_window = no_window
         self.hang = hang  # names of commands (see names()) that use their full timeout and give no answer
         self.cost = cost  # seconds that each command takes
+        self.clock_at = dict(clock_at or {})  # {command name: time}: the clock is at that time after its first run
+        self.tick = tick  # seconds that the clock moves at each read
+        self.match_reply = match_reply  # the reply of KWin to "Match", when it must have a different shape
         self.started = False
         self.now = 0.0  # the clock of this desktop: commands and sleeps move it
         self.calls = []
@@ -165,18 +169,26 @@ class Desk:
         """The commands in a short form: one word for each call."""
         return [c[1] if c[0] == APP else "start" if c[0] == SYSTEMD_RUN else c[7] for c in self.calls]
 
+    def clock(self):
+        self.now += self.tick
+        return self.now
+
     def sleep(self, seconds):
+        if seconds < 0:
+            raise ValueError("sleep length must be non-negative")  # as time.sleep does
         self.sleeps.append(seconds)
+        assert len(self.sleeps) <= 100, "the jump does not end: more than 100 pauses"
         self.now += seconds
 
     def __call__(self, argv, timeout=2.0):
         self.calls.append(argv)
         self.timeouts.append(timeout)
+        assert len(self.calls) <= 100, "the jump does not end: more than 100 commands"
         assert 0 < timeout <= 2.0
         if self.hang == "all" or self.names()[-1] in self.hang or self.cost > timeout:
             self.now += timeout  # the real runner stops a command at its timeout
             raise subprocess.TimeoutExpired(cmd="x", timeout=timeout)
-        self.now += self.cost
+        self.now = max(self.now + self.cost, self.clock_at.pop(self.names()[-1], 0.0))
         if argv[0] == SYSTEMD_RUN:
             self.started = self.launcher_exit == 0
             return reply(b"", returncode=self.launcher_exit)
@@ -204,6 +216,8 @@ class Desk:
         method, arguments = argv[7], argv[9:]
         if method == "Match":
             assert arguments == ["herdr-app"]
+            if self.match_reply is not None:
+                return reply(self.match_reply)
             rows = [["0_" + WINDOW, "a caption", "icon", 100, 0.8, {}]] if self.running and not self.no_window else []
             others = [[f"0_{{other-{n}}}", "herdr-app in a caption", "icon", 100, 0.8, {}] for n in range(len(self.others_first))]
             return reply({"type": "a(sssuda{sv})", "data": [others + rows]})
@@ -225,7 +239,7 @@ class Desk:
 
 def jump(key="t1", **desk_options):
     desk = Desk(**desk_options)
-    client = HerdrClient(APP, CORE, run=desk, sleep=desk.sleep, clock=lambda: desk.now,
+    client = HerdrClient(APP, CORE, run=desk, sleep=desk.sleep, clock=desk.clock,
                          busctl=BUSCTL, systemd_run=SYSTEMD_RUN)
     return client, desk
 
@@ -313,6 +327,63 @@ def test_a_jump_ends_at_its_deadline_with_the_error_of_the_step_in_progress(opti
     assert desk.now <= 8.0 + 1e-9  # no command and no pause goes past the deadline
     assert len(desk.calls) <= 34  # 8 s of tries each 0.25 s, the first `ls` and the launch
     assert all(0 < t <= 2.0 for t in desk.timeouts)
+
+
+@pytest.mark.parametrize(
+    "options, code",
+    [
+        # The launch ends 0.05 s before the deadline: the pause of the wait for the app is cut to 0.05 s.
+        ({"running": False, "answers_after": 10_000, "clock_at": {"start": 7.95}}, "no_start"),
+        # The new window refuses the agent 0.05 s before the deadline: the pause before the next try is cut.
+        ({"running": False, "answers_after": 1, "not_ready": 10_000, "clock_at": {"do": 7.95}}, "agent_gone"),
+    ],
+)
+def test_a_pause_that_is_longer_than_the_time_left_is_cut_at_the_deadline(options, code):
+    client, desk = jump(**options)
+    with pytest.raises(HerdrError) as failure:
+        client.focus_agent("t1")
+    assert failure.value.code == code
+    assert desk.sleeps[-1] == pytest.approx(0.05)
+    assert desk.now == pytest.approx(8.0) and desk.now <= 8.0 + 1e-9
+
+
+@pytest.mark.parametrize(
+    "options, code",
+    [
+        ({"running": False, "answers_after": 10_000, "clock_at": {"start": 8.0}}, "no_start"),
+        ({"running": False, "answers_after": 1, "not_ready": 10_000, "clock_at": {"do": 8.0}}, "agent_gone"),
+    ],
+)
+def test_a_step_that_ends_at_the_deadline_has_no_pause_and_no_command_after_it(options, code):
+    client, desk = jump(**options)
+    with pytest.raises(HerdrError) as failure:
+        client.focus_agent("t1")
+    assert failure.value.code == code
+    calls = len(desk.calls)
+    assert desk.now == pytest.approx(8.0) and all(pause > 0 for pause in desk.sleeps)
+    assert desk.names()[calls - 1] in ("start", "do")  # the step at the deadline was the last command
+
+
+@pytest.mark.parametrize(
+    "options, code",
+    [
+        ({"running": False, "answers_after": 10_000, "clock_at": {"start": 7.999}}, "no_start"),
+        ({"running": False, "answers_after": 1, "not_ready": 10_000, "clock_at": {"do": 7.999}}, "agent_gone"),
+    ],
+)
+def test_a_deadline_that_falls_between_two_reads_of_the_clock_gives_no_negative_pause(options, code):
+    # The clock moves 4 ms at each read, so the deadline is at 8.004: one read is before it and the next is after it.
+    client, desk = jump(tick=0.004, **options)
+    with pytest.raises(HerdrError) as failure:
+        client.focus_agent("t1")
+    assert failure.value.code == code
+
+
+@pytest.mark.parametrize("data", [[None], [7], None, [], {"x": 1}, [[None]], [[7]]])
+def test_focus_asks_the_app_when_the_reply_of_kwin_has_a_different_shape(data):
+    client, desk = jump(match_reply={"type": "?", "data": data})
+    client.focus_agent("t1")
+    assert desk.calls[-1] == START  # plain `herdr-app` raises the window
 
 
 def test_a_command_near_the_deadline_gets_only_the_time_that_is_left():

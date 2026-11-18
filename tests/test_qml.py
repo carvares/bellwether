@@ -259,14 +259,14 @@ def test_agent_rows_show_the_icon_of_the_program_and_no_program_word(app, window
     click(app, root, rows(root, "status")[2])
     root.setProperty("hoverRow", None)
     settle(app)
-    assert [r.property("key") for r in rows(root, "agent")] == ["t1", "t2", "t3"]
+    assert [r.property("key") for r in rows(root, "agent")] == ["t2", "t3", "t1"]
     icons = [i for i in walk(root.contentItem()) if i.property("isProgramIcon") and i.isVisible()]
     assert [(i.width(), i.height()) for i in icons] == [(16, 16)] * 3
     image = root.grabWindow()
     centres = [i.mapToScene(QPointF(8, 8)).toPoint() for i in icons]
-    assert [image.pixelColor(c).name() for c in centres] == ["#e8eaed", "#d97757", "#d97757"]
+    assert [image.pixelColor(c).name() for c in centres] == ["#d97757", "#d97757", "#e8eaed"]
     texts = [i.property("text") for i in walk(root.contentItem()) if i.isVisible() and i.property("text")]
-    assert [t for t in texts if t in ("rev", "Main", "t1", "t2", "t3")] == ["rev", "Main", "Main", "t2", "Main", "t3"]
+    assert [t for t in texts if t in ("rev", "Main", "t1", "t2", "t3")] == ["Main", "t2", "Main", "t3", "rev", "Main"]
     assert "claude-code" not in texts and "pi" not in texts
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
@@ -280,3 +280,41 @@ def test_agent_rows_show_the_program_word_when_the_app_has_no_icons(app, window)
     texts = [i.property("text") for i in walk(root.contentItem()) if i.isVisible() and i.property("text")]
     assert "claude-code" in texts and "Main" in texts
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def shown_icons(root):
+    return [i for i in walk(root.contentItem()) if i.property("isProgramIcon") and i.isVisible()]
+
+
+def test_an_icon_copy_that_was_deleted_shows_again_with_no_warning(app, window, tmp_path):
+    root, backend, messages = window
+    folder = tmp_path / "app" / "icons"
+    folder.mkdir(parents=True)
+    (folder / "pi.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M2 2h20v20H2z"/></svg>')
+    backend.apply([Agent("t1", "working", "", "Main", "pi")])
+    settle(app)
+    click(app, root, rows(root, "status")[2])
+    for copy in (tmp_path / "cache").iterdir():
+        copy.unlink()  # the person deleted the cache while the widget runs
+    backend.apply([Agent("t1", "working", "", "Main", "pi"), Agent("t2", "working", "", "docs", "pi")])
+    settle(app)
+    root.setProperty("hoverRow", None)
+    settle(app)
+    icons = shown_icons(root)
+    assert len(icons) == 2
+    image = root.grabWindow()
+    assert [image.pixelColor(i.mapToScene(QPointF(8, 8)).toPoint()).name() for i in icons] == ["#e8eaed"] * 2
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def test_an_icon_that_does_not_load_gives_the_row_the_layout_without_an_icon(app, window, tmp_path):
+    root, backend, messages = window
+    folder = tmp_path / "app" / "icons"
+    folder.mkdir(parents=True)
+    (folder / "pi.svg").write_bytes(b"\x00\x01 this is not a picture")  # not text: given to QML as it is
+    backend.apply([Agent("t1", "working", "rev", "Main", "pi")])
+    settle(app)
+    click(app, root, rows(root, "status")[2])
+    assert shown_icons(root) == []
+    label = next(i for i in walk(root.contentItem()) if i.isVisible() and i.property("text") == "rev")
+    assert label.x() == 24  # the place of the text of a row without an icon: no gap

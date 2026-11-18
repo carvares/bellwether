@@ -101,10 +101,11 @@ class HerdrClient:
                 self._show(key, run)
                 break
             except HerdrError as exc:
-                if exc.code != "agent_gone" or attempt == tries or left() <= 0:
+                pause = min(START_PAUSE, left())  # One read of the clock: the pause is never negative.
+                if exc.code != "agent_gone" or attempt == tries or pause <= 0:
                     raise
                 gone = exc
-                self._sleep(min(START_PAUSE, left()))
+                self._sleep(pause)
             except HerdrOffline:
                 if gone is None or left() > 0:
                     raise
@@ -132,8 +133,11 @@ class HerdrClient:
     def _start_app(self, key: str, run, left) -> None:
         answered = False
         if self._launch(key, run) == 0:
-            while not answered and left() > 0:
-                self._sleep(min(START_PAUSE, left()))
+            while not answered:
+                pause = min(START_PAUSE, left())  # One read of the clock: the pause is never negative.
+                if pause <= 0:
+                    break
+                self._sleep(pause)
                 answered = self._read(self._app, ["ls"], "spaces", run) is not None
             log.info("jump agent=%s step=wait answered=%s", key, answered)
         if not answered:

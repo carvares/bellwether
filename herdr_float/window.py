@@ -20,7 +20,7 @@ _ERRORS = (OSError, subprocess.SubprocessError, ValueError, LookupError, TypeErr
 def raise_app_window(run, busctl: str) -> bool:
     """Restore and activate the window of the Herdr app. Return False when that did not occur."""
     try:
-        matches = _kwin(run, busctl, "/WindowsRunner", "org.kde.krunner1", "Match", "s", APP_CLASS)[0]
+        matches = list(_kwin(run, busctl, "/WindowsRunner", "org.kde.krunner1", "Match", "s", APP_CLASS)[0])
     except _ERRORS:
         return False  # No busctl, no KWin, or a reply with a different shape.
     for match in matches:

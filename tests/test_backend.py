@@ -266,3 +266,21 @@ def test_top_state_follows_the_priority_of_the_user(backend):
     assert backend.topState == "blocked"
     backend.apply(None)
     assert backend.topState == "offline"
+
+
+def test_rows_of_a_group_are_in_the_order_of_the_label_that_shows_and_then_the_address(with_icons):
+    with_icons.apply([
+        Agent("t1", "idle", "", "zeta", "pi"),  # shows "zeta"
+        Agent("t2", "idle", "Mid", "alpha", "pi"),  # shows "Mid"
+        Agent("t3", "idle", "", "alpha", "claude-code"),  # shows "alpha"
+        Agent("t5", "idle", "", "", "pi"),  # shows "t5"
+        Agent("t4", "idle", "", "alpha", "pi"),  # shows "alpha"
+    ])
+    assert [(r["key"], r["label"]) for r in rows_of(with_icons, "idle")] == [
+        ("t3", "alpha"), ("t4", "alpha"), ("t2", "Mid"), ("t5", "t5"), ("t1", "zeta"),
+    ]
+
+
+def test_rows_without_icons_are_in_the_order_of_their_text(backend):
+    backend.apply([Agent("t1", "idle", "", "a", "pi"), Agent("t2", "idle", "", "z", "codex"), Agent("t3", "idle", "bob", "", "")])
+    assert [r["label"] for r in rows_of(backend, "idle")] == ["bob", "codex", "pi"]

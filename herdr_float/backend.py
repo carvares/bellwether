@@ -77,6 +77,7 @@ class Backend(QObject):
                 "address": "",
                 "spoken": spoken + (f" in {a.workspace}" if a.workspace else ""),
             })
+        rows.sort(key=lambda row: (row["label"].lower(), row["key"]))  # The order of the text that shows.
         looks = [(row["icon"], row["label"], row["detail"]) for row in rows]
         for row, look in zip(rows, looks):
             if looks.count(look) > 1 and row["label"] != row["key"]:
