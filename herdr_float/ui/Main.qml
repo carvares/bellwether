@@ -216,7 +216,8 @@ Window {
             // that comes before the compositor applies the last margin does not count the motion twice.
             // A dropped event loses nothing: the next one uses the absolute pointer position again.
             property double lastMoveMs: 0
-            onPressed: (mouse) => { startX = mouse.x; startY = mouse.y; moved = false }
+            // lastMoveMs starts again at each press: a clock that went back must not block the drag.
+            onPressed: (mouse) => { startX = mouse.x; startY = mouse.y; moved = false; lastMoveMs = 0 }
             onPositionChanged: (mouse) => {
                 var dx = mouse.x - startX
                 var dy = mouse.y - startY
