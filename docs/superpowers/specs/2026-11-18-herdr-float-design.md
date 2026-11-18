@@ -11,7 +11,7 @@ The widget read the `herdr` 0.9 terminal program (socket `~/.config/herdr/herdr.
 The agents of the user are in the Herdr desktop app (`herdr-app`, the window) and `herdr-core` (it runs the terminals).
 
 - **Source.** One time each second the widget runs `herdr-app ls` (argument list, no shell, 2 s timeout) and reads the JSON: spaces, tabs, terminals. Measured: 3 to 14 ms for each call, less than 1 % of one processor core.
-- **Agent row.** A terminal with a status is an agent. A terminal with status `null` is a plain shell and is not a row. The key of a row is the terminal address (for example `t11`). The name is the terminal name, else the program (`app`), else the address. The place text is the space name, and the tab name when the space has more than one tab.
+- **Agent row.** A terminal with a status is an agent. A terminal with status `null` is a plain shell and is not a row. The key of a row is the terminal address (for example `t11`). The name is the terminal name ("" when the terminal has none; before Task 13 the program word or the address took its place). The program word (`app`) is a field of its own. The place text is the space name, and the tab name when the space has more than one tab.
 - **Sub-agents.** The entries in `sub_agents` are agents too (terminals that an agent started). They are rows. As in the agent list of the app, a sub-agent that reports `done` counts as `idle`. No real sub-agent was available on 2026-11-18, so the widget accepts two shapes for these entries: the fields of a terminal in `herdr-app ls` (`terminal`), and the fields of `herdr-core ls --json` (`address`, `state`; only `live` entries count). A terminal that is listed in a tab and also below a parent is one row with the sub-agent status. This is not verified with real data.
 - **States.** Four: `blocked`, `done`, `working`, `idle`. `done` means that the agent finished while the person did not look; the app changes it to `idle` after the person looks. There is no `unknown` state. A program can report the raw word `error`; the widget counts it as `blocked`, as the agent list of the app does. A different word that is not known: the row is skipped and the word is logged one time.
 - **Fallback.** When `herdr-app ls` gives no valid answer (window closed, app not installed, timeout), the widget runs `herdr-core ls --json`. A row is a terminal with `state` `live` and a status. Name: the `agent` field. No place text. A row with a `parent` is a sub-agent (`done` counts as `idle`). The status is the word of the program itself, so `done` shows also when the person saw the agent before. If herdr-core does not answer either, the panel shows "offline".
@@ -29,7 +29,7 @@ Request of the user: a larger interface with a vertical list of the states and t
 - An open group shows 8 agent rows at most. The mouse wheel scrolls the others. A thin bar at the right is the scroll indicator. The four group items are fixed, so the scroll position stays when the agents change.
 - The open group closes when its count becomes 0, and when Herdr goes offline. Offline, the panel shows the one line "offline".
 - One pointer handler covers the panel. A press that moves 6 px or more is a drag (the rules of the first design). A press that moves less is a click on the row below the pointer. So a drag can start on any row.
-- The backend gives `groups`: for each state `{state, label, count, attention, agents: [{key, name, workspace}]}`. `counters` stays for the tray. The flat `agents` property is removed.
+- The backend gives `groups`: for each state `{state, label, count, attention, agents: [{key, icon, label, detail, address, spoken}]}` (before Task 13: `{key, name, workspace}`; see the section on program icons). `counters` stays for the tray. The flat `agents` property is removed.
 - Measured sizes (image of the widget's own window): closed 240 x 136; 3 agents open 240 x 214; 12 agents open 240 x 344; offline 240 x 46; with the error line + 24.
 
 **Jump (`client.py`, `window.py`).** A click on an agent row does these steps on a worker thread:
@@ -81,7 +81,8 @@ Request of the user: the icon that Herdr shows for the program in the place of t
 - **Border.** `state.py` has `PRIORITY = ("blocked", "done", "idle", "working")` and `top_state(online, counts)`: "offline", "none", or the first state of `PRIORITY` with an agent. Idle is above working: the user chose it. `STATES` (blocked, done, working, idle) is still the order of the rows. `Backend.topState` gives it to QML. The panel border is 2 px, drawn inside the panel (the panel size is the same: 240 x 136 closed), in the colour of `STATE_COLORS[topState]`; "none" and "offline" keep the grey `#3c4043`. The change has no animation.
 - **Tray.** The tray dot uses `Backend.topState` too, so it has the colour of the border. The tooltip lists the counts in the order of `PRIORITY`.
 - **Log.** One INFO line for each program word that has no icon of its own ("no icon for program 'x': the generic icon is used" or "...: the row shows text"). No paths.
-- **Not done.** `programs.json` is not read. The icons are read one time for each word in the life of the process. A person did not yet look at the icons and the border on the screen: the checks used images of the widget's own window (off screen, software renderer).
+- **Fix round 1 (2026-11-18).** The lookup accepts a program word of 64 characters at most and treats a file system error as "no such file" (the result is kept, so the error does not repeat each second). The rows of a group are sorted in the backend by the label that shows, then by the address; `state.py` sorts only by state and address. `Icons.url` checks that the file it gave still exists and finds or makes it again if not. An icon that does not load in QML is hidden, and the row uses the layout without an icon.
+- **Not done.** `programs.json` is not read. The icons are read one time for each word in the life of the process (and again when the file is gone). A person did not yet look at the icons and the border on the screen: the checks used images of the widget's own window (off screen, software renderer).
 
 ## Goal
 
@@ -274,7 +275,7 @@ Logs contain terminal addresses, states and counts only. They do not contain nam
 
 ## Known limits
 
-- The jump raises the app window through KWin, so it works on KDE Plasma only. A window on a different virtual desktop was not tested.
+- The jump raises the app window through KWin first. Without KWin or `busctl` it runs plain `herdr-app`, and the app raises its own window, so the jump itself does not need KDE Plasma. Only the overlay panel (layer-shell) needs KDE Plasma on Wayland. A window on a different virtual desktop was not tested.
 - After a jump the person looks at the agent, so the app changes `done` to `idle`. This is the expected Herdr behaviour.
 - The drag can jitter. The pointer positions are relative to the surface, and the surface moves one frame late. A person has not yet seen this on the screen.
 - The open group closes when Herdr goes offline. Decision of 2026-11-18.
