@@ -130,6 +130,21 @@ def test_opening_ends_after_a_failed_jump(app, backend):
     assert failures == [("t1", "could not raise the window", "t1")]
 
 
+def test_an_unexpected_error_in_a_jump_shows_a_fixed_message_and_logs_its_class_only(app, backend, caplog, capsys):
+    caplog.set_level(logging.INFO, logger="herdr_float")
+    failures = []
+    backend.focusFailed.connect(lambda key, message: failures.append((key, message)))
+    backend._client.focus_error = RuntimeError("text from a program")
+    backend._wake.clear()
+    backend.focus("t1")
+    assert wait_for(app, lambda: backend.opening == "" and failures)
+    assert failures == [("t1", "jump failed")]
+    assert backend._wake.is_set()  # the next read starts at once
+    assert [r.getMessage() for r in caplog.records] == ["focus failed agent=t1 error=RuntimeError"]
+    assert "text from a program" not in caplog.text
+    assert capsys.readouterr() == ("", "")  # no traceback on the terminal
+
+
 def test_position_is_saved_and_loaded(app, fake_client, tmp_path):
     path = tmp_path / "state.json"
     first = Backend(fake_client, settings_path=path)

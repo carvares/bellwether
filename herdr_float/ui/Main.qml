@@ -16,6 +16,9 @@ Window {
     property string failedMessage: ""
     // The group that holds the failed agent now. "" when the agent is in no group (gone, or offline).
     readonly property string failedState: failedKey === "" ? "" : stateOf(failedKey)
+    // The group of the failed agent that was opened for the message. The message opens a group one time,
+    // and again only when the agent goes to a different group, so the person can close or change the group.
+    property string failedShownIn: ""
     property Item hoverRow: null
     readonly property int edge: 16
     readonly property int statusRowHeight: 30
@@ -116,16 +119,20 @@ Window {
             // The failed agent can change its state: keep its message on the screen.
             // stateOf() and not failedState: that binding can be older than this signal.
             var failedNow = root.failedKey === "" ? "" : root.stateOf(root.failedKey)
-            if (failedNow !== "")
-                root.openState = failedNow
+            if (failedNow !== root.failedShownIn) {
+                root.failedShownIn = failedNow
+                if (failedNow !== "")
+                    root.openState = failedNow
+            }
             if (root.openState !== "" && root.countOf(root.openState) === 0)
                 root.openState = ""
         }
         function onFocusFailed(key, message) {
             root.failedKey = key
             root.failedMessage = message
-            if (root.failedState !== "")
-                root.openState = root.failedState
+            root.failedShownIn = root.stateOf(key)
+            if (root.failedShownIn !== "")
+                root.openState = root.failedShownIn
             failTimer.restart()
         }
     }
@@ -133,7 +140,7 @@ Window {
     Timer {
         id: failTimer
         interval: 3000
-        onTriggered: { root.failedKey = ""; root.failedMessage = "" }
+        onTriggered: { root.failedKey = ""; root.failedMessage = ""; root.failedShownIn = "" }
     }
 
     Rectangle {
@@ -216,6 +223,7 @@ Window {
                     }
 
                     Item {
+                        id: listBox
                         visible: groupItem.open
                         width: parent.width
                         height: Math.min(groupItem.group.count, root.maxAgentRows) * root.agentRowHeight
@@ -282,16 +290,20 @@ Window {
                             }
                         }
 
-                        // Scroll indicator.
-                        Rectangle {
-                            visible: agentList.scrolls
-                            anchors.right: parent.right
-                            width: 3
-                            radius: 1.5
-                            color: "#9aa0a6"
-                            height: Math.max(12, parent.height * parent.height / Math.max(1, agentList.contentHeight))
-                            y: (parent.height - height) * agentList.contentY
-                                / Math.max(1, agentList.contentHeight - agentList.height)
+                        // Scroll indicator. Its parent has no size, so the pointer handler does not find it
+                        // (findAt uses childAt): a click or a wheel turn on it goes to the row below it.
+                        Item {
+                            x: listBox.width - 3
+
+                            Rectangle {
+                                visible: agentList.scrolls
+                                width: 3
+                                radius: 1.5
+                                color: "#9aa0a6"
+                                height: Math.max(12, listBox.height * listBox.height / Math.max(1, agentList.contentHeight))
+                                y: (listBox.height - height) * agentList.contentY
+                                    / Math.max(1, agentList.contentHeight - agentList.height)
+                            }
                         }
                     }
                 }

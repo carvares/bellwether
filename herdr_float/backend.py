@@ -153,9 +153,12 @@ class Backend(QObject):
         except HerdrOffline:
             log.warning("focus failed agent=%s offline", key)
             self.focusFailed.emit(key, "Herdr is offline")
+        except Exception as exc:  # The class name only: the text of an error can hold command output.
+            log.warning("focus failed agent=%s error=%s", key, type(exc).__name__)
+            self.focusFailed.emit(key, "jump failed")
         finally:
             self._focusDone.emit()
-        self._wake.set()
+            self._wake.set()
 
     @Slot(int, int)
     def savePosition(self, x: int, y: int) -> None:

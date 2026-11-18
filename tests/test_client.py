@@ -53,7 +53,7 @@ class FakeRunner:
         self.answers = {APP: answers.get("app"), CORE: answers.get("core")}
         self.calls = []
 
-    def __call__(self, argv):
+    def __call__(self, argv, timeout=2.0):
         self.calls.append(argv)
         answer = self.answers[argv[0]]
         if isinstance(answer, Exception):
@@ -141,7 +141,7 @@ class Desk:
 
     def __init__(self, running=True, minimized=False, window_class="herdr-app", launcher_exit=0,
                  answers_after=2, raise_works=True, focus_answer=None, busctl_error=None,
-                 not_ready=0):
+                 not_ready=0, others_first=(), no_window=False, hang=(), cost=0.0):
         self.running = running
         self.minimized = minimized
         self.window_class = window_class
@@ -151,8 +151,14 @@ class Desk:
         self.focus_answer = focus_answer
         self.busctl_error = busctl_error
         self.not_ready = not_ready  # number of agent.focus calls that a new window refuses: no terminals yet
+        self.others_first = others_first  # classes of windows that KWin lists before the app window
+        self.no_window = no_window
+        self.hang = hang  # names of commands (see names()) that use their full timeout and give no answer
+        self.cost = cost  # seconds that each command takes
         self.started = False
+        self.now = 0.0  # the clock of this desktop: commands and sleeps move it
         self.calls = []
+        self.timeouts = []
         self.sleeps = []
 
     def names(self):
@@ -161,9 +167,16 @@ class Desk:
 
     def sleep(self, seconds):
         self.sleeps.append(seconds)
+        self.now += seconds
 
-    def __call__(self, argv):
+    def __call__(self, argv, timeout=2.0):
         self.calls.append(argv)
+        self.timeouts.append(timeout)
+        assert 0 < timeout <= 2.0
+        if self.hang == "all" or self.names()[-1] in self.hang or self.cost > timeout:
+            self.now += timeout  # the real runner stops a command at its timeout
+            raise subprocess.TimeoutExpired(cmd="x", timeout=timeout)
+        self.now += self.cost
         if argv[0] == SYSTEMD_RUN:
             self.started = self.launcher_exit == 0
             return reply(b"", returncode=self.launcher_exit)
@@ -191,10 +204,15 @@ class Desk:
         method, arguments = argv[7], argv[9:]
         if method == "Match":
             assert arguments == ["herdr-app"]
-            rows = [["0_" + WINDOW, "a caption", "icon", 100, 0.8, {}]] if self.running else []
-            return reply({"type": "a(sssuda{sv})", "data": [rows]})
+            rows = [["0_" + WINDOW, "a caption", "icon", 100, 0.8, {}]] if self.running and not self.no_window else []
+            others = [[f"0_{{other-{n}}}", "herdr-app in a caption", "icon", 100, 0.8, {}] for n in range(len(self.others_first))]
+            return reply({"type": "a(sssuda{sv})", "data": [others + rows]})
+        if method == "getWindowInfo" and arguments != [WINDOW]:
+            kind = self.others_first[int(arguments[0][7:-1])]
+            if kind is None:
+                return reply(b"", returncode=1)  # KWin does not know this window
+            return reply({"type": "a{sv}", "data": [{"resourceClass": {"type": "s", "data": kind}}]})
         if method == "getWindowInfo":
-            assert arguments == [WINDOW]
             return reply({"type": "a{sv}", "data": [{
                 "resourceClass": {"type": "s", "data": self.window_class},
                 "minimized": {"type": "b", "data": self.minimized},
@@ -207,7 +225,8 @@ class Desk:
 
 def jump(key="t1", **desk_options):
     desk = Desk(**desk_options)
-    client = HerdrClient(APP, CORE, run=desk, sleep=desk.sleep, busctl=BUSCTL, systemd_run=SYSTEMD_RUN)
+    client = HerdrClient(APP, CORE, run=desk, sleep=desk.sleep, clock=lambda: desk.now,
+                         busctl=BUSCTL, systemd_run=SYSTEMD_RUN)
     return client, desk
 
 
@@ -258,7 +277,76 @@ def test_focus_fails_when_the_launcher_fails():
         assert (failure.value.code, failure.value.message) == ("no_start", "Herdr app did not start")
         assert desk.names().count("start") == 1
         assert "do" not in desk.names() and "Run" not in desk.names()
-    assert sum(desk.sleeps) == pytest.approx(6.0)  # the wait for an app that starts but does not answer
+    assert sum(desk.sleeps) == pytest.approx(8.0)  # the wait for an app that starts but does not answer
+    assert desk.now == pytest.approx(8.0)
+
+
+def test_a_jump_where_every_command_hangs_ends_with_the_right_error():
+    client, desk = jump(hang="all")
+    with pytest.raises(HerdrError) as failure:
+        client.focus_agent("t1")
+    assert failure.value.code == "no_start"  # `ls` and then the launcher gave no answer
+    assert desk.names() == ["ls", "start"] and desk.now == pytest.approx(4.0)
+
+
+@pytest.mark.parametrize(
+    "options, code, error",
+    [
+        # The app is closed and, after the launch, `ls` never answers: each try uses its timeout.
+        ({"running": False, "answers_after": 10_000, "cost": 0.75}, "no_start", HerdrError),
+        ({"running": False, "hang": ("ls",)}, "no_start", HerdrError),
+        # The new window never has the terminal, and each command is slow.
+        ({"running": False, "answers_after": 1, "not_ready": 10_000, "cost": 0.9}, "agent_gone", HerdrError),
+        # The agent shows, then KWin and the launcher give no answer.
+        ({"hang": ("Match", "start")}, "no_raise", HerdrError),
+        ({"cost": 1.9, "minimized": True, "raise_works": False, "launcher_exit": 1}, "no_raise", HerdrError),
+        # The command that shows the agent gives no answer.
+        ({"hang": ("do",)}, None, HerdrOffline),
+        ({"running": False, "answers_after": 1, "cost": 1.5, "hang": ("do",)}, None, HerdrOffline),
+    ],
+)
+def test_a_jump_ends_at_its_deadline_with_the_error_of_the_step_in_progress(options, code, error):
+    client, desk = jump(**options)
+    with pytest.raises(error) as failure:
+        client.focus_agent("t1")
+    assert getattr(failure.value, "code", None) == code
+    assert desk.now <= 8.0 + 1e-9  # no command and no pause goes past the deadline
+    assert len(desk.calls) <= 34  # 8 s of tries each 0.25 s, the first `ls` and the launch
+    assert all(0 < t <= 2.0 for t in desk.timeouts)
+
+
+def test_a_command_near_the_deadline_gets_only_the_time_that_is_left():
+    client, desk = jump(running=False, answers_after=10_000, cost=0.7)
+    with pytest.raises(HerdrError):
+        client.focus_agent("t1")
+    assert desk.timeouts[0] == 2.0
+    assert desk.timeouts[-1] < 0.7  # less than the command needs: only the time that was left
+    assert desk.now == pytest.approx(8.0)
+
+
+def test_a_slow_start_that_ends_before_the_deadline_is_a_good_jump():
+    client, desk = jump(running=False, minimized=True, answers_after=3, not_ready=2, cost=0.5)
+    client.focus_agent("t1")
+    assert desk.minimized is False
+    assert 6.0 < desk.now <= 8.0
+    assert desk.names().count("start") == 1
+
+
+def test_focus_raises_the_app_window_when_kwin_lists_other_windows_first():
+    # A caption that holds "herdr-app", a window that KWin does not know any more, then the app window.
+    client, desk = jump(minimized=True, others_first=("konsole", None, "herdr-app-helper"))
+    client.focus_agent("t1")
+    assert desk.minimized is False
+    runs = [c[9:] for c in desk.calls if c[0] == BUSCTL and c[7] == "Run"]
+    assert runs == [["0_" + WINDOW, ""]]  # only the app window was activated
+    assert "start" not in desk.names()
+
+
+def test_focus_asks_the_app_when_kwin_finds_no_window():
+    client, desk = jump(no_window=True)
+    client.focus_agent("t1")
+    assert desk.names() == ["ls", "do", "Match", "start"]
+    assert desk.calls[-1] == START
 
 
 def test_focus_fails_when_the_launcher_is_not_found():
@@ -266,10 +354,10 @@ def test_focus_fails_when_the_launcher_is_not_found():
     client._systemd_run = "/fake/herdr-app-missing"
     desk_call = desk.__call__
 
-    def run(argv):
+    def run(argv, timeout=2.0):
         if argv[0] == "/fake/herdr-app-missing":
             raise FileNotFoundError(argv[0])
-        return desk_call(argv)
+        return desk_call(argv, timeout)
 
     client._run = run
     with pytest.raises(HerdrError) as failure:
@@ -332,7 +420,8 @@ def test_focus_that_does_not_answer_is_offline():
 
 def test_focus_without_the_app_program_runs_nothing():
     desk = Desk()
-    client = HerdrClient(None, CORE, run=desk, sleep=desk.sleep, busctl=BUSCTL, systemd_run=SYSTEMD_RUN)
+    client = HerdrClient(None, CORE, run=desk, sleep=desk.sleep, clock=lambda: desk.now,
+                         busctl=BUSCTL, systemd_run=SYSTEMD_RUN)
     with pytest.raises(HerdrError) as failure:
         client.focus_agent("t1")
     assert (failure.value.code, failure.value.message) == ("no_app", "Herdr app is not installed")
@@ -371,6 +460,8 @@ def test_default_runner_uses_no_shell_and_a_timeout(monkeypatch):
         "capture_output": True,
         "timeout": 2.0,
     }
+    client_module._run(["/fake/herdr-app", "ls"], timeout=0.5)
+    assert seen["timeout"] == 0.5
 
 
 def test_find_executables(monkeypatch, tmp_path):

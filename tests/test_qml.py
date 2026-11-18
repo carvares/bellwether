@@ -3,7 +3,8 @@ import time
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QPointF, Qt, qInstallMessageHandler
+from PySide6.QtCore import QPoint, QPointF, Qt, qInstallMessageHandler
+from PySide6.QtGui import QWheelEvent
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickWindow
 from PySide6.QtTest import QTest
@@ -168,4 +169,48 @@ def test_a_failed_jump_shows_its_message_where_the_agent_is_now(app, window):
     assert root.property("openState") == ""
     assert texts().count("could not raise the window") == 1
     assert root.height() == 136 + 24
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def test_a_failure_message_opens_its_group_one_time_and_then_follows_only_a_state_change(app, window):
+    root, backend, messages = window
+    backend.apply(AGENTS)
+    settle(app)
+    backend.focusFailed.emit("t2", "could not raise the window")
+    settle(app)
+    assert root.property("openState") == "working"
+    click(app, root, rows(root, "status")[2])  # the person closes the group
+    assert root.property("openState") == ""
+    backend.apply(AGENTS + [Agent("t4", "idle", "cy", "")])  # new data, the failed agent did not move
+    settle(app)
+    assert root.property("openState") == ""
+    click(app, root, rows(root, "status")[0])  # the person opens a different group
+    backend.apply(AGENTS)
+    settle(app)
+    assert root.property("openState") == "blocked"
+    backend.apply([AGENTS[0], Agent("t2", "idle", "ana", "api / 1"), AGENTS[2]])  # the failed agent moved
+    settle(app)
+    assert root.property("openState") == "idle"
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def test_the_scroll_indicator_does_not_take_clicks_or_the_wheel(app, window):
+    root, backend, messages = window
+    backend.apply([Agent(f"i{n:02d}", "idle", f"helper {n:02d}", "pool") for n in range(12)])
+    settle(app)
+    click(app, root, rows(root, "status")[3])
+    row = rows(root, "agent")[1]
+    edge = row.mapToScene(QPointF(row.width() - 1, row.height() / 2))  # on the 3 px of the indicator
+    flick = next(i for i in walk(root.contentItem()) if i.property("scrolls"))
+    wheel = QWheelEvent(edge, edge, QPoint(0, 0), QPoint(0, -120), Qt.MouseButton.NoButton,
+                        Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False)
+    app.sendEvent(root, wheel)
+    settle(app)
+    assert flick.property("contentY") == 52
+    QTest.mouseClick(root, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, edge.toPoint())
+    for _ in range(100):
+        settle(app)
+        if backend._client.focused and backend.opening == "":
+            break
+    assert backend._client.focused == ["i03"]  # the row that is at that place after the scroll of 2 rows
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
