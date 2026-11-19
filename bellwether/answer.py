@@ -5,9 +5,21 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from PySide6.QtCore import QEvent, QObject
+
 from .layouts import UI_PATH
 
 log = logging.getLogger("bellwether")
+
+
+class _KeyWatch(QObject):
+    """Sees each key press of the window before any item of it: an answer sent from the window is then no longer
+    "with no key since" (the rule of the number keys in Answer.qml). It changes nothing else and keeps no key."""
+
+    def eventFilter(self, watched, event) -> bool:
+        if event.type() == QEvent.Type.KeyPress:
+            watched.setProperty("answerSent", False)
+        return False
 
 
 class Answer:
@@ -16,6 +28,7 @@ class Answer:
         self._backend = backend
         self._source = Path(source)
         self._window = None
+        self._keys = _KeyWatch()
         backend.answerRequested.connect(self.open)
 
     @property
@@ -34,6 +47,7 @@ class Answer:
                 self._backend.closePrompt()  # no window shows the prompt: it does not stay open
                 return
             self._window = roots[-1]
+            self._window.installEventFilter(self._keys)
         if self._window.isVisible() and not self._window.isActive():
             # Behind a different window. On Wayland a program cannot raise its window, but a new window comes to
             # the front: show it again. `raising` tells the window that this hide is not a close of the prompt.

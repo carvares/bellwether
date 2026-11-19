@@ -69,14 +69,18 @@ Window {
     // - the pointer answers only after `guardMs` with no press of a key or of the pointer (400 ms: the double-click
     //   time of KDE, so the second click of a double click never answers);
     // - a number key answers only after `keyQuietMs` with no key press (1000 ms: a person who types presses a key
-    //   each 0.1 to 0.3 s, so 1 s with no key means that the typing has stopped);
-    // - when the keyboard was in the text field, or a key was pressed in the `lockMs` (2 s) before the question
-    //   changed, the number keys stay off for that question until a click in the window or the Tab key.
-    // Each press of a key or of the pointer starts a guard that is not over again. The engine has its own rules;
-    // these are of the window.
+    //   each 0.1 to 0.3 s, so 1 s with no key means that the typing has stopped).
+    // Each press of a key or of the pointer starts a guard that is not over again.
+    // The number keys follow one rule more. At each change of the question that shows (not at the first question
+    // after the window opens), they are locked, except when all of these are true: the new question is the next
+    // question after an answer of the person sent from this window (the engine went from "answering" or "pending"
+    // to "ready" with a new question, and says nothing of it but "held"), the window is active at the change, and
+    // no key was pressed in the window since that answer went. A lock ends only by a press of the pointer in the
+    // window or by Tab or Shift+Tab: never by an other change, a change of the state, of the keyboard or of the
+    // activation. A close ends it too (the next open starts as an open). The engine has its own rules; these are of
+    // the window.
     property int guardMs: 400
     property int keyQuietMs: 1000
-    property int lockMs: 2000
     readonly property bool answerable: phase === "ready" && hasQuestion
     // The number of the question for which each guard is over (0: none).
     property int pointerPassed: 0
@@ -84,10 +88,11 @@ Window {
     readonly property bool armed: answerable && shown !== 0 && pointerPassed === shown
     readonly property bool keysArmed: armed && keysPassed === shown
     property bool digitsLocked: false
-    property real lastKeyAt: 0
-    // The keyboard is in the text field; when it left it.
-    property bool inField: false
-    property real fieldLeftAt: 0
+    // An answer of the person went from this window for the question with the number `answeredShown`, and no key
+    // was pressed in the window since (bellwether/answer.py sets it to false at each key press, before any item of
+    // the window gets the key).
+    property bool answerSent: false
+    property int answeredShown: 0
     // The question took the place of an other question of the same agent while the window was open, and how many
     // questions showed since the window opened.
     property bool fresh: false
@@ -102,21 +107,35 @@ Window {
     onShownChanged: {
         if (shown === 0)
             return
-        var now = Date.now()
         fresh = lastShown !== 0 && lastKey === prompt.key
         questionCount = fresh ? questionCount + 1 : 1
-        // The field lost the keyboard in the same moment: the change of the question took it.
-        var typing = inField || now - fieldLeftAt < 250
-        digitsLocked = fresh && (typing || now - lastKeyAt < lockMs)
+        // The values of the prompt itself, not of the bindings of the window: they are of this change.
+        var next = answerSent && prompt.state === "ready"
+                   && (prompt.reason === "" || prompt.reason === "held") && answer.active
+        digitsLocked = fresh && (digitsLocked || !next)
+        answerSent = false
         lastShown = shown
         lastKey = prompt.key
         startGuard()
+        // The new detail shows from its first line (else a new command could show at the end of the one before,
+        // and be seen to its end with no scroll), and the content from its top. Nothing is reported seen before
+        // the guard that starts here is over.
+        if (detailView)
+            detailView.toEnd(false)
+        scroller.contentY = 0
         if (fresh)
             changeFlash.restart()
         // Nothing of the question before stays: no text in the field, and no option has the keyboard.
         if (entryItem)
             entryItem.text = ""
         frame.forceActiveFocus()
+    }
+    // An answer that ended in an other way than the next question (failed, sent, gone, closed, or ready again
+    // with the same question): no next question comes from it. A change of the question while the answer is on
+    // its way also ends it (above), so `answerSent` is always of the question just before the change.
+    onPhaseChanged: {
+        if (phase !== "answering" && phase !== "pending" && !(phase === "ready" && prompt.shown !== answeredShown))
+            answerSent = false
     }
     onAnswerableChanged: if (answerable) startGuard()
     onArmedChanged: Qt.callLater(reportSeen)
@@ -128,16 +147,22 @@ Window {
         keyTimer.restart()
     }
     // A press of a key (`isKey`) or of the pointer: a guard that is not over starts again. A press of the pointer
-    // in the window also turns the number keys on again.
+    // in the window also ends a lock of the number keys.
     function notePress(isKey) {
-        if (isKey)
-            lastKeyAt = Date.now()
-        else
-            digitsLocked = false
+        if (!isKey)
+            unlockDigits()
         if (pointerPassed !== shown)
             pointerTimer.restart()
         if (keysPassed !== shown)
             keyTimer.restart()
+    }
+    // The end of a lock of the number keys (a press of the pointer, Tab): they answer after their quiet time again.
+    function unlockDigits() {
+        if (!digitsLocked)
+            return
+        digitsLocked = false
+        keysPassed = 0
+        keyTimer.restart()
     }
     Timer {
         id: pointerTimer
@@ -167,6 +192,12 @@ Window {
                 return true
         return false
     }
+    // An option that approves is off because the end of the detail was not in view: in its own view, or in the
+    // window (on a low screen the content of the window scrolls too). The line below the detail and the footer
+    // say so, so that an option is never off with no reason in view.
+    readonly property string scrollNote: "Scroll to the end of the text above to approve."
+    readonly property bool waitsForEnd: answerable && !blind && hasAccept && !prompt.seen && detailView !== null
+                                        && !detailAtEnd
     // Later, not inside the change: the report changes the prompt, and the prompt the place of the detail.
     onDetailAtEndChanged: Qt.callLater(reportSeen)
     function reportSeen() {
@@ -186,7 +217,7 @@ Window {
         for (var i = 0; i < prompt.options.length; i++) {
             var option = prompt.options[i]
             if (option.key === key && option.allowed && option.kind !== "text")
-                return backend.answer(key)
+                return sent(backend.answer(key))
         }
         return false
     }
@@ -195,7 +226,16 @@ Window {
     function sendText() {
         if (phase !== "ready" || !armed || !prompt.freeText || !entryItem)
             return false
-        return backend.answerText(entryItem.text)
+        return sent(backend.answerText(entryItem.text))
+    }
+
+    // The engine took an answer of the person (`started`) for the question that shows.
+    function sent(started) {
+        if (started) {
+            answerSent = true
+            answeredShown = shown
+        }
+        return started
     }
 
     // Show the agent in Herdr (the jump of the panel), and close this window when the jump starts.
@@ -238,16 +278,11 @@ Window {
             lastKey = ""
             fresh = false
             digitsLocked = false
+            answerSent = false
             backend.closePrompt()
         }
     }
-    onActiveFocusItemChanged: {
-        var field = activeFocusItem !== null && activeFocusItem.isAnswerField === true
-        if (inField && !field)
-            fieldLeftAt = Date.now()
-        inField = field
-        scroller.reveal(activeFocusItem)
-    }
+    onActiveFocusItemChanged: scroller.reveal(activeFocusItem)
 
     Connections {
         target: backend
@@ -285,7 +320,7 @@ Window {
             var plain = (event.modifiers & ~Qt.KeypadModifier) === Qt.NoModifier
             var view = detailLoader.item ? detailLoader.item : screenLoader.item
             if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
-                answer.digitsLocked = false
+                answer.unlockDigits()
             } else if (plain && event.key >= Qt.Key_1 && event.key <= Qt.Key_9) {
                 answer.digit(String(event.key - Qt.Key_0))
                 event.accepted = true
@@ -526,14 +561,14 @@ Window {
                         }
                     }
 
-                    // The number keys are off for a question that came while the person typed.
+                    // The number keys are locked after a change of the question (the rule above).
                     Text {
                         readonly property bool isDigitsOff: true
-                        visible: answer.digitsLocked && answer.answerable
+                        visible: answer.digitsLocked && answer.hasQuestion
                         width: parent.width
                         textFormat: Text.PlainText
                         wrapMode: Text.Wrap
-                        text: "New question — click or press Tab to use the number keys"
+                        text: "New question — the number keys are off. Click in the window or press Tab to turn them on."
                         color: answer.warnColor
                         font { family: answer.theme.fontFamily; pixelSize: answer.theme.smallSize + 1; weight: Font.DemiBold }
                     }
@@ -596,12 +631,11 @@ Window {
                     // The options that approve are off until the last line of the detail was in view.
                     Text {
                         readonly property bool isSeenNote: true
-                        visible: answer.answerable && !answer.blind && answer.hasAccept && !answer.prompt.seen
-                                 && answer.detailView !== null && answer.detailView.scrolls
+                        visible: answer.waitsForEnd
                         width: parent.width
                         textFormat: Text.PlainText
                         wrapMode: Text.Wrap
-                        text: "Scroll to the end of the text above to approve."
+                        text: answer.scrollNote
                         color: answer.warnColor
                         font { family: answer.theme.fontFamily; pixelSize: answer.theme.smallSize + 1; weight: Font.DemiBold }
                     }
@@ -760,10 +794,18 @@ Window {
                 width: herdr.x - x - 16
                 height: parent.height
                 verticalAlignment: Text.AlignVCenter
+                wrapMode: Text.Wrap
+                maximumLineCount: 2
                 elide: Text.ElideRight
                 textFormat: Text.PlainText
-                text: answer.answerable && answer.digitsLocked ? "Click or press Tab first. Esc closes."
-                    : answer.answerable ? "Press the number of an option. Esc closes." : "Esc closes."
+                // Why the number keys or the options that approve are off, when they are; then Esc, when there is
+                // room for it (with both reasons there is not, at a large text size).
+                readonly property bool locked: answer.digitsLocked && answer.hasQuestion
+                text: (locked ? "Number keys off: click or press Tab." : "")
+                    + (locked && answer.waitsForEnd ? " " + answer.scrollNote
+                       : answer.waitsForEnd ? answer.scrollNote + " Esc closes."
+                       : locked ? " Esc closes."
+                       : answer.answerable ? "Press the number of an option. Esc closes." : "Esc closes.")
                 color: answer.theme.dimColor
                 font { family: answer.theme.fontFamily; pixelSize: answer.theme.smallSize + 1 }
             }

@@ -5,17 +5,21 @@ import re
 import threading
 
 import pytest
-from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QGuiApplication, QWheelEvent
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, qInstallMessageHandler
+from PySide6.QtGui import QColor, QGuiApplication, QWheelEvent, QWindow
+from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtTest import QTest
 
 from bellwether import layouts
+from bellwether.answer import Answer
+from bellwether.backend import Backend
 from bellwether.client import Failure, Screen
+from bellwether.icons import Icons
 from bellwether.prompt_session import MESSAGES
 from bellwether.state import Agent
 from tests.audit import text_findings
 from tests.test_answer_control import LEFT, LETTERS, NONE, Panel, centre
-from tests.test_backend_prompt import ASK, BASH, CREATE, FIXTURES, NO_DIALOG, TIP, shown, wait_for
+from tests.test_backend_prompt import ASK, BASH, CREATE, FIXTURES, NO_DIALOG, TIP, ScreenClient, shown, wait_for
 from tests.test_options_look import focused, items, js, key, tab_order, type_text
 from tests.test_qml import LAYERSHELL_QMLDIR, click, settle, walk
 from tests.test_skins import spoken, wait_jump
@@ -800,9 +804,7 @@ def test_the_reviewers_probe_digits_typed_for_the_field_do_not_answer_a_new_ques
     type_text(app, window, " a 2")  # the person goes on typing what they meant for the field
     assert not wait_for(app, lambda: d.client.pressed != [], 1.0)
     assert d.client.pressed == [] and d.state() == "ready"
-    assert d.one("isDigitsOff").property("text") == "New question — click or press Tab to use the number keys"
-    assert window.property("digitsLocked") is True
-    assert d.one("isFooterNote").property("text") == "Click or press Tab first. Esc closes."
+    assert_locked(d, window)
 
 
 @pytest.mark.parametrize("unlock", ["click", "tab"])
@@ -834,7 +836,6 @@ def test_normal_fast_use_open_wait_then_a_digit_answers(app, desk):
     d = desk()
     window = d.answer_for("t1", quiet=None)
     assert window.property("guardMs") == 400 and window.property("keyQuietMs") == 1000
-    assert window.property("lockMs") == 2000
     assert not window.property("digitsLocked") and not d.shows("isDigitsOff")
     d.arm()
     key(app, window, Qt.Key.Key_4)
@@ -845,21 +846,25 @@ def test_normal_fast_use_open_wait_then_a_digit_answers(app, desk):
 def test_a_key_in_the_quiet_time_answers_nothing_and_starts_it_again(app, desk):
     d = desk()
     window = d.answer_for("t1", quiet=None)
+    d.arm()
+    d.client.on_press = lambda: d.client.screens.__setitem__(slice(None), [EDIT])
     window.setProperty("guardMs", 600000)
-    d.client.screens[:] = [EDIT]
-    d.backend.apply(list(AGENTS))  # a new question: both guards start
-    d.until("ready")
+    key(app, window, Qt.Key.Key_4)  # the next question of this answer: both guards start, the keys stay on
+    assert wait_for(app, lambda: d.backend.prompt["title"] == "Edit file" and d.state() == "ready")
+    d.client.on_press = None
+    settle(app)
+    assert window.property("digitsLocked") is False
     window.setProperty("guardMs", 30)
     assert wait_for(app, lambda: window.property("armed") is True)
     for _ in range(4):  # a key each 0.4 s: the quiet time of 1 s never ends
         key(app, window, Qt.Key.Key_3)
         assert window.property("keysArmed") is False
         assert not wait_for(app, lambda: window.property("keysArmed") is True, 0.35)
-    assert d.client.pressed == []
+    assert d.client.pressed == [("t1", ["4"])]
     assert wait_for(app, lambda: window.property("keysArmed") is True, 1.5)
     key(app, window, Qt.Key.Key_3)
     d.until("failed", "sent", "ready")
-    assert d.client.pressed == [("t1", ["3"])]
+    assert d.client.pressed == [("t1", ["4"]), ("t1", ["3"])]
 
 
 def test_a_pointer_press_in_the_guard_starts_it_again(app, desk):
@@ -938,3 +943,434 @@ def test_on_a_low_screen_the_end_of_the_detail_must_be_in_the_window_too(app, de
     assert not d.button("1").property("enabled")
     scroller.setProperty("contentY", scroller.property("contentHeight") - scroller.height())
     assert wait_for(app, lambda: d.backend.prompt["seen"] is True)
+
+
+@pytest.mark.parametrize("letter", LETTERS)
+def test_the_room_of_the_detail_has_no_binding_loop_when_the_window_gets_its_screen_height_at_once(app, tmp_path,
+                                                                                                    letter):
+    """The path of the program at its first open (dfd4d90): a fresh engine with only the answer window, the window
+    made and shown, then the height of the screen at once, with a command that scrolls."""
+    messages = []
+    previous = qInstallMessageHandler(lambda mode, context, text: messages.append(text))
+    client = ScreenClient()
+    client.screens = [LONG]
+    backend = Backend(client, settings_path=tmp_path / "state.json", icons=Icons(None, tmp_path / "cache"),
+                      follow=(0.0,), prompt_floor=0.0)
+    try:
+        backend.setLayout(letter)
+        engine = QQmlApplicationEngine()
+        engine.warnings.connect(lambda errors: messages.extend(e.toString() for e in errors))
+        engine.rootContext().setContextProperty("backend", backend)
+        backend.apply([Agent("t1", "blocked", "rev", "Main", "claude-code")])
+        opener = Answer(engine, backend)
+        backend.showAnswer("t1")
+        window = opener.window
+        window.setProperty("roomHeight", 1080)
+        window.setProperty("guardMs", 1)
+        window.setProperty("keyQuietMs", 1)
+        assert wait_for(app, lambda: backend.prompt["state"] == "ready" and backend.prompt["seen"] is False)
+        settle(app)
+        assert window.height() == 1000
+        window.close()
+        settle(app)
+    finally:
+        backend.stop()
+        app.processEvents()
+        qInstallMessageHandler(previous)
+    assert [m for m in messages if "Binding loop" in m] == []
+
+
+# ----- the one rule of the number keys: locked at each change of the question, but for the next question of an
+# answer sent from this window, with the window active and no key pressed since -----
+
+def pause(app, ms):
+    wait_for(app, lambda: False, ms / 1000)
+
+
+def to_the_field(d, app, window):
+    """The person presses 3: the text field of the question ASK takes the keyboard, and the person types in it."""
+    window.setProperty("guardMs", 50)
+    d.arm()
+    key(app, window, Qt.Key.Key_3)
+    type_text(app, window, "made-up")
+    assert focused(window) == "Option 3, Type something., text"
+
+
+def tick_to(d, screen):
+    """The next read of the list shows the agent with an other question (not the result of an answer)."""
+    d.client.screens[:] = [screen]
+    d.backend.apply(list(AGENTS))
+    d.until("ready")
+
+
+def away(app, window):
+    """An other window takes the activation (Alt+Tab): Qt takes the keyboard away from every item of the window."""
+    other = QWindow()
+    other.resize(50, 50)
+    other.show()
+    other.requestActivate()
+    assert wait_for(app, lambda: not window.isActive())
+    return other
+
+
+def back(app, window, other):
+    """The person comes back with the keyboard (no click)."""
+    window.requestActivate()
+    assert wait_for(app, lambda: window.isActive())
+    other.destroy()
+    settle(app)
+
+
+LOCK_LINE = "New question — the number keys are off. Click in the window or press Tab to turn them on."
+LOCK_FOOTER = "Number keys off: click or press Tab. Esc closes."
+
+
+def assert_locked(d, window):
+    assert window.property("digitsLocked") is True
+    assert d.one("isDigitsOff").property("text") == LOCK_LINE
+    assert d.one("isFooterNote").property("text") == LOCK_FOOTER
+
+
+def test_the_reviewers_n1_probe_a_change_while_the_window_is_not_active_locks_the_number_keys(app, desk):
+    d = desk(screens=[ASK])
+    window = d.answer_for("t1", quiet=None)
+    to_the_field(d, app, window)
+    other = away(app, window)
+    pause(app, 2500)  # more than 2 s after the last key
+    tick_to(d, BASH)
+    pause(app, 1200)
+    back(app, window, other)
+    type_text(app, window, " a 2")
+    pause(app, 300)
+    assert d.client.pressed == []
+    assert_locked(d, window)
+
+
+def test_the_reviewers_n2_probe_a_second_change_keeps_the_lock(app, desk):
+    d = desk(screens=[ASK])
+    window = d.answer_for("t1", quiet=None)
+    to_the_field(d, app, window)
+    tick_to(d, BASH)
+    assert window.property("digitsLocked") is True
+    type_text(app, window, " more")  # the keys go to the frame now
+    pause(app, 2200)
+    tick_to(d, EDIT)
+    pause(app, 1200)
+    type_text(app, window, "1")
+    pause(app, 300)
+    assert d.client.pressed == []
+    assert_locked(d, window)
+
+
+def test_a_change_while_the_window_is_not_active_locks_the_number_keys_with_no_key_before(app, desk):
+    d = desk()
+    window = d.answer_for("t1", quiet=None)
+    d.arm()
+    other = away(app, window)
+    tick_to(d, EDIT)
+    back(app, window, other)
+    d.arm()
+    key(app, window, Qt.Key.Key_3)
+    assert d.client.pressed == []
+    assert_locked(d, window)
+
+
+def test_a_change_after_a_quiet_time_with_the_field_used_before_locks_the_number_keys(app, desk):
+    """The person typed in the field, then nothing for 2.5 s: a change of the question locks all the same."""
+    d = desk(screens=[ASK])
+    window = d.answer_for("t1", quiet=None)
+    to_the_field(d, app, window)
+    pause(app, 2500)
+    tick_to(d, BASH)
+    d.arm()
+    key(app, window, Qt.Key.Key_2)
+    assert d.client.pressed == []
+    assert_locked(d, window)
+
+
+def test_a_change_with_no_key_and_no_field_before_locks_the_number_keys_too(app, desk):
+    d = desk()
+    window = d.answer_for("t1")
+    d.arm()
+    pause(app, 2200)
+    tick_to(d, EDIT)
+    d.arm()
+    key(app, window, Qt.Key.Key_3)
+    assert d.client.pressed == []
+    assert_locked(d, window)
+
+
+def test_the_lock_stays_through_a_second_and_a_third_change(app, desk):
+    d = desk()
+    window = d.answer_for("t1")
+    d.arm()
+    tick_to(d, EDIT)
+    assert_locked(d, window)
+    for screen in (CREATE, EDIT):
+        pause(app, 2200)
+        tick_to(d, screen)
+        d.arm()
+        assert_locked(d, window)
+        other = away(app, window)  # a change of the activation does not end the lock either
+        back(app, window, other)
+        key(app, window, Qt.Key.Key_3)
+        assert d.client.pressed == [] and window.property("digitsLocked") is True
+
+
+@pytest.mark.parametrize("how", ["digit", "pointer"])
+def test_the_next_question_of_an_own_answer_keeps_the_number_keys_on(app, desk, how):
+    """The fast path: an answer from this window, the next question comes, a number key answers it after the guard."""
+    d = desk()
+    window = d.answer_for("t1")
+    assert window.isActive()
+    d.arm()
+    d.client.on_press = lambda: d.client.screens.__setitem__(slice(None), [EDIT])
+    if how == "digit":
+        key(app, window, Qt.Key.Key_4)
+    else:
+        d.press(d.button("4"))
+    assert wait_for(app, lambda: d.backend.prompt["title"] == "Edit file" and d.state() == "ready")
+    settle(app)
+    assert window.property("digitsLocked") is False and not d.shows("isDigitsOff")
+    assert d.one("isNewMark").property("text") == "New question (no. 2)"
+    assert d.one("isFooterNote").property("text") == "Press the number of an option. Esc closes."
+    d.client.on_press = None
+    d.arm()
+    key(app, window, Qt.Key.Key_3)
+    d.until("failed", "sent", "ready")
+    assert d.client.pressed == [("t1", ["4"]), ("t1", ["3"])]
+
+
+def held_answer(d, app, window, digit=Qt.Key.Key_4):
+    """An answer by a number key that herdr-core holds until `release()`; the next question is EDIT."""
+    gate = threading.Event()
+    d.client.press_gate = gate
+    d.client.on_press = lambda: d.client.screens.__setitem__(slice(None), [EDIT])
+    key(app, window, digit)
+    assert wait_for(app, lambda: d.state() == "answering")
+
+    def release():
+        gate.set()
+        assert wait_for(app, lambda: d.backend.prompt["title"] == "Edit file" and d.state() == "ready")
+        settle(app)
+        d.client.press_gate = None
+    return release
+
+
+def test_a_key_after_the_own_answer_locks_the_next_question(app, desk):
+    d = desk()
+    window = d.answer_for("t1")
+    d.arm()
+    release = held_answer(d, app, window)
+    key(app, window, Qt.Key.Key_A)  # a stray key while the answer is on its way
+    release()
+    d.arm()
+    key(app, window, Qt.Key.Key_3)
+    assert d.client.pressed == [("t1", ["4"])]
+    assert_locked(d, window)
+
+
+def test_the_next_question_of_an_own_answer_while_the_window_is_not_active_is_locked(app, desk):
+    d = desk()
+    window = d.answer_for("t1")
+    d.arm()
+    release = held_answer(d, app, window)
+    other = away(app, window)
+    release()
+    back(app, window, other)
+    d.arm()
+    key(app, window, Qt.Key.Key_3)
+    assert d.client.pressed == [("t1", ["4"])]
+    assert_locked(d, window)
+
+
+def test_a_question_that_comes_while_nothing_was_sent_is_locked(app, desk):
+    """The engine reads the screen again before the key: an other question shows, and the key does not go
+    (reason "changed"). That question is not the result of the answer: locked."""
+    d = desk()
+    window = d.answer_for("t1")
+    d.arm()
+    d.client.screens[:] = [EDIT]  # the next read, the one before the key, shows an other question
+    key(app, window, Qt.Key.Key_4)
+    d.until("ready")
+    assert d.backend.prompt["reason"] == "changed" and d.client.pressed == []
+    d.arm()
+    key(app, window, Qt.Key.Key_3)
+    assert d.client.pressed == []
+    assert_locked(d, window)
+
+
+@pytest.mark.parametrize("unlock", ["click", "tab", "backtab"])
+def test_a_click_or_tab_ends_the_lock_and_the_quiet_time_still_applies(app, desk, unlock):
+    d = desk()
+    window = d.answer_for("t1", quiet=None)
+    d.arm()
+    tick_to(d, EDIT)
+    d.arm()
+    assert_locked(d, window)
+    if unlock == "click":
+        d.press(d.one("isPromptTitle"))
+    else:
+        key(app, window, Qt.Key.Key_Tab if unlock == "tab" else Qt.Key.Key_Backtab)
+    assert window.property("digitsLocked") is False and not d.shows("isDigitsOff")
+    # The quiet time of the number keys (1 s, again at each key) starts again at the end of a lock.
+    assert window.property("keysArmed") is False and window.property("armed") is True
+    key(app, window, Qt.Key.Key_3)
+    pause(app, 600)
+    key(app, window, Qt.Key.Key_3)
+    assert d.client.pressed == [] and window.property("keysArmed") is False
+    d.arm()
+    key(app, window, Qt.Key.Key_3)
+    d.until("failed", "sent", "ready")
+    assert d.client.pressed == [("t1", ["3"])]
+
+
+def test_typing_in_the_field_keeps_the_quiet_time_of_the_number_keys_running(app, desk):
+    """Mutant Q6 of the re-review: each key typed in the field counts as a key press for the quiet time."""
+    d = desk(screens=[ASK])
+    window = d.answer_for("t1", quiet=None)
+    window.setProperty("guardMs", 50)
+    assert wait_for(app, lambda: window.property("armed") is True)
+    field = next(i for i in walk(window.contentItem()) if i.property("isAnswerField"))
+    d.press(field)  # the quiet time starts again with this press
+    for letter in "made-up":  # 1.4 s of typing in the field
+        QTest.keyClick(window, letter)
+        pause(app, 200)
+    key(app, window, Qt.Key.Key_Tab)  # out of the field, to "Send"
+    assert focused(window) == "Send the text" and window.property("keysArmed") is False
+    key(app, window, Qt.Key.Key_1)
+    assert d.client.pressed == []
+
+
+# ----- a new detail shows from its first line; the end of the detail and the reason why accept is off -----
+
+SHORTER = Screen(BASH.text.replace(" touch made-by-test.txt\n╌", "\n".join(
+    [" sudo made-up-wipe --all && \\", *STEPS[6:]]) + "\n╌", 1), True)
+OTHER_START = Screen(BASH.text.replace(" touch made-by-test.txt\n╌", "\n".join(
+    [" sudo made-up-wipe --all && \\", *STEPS[1:]]) + "\n╌", 1), True)
+
+
+@pytest.mark.parametrize("second", ["shorter", "same-length"])
+@pytest.mark.parametrize("room", [1080, 700])
+def test_the_reviewers_n3_probe_a_new_long_command_shows_from_its_first_line_and_is_not_seen(app, desk, second, room):
+    d = desk(screens=[LONG])
+    window = d.answer_for("t1")
+    window.setProperty("roomHeight", room)
+    settle(app)
+    d.arm()
+    key(app, window, Qt.Key.Key_End)
+    assert wait_for(app, lambda: d.backend.prompt["seen"] is True)
+    tick_to(d, SHORTER if second == "shorter" else OTHER_START)
+    assert d.backend.prompt["detail"][0] == " sudo made-up-wipe --all && \\" and d.backend.prompt["seen"] is False
+    view = d.one("isDetail")
+    assert view.property("above") == 0 and view.property("atEnd") is False  # at the top, before the guard ends
+    assert d.one("isScroller").property("contentY") == 0
+    d.arm()
+    pause(app, 300)
+    assert d.backend.prompt["seen"] is False and view.property("above") == 0
+    assert [b.property("enabled") for b in d.buttons()] == [False, False, False, True]
+    assert d.one("isSeenNote").property("text") == SCROLL_NOTE
+    key(app, window, Qt.Key.Key_Tab)  # ends the lock of the number keys; the detail takes the keyboard
+    key(app, window, Qt.Key.Key_End)
+    assert wait_for(app, lambda: d.backend.prompt["seen"] is True)
+
+
+def test_the_end_of_the_detail_counts_at_its_last_pixel_and_not_before(app, desk):
+    """Mutant Q3 of the re-review: the view is at its end only within 1 px of it."""
+    d = desk(screens=[LONG])
+    d.answer_for("t1")
+    d.arm()
+    view = d.one("isDetail")
+    flick = next(i for i in walk(view) if i.inherits("QQuickFlickable"))
+    end = flick.property("contentHeight") - flick.height()
+    for short in (40, 30, 2):
+        flick.setProperty("contentY", end - short)
+        settle(app)
+        assert view.property("atEnd") is False, short
+        assert not wait_for(app, lambda: d.backend.prompt["seen"] is True, 0.2), short
+    assert view.property("below") == 0  # the last line is in view, but not the foot of the view
+    flick.setProperty("contentY", end - 1)
+    settle(app)
+    assert view.property("atEnd") is True
+    assert wait_for(app, lambda: d.backend.prompt["seen"] is True)
+
+
+def test_on_a_low_window_the_reason_why_accept_is_off_is_in_view(app, desk):
+    """N5: the detail fits in its own view, but its end is below the window; the footer, which is always in view,
+    says why the options that approve are off, and the line below the detail says it too."""
+    d = desk(screens=[EDIT])
+    d.open_group("blocked")
+    click(app, d.root, d.control("t1"))
+    d.window.setProperty("roomHeight", 300)
+    assert wait_for(app, lambda: d.state() == "ready" and not d.backend._session.busy)
+    d.arm()
+    scroller, view = d.one("isScroller"), d.one("isDetail")
+    assert d.window.height() == 220 and view.property("scrolls") is False and scroller.property("contentY") == 0
+    assert d.backend.prompt["seen"] is False and not d.button("1").property("enabled")
+    footer = d.one("isFooterNote")
+    assert footer.property("text") == f"{SCROLL_NOTE} Esc closes."
+    assert footer.property("truncated") is False and d.one("isSeenNote").property("text") == SCROLL_NOTE
+    assert footer.mapToScene(QPointF(0, 0)).y() >= d.window.height() - d.one("isFooter").height()  # always in view
+    scroller.setProperty("contentY", scroller.property("contentHeight") - scroller.height())
+    assert wait_for(app, lambda: d.backend.prompt["seen"] is True)
+    settle(app)
+    assert footer.property("text") == "Press the number of an option. Esc closes." and not d.shows("isSeenNote")
+
+
+@pytest.mark.parametrize("letter,size", [("A", 1.0), ("C", 1.0), ("C", 1.4), ("E", 1.4)])
+def test_the_footer_says_both_reasons_when_the_keys_are_locked_and_the_end_is_not_seen(app, desk, letter, size):
+    d = desk()
+    d.backend.setLayout(letter)
+    assert d.backend.setFontScale(size)
+    d.answer_for("t1")
+    d.arm()
+    tick_to(d, LONG)
+    d.arm()
+    footer = d.one("isFooterNote")
+    assert footer.property("text") == f"Number keys off: click or press Tab. {SCROLL_NOTE}"
+    assert footer.property("truncated") is False and footer.property("lineCount") <= 2
+    assert d.one("isDigitsOff").property("text") == LOCK_LINE
+
+
+def test_a_change_from_failed_to_ready_on_the_same_question_starts_the_guard(app, desk):
+    d = desk()
+    window = d.answer_for("t1")
+    d.arm()
+    session, prompt = d.backend._session, d.backend._session.prompt
+    window.setProperty("guardMs", 600000)
+    session._set("failed", "press_timeout", prompt=prompt)  # the same question, not answerable
+    settle(app)
+    assert window.property("armed") is False and window.property("digitsLocked") is False
+    session._set("ready", prompt=prompt)  # answerable again, with no new question: the guard runs again
+    settle(app)
+    assert d.backend.prompt["shown"] == 1 and window.property("armed") is False
+    d.press(d.button("4"))
+    key(app, window, Qt.Key.Key_4)
+    assert d.client.pressed == []
+    window.setProperty("guardMs", 20)
+    d.arm()
+    key(app, window, Qt.Key.Key_4)
+    d.until("failed", "sent", "ready")
+    assert d.client.pressed == [("t1", ["4"])]
+
+
+def test_the_next_question_after_an_own_answer_that_failed_first_is_locked(app, desk):
+    """The answer ends as failed (herdr-core did not confirm the key in time); the key arrives later and the agent
+    asks its next question (reason "held"). The answer was over for the window at "Failed": the question is locked."""
+    d = desk(pending_follow=(0.0,))
+    window = d.answer_for("t1")
+    d.arm()
+    d.client.keep_key = True
+    d.client.press_result = Failure("timeout")
+    key(app, window, Qt.Key.Key_4)
+    d.until("failed")
+    assert d.backend.prompt["reason"] == "press_timeout" and d.client.late is not None
+    d.client.press_result = None
+    d.client.screens[:] = [EDIT]
+    d.client.late(None)  # the key went, late: the agent asks its next question
+    assert wait_for(app, lambda: d.backend.prompt["title"] == "Edit file" and d.state() == "ready")
+    assert d.backend.prompt["reason"] == "held"
+    d.arm()
+    key(app, window, Qt.Key.Key_3)
+    assert d.client.pressed == [("t1", ["4"])]
+    assert_locked(d, window)
