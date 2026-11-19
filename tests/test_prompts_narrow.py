@@ -2,6 +2,7 @@
 sanitized: the folder layout, the user, the model and the plan are made-up text of the same length): how Claude Code
 and Codex wrap their dialogs. Each gives the exact prompt. The rule: a screen never gives a prompt that shows less
 than what is approved with an accept allowed."""
+import getpass
 import re
 from pathlib import Path
 
@@ -85,10 +86,28 @@ def test_a_narrow_screen_gives_the_exact_prompt(name):
         assert prompt.options[0].description == DESCRIPTIONS[name]
 
 
-def test_no_fixture_has_the_real_folder_layout_or_user():
+def private_words() -> set[str]:
+    """The names of this machine that no fixture may hold, found at run time (none is written in this file): the
+    login, the home folder, the folder of this repository, the folders directly under the project folder of the
+    home (the first folder of the path of the repository under the home), that path from its start, and the hidden
+    folders of the repository with a long name. The project folder alone ("projects") is a common word of made-up
+    paths: it counts only with the folder after it."""
+    home, root = Path.home(), Path(__file__).resolve().parents[1]
+    words = {getpass.getuser(), home.name, root.name}
+    parts = root.relative_to(home).parts if root.is_relative_to(home) else ()
+    if parts:
+        words |= {place.name for place in (home / parts[0]).iterdir() if place.is_dir()}
+        words |= {"/".join(parts[:end]) for end in range(2, len(parts) + 1)}
+    words |= {place.name[1:] for place in root.iterdir() if place.name.startswith(".") and len(place.name) > 6}
+    return {word.lower() for word in words if word}
+
+
+def test_no_prompt_fixture_has_a_name_of_this_machine():
+    words = private_words()
+    assert getpass.getuser().lower() in words and len(words) >= 3
     for path in FIXTURES.parent.rglob("*.txt"):
         text = path.read_text().lower()
-        assert not [word for word in ("superpowers", "projects/personal", "bellwether", "carvares") if word in text], path.name
+        assert not [word for word in words if word in text], path.name
 
 
 @pytest.mark.parametrize("name", [name for name in EXPECTED if "claude-bash" in name or "claude-edit" in name])

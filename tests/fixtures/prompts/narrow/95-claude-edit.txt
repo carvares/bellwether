@@ -1,7 +1,7 @@
 
  ▐▛███▛█   Claude Code v2.1.322
 ▝▜██████▀  Test 1.1 with high effort · Sample Plans
- ▝▝   ▝▝   ~/…/Personal/madeupproj/.madeupnotes/run/2000-01-01-madeupproj/t00f-test/work
+ ▝▝   ▝▝   ~/…/Examples/madeupproj/.madeupnotes/run/2000-01-01-madeupproj/t00f-test/work
 
 
 ❯ Do exactly two things, in order, and nothing else. First: use the Bash tool to run the
