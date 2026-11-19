@@ -49,6 +49,10 @@ class ScreenClient(FakeClient):
         self.read_gate: threading.Event | None = None
         self.on_press = None  # called after a key or a text went to the terminal
         self.press_gate: threading.Event | None = None  # a key waits for it: herdr-core holds the key
+        # A `keys` command that did not end before its deadline runs on, and the client tells how it ended through
+        # `late`. False: the process is lost at once (the settle rule of the mark applies). True: the test ends it.
+        self.keep_key = False
+        self.late = None
 
     def read_screen(self, terminal):
         self.reads.append(terminal)
@@ -57,12 +61,16 @@ class ScreenClient(FakeClient):
         item = self.screens.pop(0) if len(self.screens) > 1 else self.screens[0]
         return item() if callable(item) else item
 
-    def press(self, terminal, keys):
+    def press(self, terminal, keys, late=None):
         self.pressed.append((terminal, list(keys)))
         if self.press_gate is not None:
             self.press_gate.wait(5)
         if self.press_result is None and self.on_press:
             self.on_press()
+        if self.press_result == Failure("timeout") and late is not None:
+            self.late = late
+            if not self.keep_key:
+                late(Failure("lost"))
         return self.press_result
 
     def send_text(self, terminal, text, cancel=None):
@@ -1375,3 +1383,90 @@ def test_a_second_text_is_refused_while_the_first_is_pending_also_after_its_mark
     assert b.backend.answerText("other text") is False and b.backend.answer("1") is False
     assert b.state() == "pending" and b.client.sent == [("t1", "made-up text")]
     gate.set()
+
+
+# ----- a `keys` command that does not end before its deadline runs on: its end says what happened -----
+
+def running_key(b, pending_follow=(0.0,)):
+    """Answer "1" on BASH; the `keys` command does not end before its deadline and runs on. The reads after it see
+    the same question, so the prompt ends as failed (press_timeout) while the command still runs."""
+    b.client.keep_key = True
+    unconfirmed_key(b)
+    assert b.client.late is not None
+    return b.client.late
+
+
+def test_a_key_command_that_ends_well_after_its_deadline_is_delivered_and_the_state_follows_the_screen(bench):
+    b = bench(pending_follow=(0.0,))
+    late = running_key(b)
+    assert b.state() == "failed" and b.prompt["reason"] == "press_timeout"
+    b.client.screens = [CREATE]  # the key answered the question: the agent asks its next one
+    late(None)
+    assert b.until("ready") and b.prompt["title"] == "Create file"
+    assert b.prompt["reason"] == "held" and b.prompt["message"] == HELD
+    assert b.client.pressed == [("t1", ["1"])]
+    assert b.backend.answer("2") is True  # no mark is left: the new question can be answered
+    assert b.until("failed", "sent", "ready") and b.client.pressed == [("t1", ["1"]), ("t1", ["2"])]
+
+
+def test_a_key_command_that_ends_well_while_pending_and_the_agent_goes_on_is_sent_with_the_held_note(bench):
+    b = bench(pending_follow=(0.0,))
+    b.client.keep_key = True
+    gate = unconfirmed_key(b, "pending")
+    b.client.result = list(WORKING)
+    b.client.late(None)
+    gate.set()
+    b.backend.apply(list(WORKING))
+    assert b.until("sent") and b.prompt["reason"] == "held" and b.prompt["message"] == HELD
+
+
+def test_a_key_command_that_runs_on_keeps_the_mark_however_long_the_agent_is_away(bench):
+    """No settle time while the command runs: herdr-core holds the key with no limit while a person types."""
+    b = bench(pending_follow=(0.0,))
+    late = running_key(b)
+    b.backend.closePrompt()
+    b.backend.apply(list(WORKING))
+    b.now[0] += 500.0
+    b.backend.apply(list(WORKING))
+    b.backend.apply(list(BLOCKED))
+    b.client.screens = [CREATE]
+    b.backend.openPrompt("t1")
+    assert b.until("pending") and b.prompt["reason"] == "earlier" and b.backend.answer("1") is False
+    late(None)  # the command ended: the key is delivered, the mark ends at once
+    assert b.until("ready") and b.prompt["title"] == "Create file" and b.backend.answer("1") is True
+    assert b.until("failed", "sent", "ready")
+
+
+def test_a_key_command_that_ends_with_an_error_after_its_deadline_sent_nothing(bench):
+    b = bench(pending_follow=(0.0,))
+    late = running_key(b)
+    late(Failure("herdr_not_blocked"))
+    assert b.until("failed") and b.prompt["reason"] == "press_herdr_not_blocked"
+    assert b.prompt["message"] == "The answer was not sent, or Herdr did not confirm it."
+    b.backend.closePrompt()
+    b.backend.openPrompt("t1")
+    assert b.until("ready")  # no mark
+
+
+def test_a_key_command_that_is_lost_keeps_the_settle_rule(bench):
+    b = bench(pending_follow=(0.0,))
+    late = running_key(b)
+    late(Failure("lost"))
+    b.backend.closePrompt()
+    b.backend.openPrompt("t1")
+    assert b.until("pending") and b.prompt["reason"] == "earlier"
+    b.backend.apply(list(WORKING))
+    assert b.until("gone")
+    b.now[0] += 4.0
+    b.backend.apply(list(BLOCKED))
+    b.backend.openPrompt("t1")
+    assert b.until("ready")
+
+
+def test_the_end_of_a_key_command_after_the_stop_does_nothing(bench):
+    b = bench(pending_follow=(0.0,))
+    late = running_key(b)
+    b.backend.stop()
+    late(None)
+    b.app.processEvents()
+    assert b.state() == "closed" and b.client.pressed == [("t1", ["1"])]

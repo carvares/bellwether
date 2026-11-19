@@ -54,9 +54,40 @@ class Runner:
         return self.answer
 
 
+class RunnerProcess:
+    """A fake Popen for the `keys` command (it runs as a process that is not killed at its deadline): it ends as the
+    runner says, at the first poll."""
+
+    def __init__(self, runner, argv):
+        self.runner, self.argv, self.returncode = runner, argv, None
+        self.killed = False
+
+    def communicate(self, timeout=None):
+        if timeout is None:  # the wait after the deadline: the fake command ends well
+            self.returncode = 0
+            return b"", b""
+        answer = self.runner(self.argv, timeout=timeout)
+        self.returncode = answer.returncode
+        return answer.stdout, answer.stderr
+
+    def kill(self):
+        self.killed = True
+
+
+def spawn_with(runner):
+    """`spawn` for a client: an OSError of the runner comes at the start, as from Popen."""
+    def spawn(argv):
+        if isinstance(runner.answer, (OSError, subprocess.SubprocessError)) and not isinstance(
+                runner.answer, subprocess.TimeoutExpired):
+            runner.calls.append((argv, PRESS_TIMEOUT))
+            raise runner.answer
+        return RunnerProcess(runner, argv)
+    return spawn
+
+
 def client_with(answer=None, core=CORE, listed=True, names=None) -> tuple[HerdrClient, Runner]:
     runner = Runner(answer, names)
-    client = HerdrClient(None, core, run=runner)
+    client = HerdrClient(None, core, run=runner, spawn=spawn_with(runner))
     if listed:
         client.list_agents()
     return client, runner
@@ -447,3 +478,87 @@ def test_a_real_process_is_killed_and_gone_when_the_call_returns(tmp_path):
     pid = int(pid_file.read_text())
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)
+
+
+# ----- a `keys` command is never killed: a killed `keys` still delivers, so a kill only loses the proof -----
+
+class SlowProcess:
+    """A fake Popen that does not end before the deadline. `end(returncode, stderr)` ends it."""
+
+    def __init__(self):
+        self.returncode = None
+        self.killed = False
+        self.stderr_bytes = b""
+        self.ended = threading.Event()
+        self.timeouts = []
+
+    def communicate(self, timeout=None):
+        self.timeouts.append(timeout)
+        if timeout is not None:
+            raise subprocess.TimeoutExpired(["x"], timeout)
+        assert self.ended.wait(5)
+        return MARKER.encode(), self.stderr_bytes
+
+    def kill(self):
+        self.killed = True
+
+    def end(self, returncode, stderr=b""):
+        self.returncode, self.stderr_bytes = returncode, stderr
+        self.ended.set()
+
+
+def slow_press(records=None):
+    process = SlowProcess()
+    client, _, spawned = cancellable_client(process)
+    ends = []
+    told = threading.Event()
+    assert client.press("t1", ["2"], late=lambda failure: (ends.append(failure), told.set())) == Failure("timeout")
+    assert spawned == [[CORE, "keys", "t1", "2"]] and process.timeouts[0] == PRESS_TIMEOUT
+    assert not process.killed and ends == []
+    return process, ends, told
+
+
+def test_a_key_command_past_its_deadline_is_not_killed_and_its_good_end_is_told():
+    process, ends, told = slow_press()
+    process.end(0)
+    assert told.wait(5) and ends == [None] and not process.killed
+
+
+def test_a_key_command_that_ends_with_an_error_after_its_deadline_tells_the_code(records):
+    process, ends, told = slow_press()
+    process.end(3, json.dumps({"error": {"kind": "not_found", "message": MARKER}}).encode())
+    assert told.wait(5) and ends == [Failure("herdr_not_found")] and no_marker(records)
+    process, ends, told = slow_press()
+    process.end(2, MARKER.encode())
+    assert told.wait(5) and ends == [Failure("exit_2")]
+
+
+def test_a_key_command_that_a_signal_ended_is_lost_and_not_a_proof():
+    """A killed `keys` still delivers (measured): its end by a signal says nothing."""
+    process, ends, told = slow_press()
+    process.end(-9)
+    assert told.wait(5) and ends == [Failure("lost")]
+
+
+def test_a_key_command_with_no_listener_runs_on_too():
+    process = SlowProcess()
+    client, _, _ = cancellable_client(process)
+    assert client.press("t1", ["2"]) == Failure("timeout") and not process.killed
+    process.end(0)
+
+
+def test_a_real_key_process_lives_past_the_deadline_and_is_reaped(tmp_path, monkeypatch):
+    """With a real child process (a shell script in the place of herdr-core): the call returns at the deadline, the
+    process runs on, and its end is told."""
+    monkeypatch.setattr("bellwether.client.PRESS_TIMEOUT", 0.2)
+    script = tmp_path / "fake-core"
+    script.write_text("#!/bin/sh\nsleep 0.8\nexit 0\n")
+    script.chmod(0o755)
+    client = HerdrClient(None, str(script), run=Runner(done({})))
+    client._known = frozenset({"t1"})
+    ends = []
+    told = threading.Event()
+    began = time.monotonic()
+    assert client.press("t1", ["1"], late=lambda failure: (ends.append(failure), told.set())) == Failure("timeout")
+    assert time.monotonic() - began < 0.7
+    assert told.wait(5) and ends == [None] and time.monotonic() - began >= 0.7

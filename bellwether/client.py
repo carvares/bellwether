@@ -37,7 +37,8 @@ SHOW_TRIES = 8
 # The deadlines of the screen calls. herdr-core holds keys and a text before it types them (measured with
 # herdr-core 0.1.21): `keys` until 3 s after the last key that a person typed in that terminal (with no limit while
 # the person goes on typing); `send` while the person has a draft there, up to 60 s after their last key. A held
-# `keys` is NOT cancelled when its command is killed: the key still arrives. A held `send` is cancelled.
+# `keys` is NOT cancelled when its command is killed: the key still arrives. A held `send` is cancelled. So the
+# `keys` command is never killed: after PRESS_TIMEOUT the call returns and the command runs on (see `press`).
 READ_TIMEOUT = TIMEOUT
 PRESS_TIMEOUT = 10.0
 SEND_TIMEOUT = 65.0
@@ -210,12 +211,17 @@ class HerdrClient:
             return self._failed("read", terminal, "bad_reply")
         return Screen(text, complete)
 
-    def press(self, terminal: str, keys) -> Failure | None:
-        """Press the keys in the terminal, in sequence. None: herdr-core took them."""
+    def press(self, terminal: str, keys, late=None) -> Failure | None:
+        """Press the keys in the terminal, in sequence. None: herdr-core took them. The command is never killed: a
+        killed `keys` still delivers its key (measured), so a kill would only lose the proof. After PRESS_TIMEOUT
+        the call gives the code "timeout" and the command runs on; when it ends, `late` is called on a thread of
+        the client with None (the key was delivered), a Failure with the error code of herdr-core (nothing was
+        sent: an assumption for `exit_<n>` and `herdr_<kind>`, see the spec), or Failure("lost") (a signal ended
+        the command, or its end could not be read: that proves nothing)."""
         if (not isinstance(keys, (list, tuple)) or not 0 < len(keys) <= MAX_KEYS
                 or not all(isinstance(key, str) and key in KEYS for key in keys)):
             return self._failed("keys", terminal, "bad_key")
-        done = self._screen_call("keys", terminal, ["keys", terminal, *keys], PRESS_TIMEOUT)
+        done = self._screen_call("keys", terminal, ["keys", terminal, *keys], PRESS_TIMEOUT, lasting=True, late=late)
         if isinstance(done, Failure):
             return done
         log.info("screen keys ok terminal=%s keys=%s", terminal, ",".join(keys))
@@ -241,7 +247,8 @@ class HerdrClient:
         return Failure(code)
 
     def _screen_call(self, action: str, terminal: str, args: list[str], timeout: float, no_caller: bool = False,
-                     cancel: threading.Event | None = None) -> subprocess.CompletedProcess | Failure:
+                     cancel: threading.Event | None = None, lasting: bool = False, late=None
+                     ) -> subprocess.CompletedProcess | Failure:
         """Run one herdr-core command for a terminal of the last list. The output of a command that failed is
         not logged and not kept: it can hold the text of a screen."""
         if not valid_address(terminal):
@@ -264,7 +271,10 @@ class HerdrClient:
         argv = [self._core, *args]
         if no_caller:
             argv = [self._env, *(part for name in _CALLER_VARIABLES for part in ("-u", name)), *argv]
-        done = self._command(argv, timeout) if cancel is None else self._watched(argv, timeout, cancel)
+        if lasting:
+            done = self._lasting(argv, timeout, terminal, late)
+        else:
+            done = self._command(argv, timeout) if cancel is None else self._watched(argv, timeout, cancel)
         return self._failed(action, terminal, done.code) if isinstance(done, Failure) else done
 
     def _command(self, argv: list[str], timeout: float) -> subprocess.CompletedProcess | Failure:
@@ -304,6 +314,46 @@ class HerdrClient:
         if process.returncode != 0:
             return Failure(self._error_kind(stderr) or f"exit_{process.returncode}")
         return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
+
+    def _lasting(self, argv: list[str], timeout: float, terminal: str, late) -> subprocess.CompletedProcess | Failure:
+        """Run one herdr-core command that is not killed at its deadline (`keys`). After `timeout` the call gives
+        "timeout", and a thread waits for the end of the command and tells `late` (see `press`). At the stop of the
+        program the command is left alone: it ends by itself. Its output is not logged and not kept."""
+        try:
+            process = self._spawn(argv)
+        except (OSError, subprocess.SubprocessError):
+            return Failure("no_run")
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            threading.Thread(target=self._wait_late, name="herdr-keys", daemon=True,
+                             args=(process, terminal, late)).start()
+            return Failure("timeout")
+        except (OSError, subprocess.SubprocessError):
+            return Failure("no_run")
+        if process.returncode != 0:
+            return Failure(self._error_kind(stderr) or f"exit_{process.returncode}")
+        return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
+
+    def _wait_late(self, process, terminal: str, late) -> None:
+        """Wait for a `keys` command that went past its deadline, and tell how it ended."""
+        try:
+            _, stderr = process.communicate()
+            code = process.returncode
+        except Exception:  # the end cannot be read: no proof
+            code, stderr = None, b""
+        if code == 0:
+            result = None
+        elif code is None or code < 0:
+            result = Failure("lost")
+        else:
+            result = Failure(self._error_kind(stderr) or f"exit_{code}")
+        log.info("screen keys late terminal=%s result=%s", terminal, result.code if result else "delivered")
+        if late is not None:
+            try:
+                late(result)
+            except RuntimeError:  # the program stops: the listener is gone
+                pass
 
     @staticmethod
     def _error_kind(stderr: bytes) -> str | None:

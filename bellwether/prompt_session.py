@@ -6,8 +6,9 @@ did not confirm the key or the text: it may still arrive) -> sent | failed | gon
 
 The mark: an answer to a terminal that may still arrive. It lives outside the open prompt (a close does not end it):
 while it is there, the prompt of that terminal is `pending` (reason "earlier") and sends nothing. It ends when the
-call of the answer returned and nothing of it can still arrive, or, for a key that herdr-core may still hold, only
-when the agent left the answered question for SETTLE_SECONDS (see `Mark`).
+call of the answer returned and nothing of it can still arrive. A `keys` command that herdr-core holds past its
+deadline is not killed: the mark stays while it runs and ends when it ends (delivered, or an error: nothing sent).
+Only when that command is lost, the mark ends SETTLE_SECONDS after the agent left the answered question (see `Mark`).
 
 The UI thread has the state. A worker thread does one job (a read, or a read and an answer) and gives its result
 through a signal. The text of a screen is in memory only: no log line and no file has it.
@@ -99,6 +100,9 @@ class Outcome:
         self.held = held
 
 
+NOT_ENDED = object()  # the value of `Mark.late` while the `keys` command of the mark has not ended
+
+
 class Mark:
     """An answer to the terminal `key` that may still arrive. `running`: its call (the read, the key, the text) has
     not returned. `left_at`: the clock of the first read that showed the agent away from the answered question (not
@@ -109,7 +113,10 @@ class Mark:
     a close killed (herdr-core does not type it then, measured), ends the mark at once. A text whose command was
     killed at its deadline: the mark ends SETTLE_SECONDS later (`until`), in case herdr-core was typing it at the
     kill. A key whose `keys` command was killed (deadline) can still arrive at any time while a person types in that
-    terminal: its mark ends only SETTLE_SECONDS after the agent left the answered question, never by time alone
+    terminal. Its command is not killed: it runs on after the deadline, and the mark stays while it runs
+    (`watched`), with no limit. When the command ends well the key is delivered and the mark ends; when it ends
+    with an error nothing was sent and the mark ends. Only when the command is lost (a signal ended it) the old
+    rule applies: the mark ends SETTLE_SECONDS after the agent left the answered question, never by time alone
     while that question shows."""
 
     def __init__(self, key: str, fingerprint: str) -> None:
@@ -119,6 +126,10 @@ class Mark:
         self.left_at: float | None = None
         self.until: float | None = None  # the end of the mark by time (a killed text)
         self.ended = threading.Event()
+        # A `keys` command that went past its deadline runs on (it is never killed). `watched`: it runs, and the
+        # mark stays until it ends. `late`: how it ended (None: the key was delivered; a Failure), or NOT_ENDED.
+        self.watched = False
+        self.late = NOT_ENDED
 
 
 class PromptSession(QObject):
@@ -130,6 +141,7 @@ class PromptSession(QObject):
     changed = Signal()  # the value or the flag `answering` is different
     _done = Signal(int, object)
     _call_ended = Signal(object, object)  # (Mark, Outcome): the call of an answer returned, also after a close
+    _key_ended = Signal(object, object)  # (Mark, None | Failure): a `keys` command ended after its deadline
 
     def __init__(self, client, lookup, blocked, row, wake, stopped, clock, wait, floor: float = PROMPT_FLOOR,
                  follow: tuple[float, ...] = FOLLOW, pending_follow: tuple[float, ...] | None = None,
@@ -167,6 +179,7 @@ class PromptSession(QObject):
         self._sent_timer.timeout.connect(self.close)
         self._done.connect(self._result)
         self._call_ended.connect(self._end_call)
+        self._key_ended.connect(self._end_key)
 
     # ----- the value for QML -----
 
@@ -278,8 +291,9 @@ class PromptSession(QObject):
         self._set("closed", keep_agent=False)
 
     def finish(self, seconds: float = STOP_SECONDS) -> None:
-        """Close at the stop of the program, and wait up to `seconds` for the calls of answers that run (the
-        command of a text is killed): no command of Bellwether goes on after it."""
+        """Close at the stop of the program, and wait up to `seconds` for the calls of answers that run. The
+        command of a text is killed. A `keys` command that runs is NOT killed and is waited for only in these
+        `seconds`: it can go on after the program stopped and deliver its key (a kill would not stop the key)."""
         self.close()
         deadline = self._clock() + seconds
         for mark in [mark for mark in self._marks.values() if mark.running]:
@@ -353,7 +367,7 @@ class PromptSession(QObject):
         mark = self._marks[self.agent.key] = Mark(self.agent.key, prompt.fingerprint)
         log.info("mark terminal=%s set", mark.key)
         self._set("answering", prompt=prompt)
-        self._work(job, prompt, value, mark=mark)
+        self._work(job, prompt, value, mark, mark=mark)
 
     def _work(self, job, *args, mark: Mark | None = None) -> None:
         """Start one worker. The result of a worker that started before it is ignored; the end of the call of an
@@ -384,7 +398,10 @@ class PromptSession(QObject):
             return
         mark.running = False
         if outcome.kind == "failed" and outcome.reason == "press_timeout":
-            log.info("mark terminal=%s kept reason=press_timeout", mark.key)  # a killed `keys` still delivers
+            log.info("mark terminal=%s kept reason=press_timeout", mark.key)  # the `keys` command runs on
+            mark.watched = True
+            if mark.late is not NOT_ENDED:
+                self._settle_key(mark)  # it ended before this call returned
             return
         if outcome.kind == "failed" and outcome.reason == "send_timeout":
             mark.until = self._clock() + SETTLE_SECONDS
@@ -395,13 +412,50 @@ class PromptSession(QObject):
         if self._earlier() and self.agent is not None and self.agent.key == mark.key and not self.busy:
             self._work(self._job_read)  # the prompt that waited for this mark reads the screen now
 
+    @Slot(object, object)
+    def _end_key(self, mark: Mark, failure) -> None:
+        """The `keys` command of a mark ended after its deadline. None: the key was delivered."""
+        if self._marks.get(mark.key) is not mark or self._stopped():
+            return
+        mark.late = failure
+        if not mark.running:
+            self._settle_key(mark)
+
+    def _settle_key(self, mark: Mark) -> None:
+        """What the end of a late `keys` command says. Delivered, or an error of herdr-core (nothing was sent): the
+        mark ends, and the prompt of that terminal follows the screen. Lost: no proof, the settle rule applies."""
+        failure = mark.late
+        mark.watched = False
+        if failure is not None and failure.code == "lost":
+            log.info("mark terminal=%s kept reason=lost", mark.key)
+            return
+        del self._marks[mark.key]
+        log.info("mark terminal=%s cleared reason=%s", mark.key,
+                 "delivered" if failure is None else f"press_{failure.code}")
+        if self.agent is None or self.agent.key != mark.key:
+            return
+        if self._earlier():
+            if not self.busy:
+                self._work(self._job_read)  # the prompt that waited for this mark reads the screen now
+        elif self.state in ("pending", "failed") and self._reason == "press_timeout":
+            self._end_workers()
+            if failure is not None:
+                self._set("failed", f"press_{failure.code}")
+                return
+            # The key went, late: herdr-core held it. Read what the agent shows now, as after any key.
+            self._answered = mark.fingerprint
+            self._set("answering", prompt=self.prompt)
+            self._unconfirmed = ""
+            self._held = True
+            self._start_follow(self._follow)
+
     def _marked(self, key: str) -> bool:
         """An earlier answer may still reach the terminal `key`. A mark whose settle time has passed ends here."""
         mark = self._marks.get(key)
         if mark is None:
             return False
         now = self._clock()
-        if mark.running or ((mark.left_at is None or now - mark.left_at < SETTLE_SECONDS)
+        if mark.running or mark.watched or ((mark.left_at is None or now - mark.left_at < SETTLE_SECONDS)
                             and (mark.until is None or now < mark.until)):
             return True
         del self._marks[key]
@@ -448,10 +502,11 @@ class PromptSession(QObject):
             return Outcome("changed", found.screen, found.prompt)
         return Outcome("failed", reason="closed") if cancel.is_set() else None
 
-    def _press(self, agent: Agent, key: str) -> Outcome:
-        """Press one key and time it: a key that took long was held by herdr-core."""
+    def _press(self, agent: Agent, key: str, mark: Mark) -> Outcome:
+        """Press one key and time it: a key that took long was held by herdr-core. A command that does not end
+        before its deadline runs on, and its end comes to `_end_key`."""
         began = self._clock()
-        failure = self._client.press(agent.key, [key])
+        failure = self._client.press(agent.key, [key], late=lambda ended: self._key_ended.emit(mark, ended))
         held = self._clock() - began > HELD_SECONDS
         log.info("answer terminal=%s app=%s key=%s result=%s held=%s", agent.key, agent.app, key,
                  failure.code if failure else "pressed", held)
@@ -460,16 +515,16 @@ class PromptSession(QObject):
         # A failed check of the address: `keys` did not run.
         return Outcome("failed", reason=failure.code if failure.code.startswith("check_") else f"press_{failure.code}")
 
-    def _job_answer(self, cancel: threading.Event, agent: Agent, shown, key: str) -> Outcome:
+    def _job_answer(self, cancel: threading.Event, agent: Agent, shown, key: str, mark: Mark) -> Outcome:
         different = self._same(cancel, agent, shown)
-        return different if different is not None else self._press(agent, key)
+        return different if different is not None else self._press(agent, key, mark)
 
-    def _job_text(self, cancel: threading.Event, agent: Agent, shown, text: str) -> Outcome:
+    def _job_text(self, cancel: threading.Event, agent: Agent, shown, text: str, mark: Mark) -> Outcome:
         different = self._same(cancel, agent, shown)
         if different is not None:
             return different
         key = shown.text_key
-        pressed = self._press(agent, key)
+        pressed = self._press(agent, key, mark)
         if pressed.kind == "failed":
             return pressed
         # The key moves the cursor to the text entry. The text goes only when the screen shows the cursor there.
