@@ -275,10 +275,17 @@ Window {
     // fit are the height of the screen less the height of the skin without its rows, divided by the height of a
     // row. It runs before each frame (onAfterAnimating): the items of the skin then have their final places, so
     // the height of the skin and the number of rows belong together. The same rule gives the rows back when
-    // they have room again (a smaller scale, a taller screen).
+    // they have room again (a smaller scale, a taller screen), and when no group is open.
     function fitRows() {
         var rows = panelModel.shown
-        if (!skin || rows === 0 || panelModel.rowHeight <= 0)
+        if (rows === 0) {
+            // No list shows rows: nothing is held back. The next open starts with all rows, and takeSize()
+            // waits for this rule when they do not fit. (A low number that stays here gives the next open two
+            // sizes: the low number of rows first, all rows one frame later.)
+            panelModel.rowRoom = panelModel.rowLimit
+            return
+        }
+        if (!skin || panelModel.rowHeight <= 0)
             return
         var rest = skin.implicitHeight - rows * panelModel.rowHeight
         var fit = Math.floor((home.height / panelScale - rest) / panelModel.rowHeight + 0.000001)

@@ -106,7 +106,7 @@ QtObject {
     // The colours of a failure message and of "opening…", the same in every layout (see AgentRow.note): the
     // colour of the status blocked (a failed jump needs the person), and the accent of the custom look.
     readonly property color failedColor: stateColors["blocked"]
-    readonly property color openingColor: backend.colorOverrides.accent || "#8ab4f8"
+    readonly property color openingColor: backend.colors.accent
     // The agent of the last failed jump and the message for it. Empty again after 3 seconds.
     property string failedKey: ""
     property string failedMessage: ""

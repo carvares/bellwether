@@ -5,13 +5,14 @@ import re
 
 import pytest
 from PySide6.QtCore import QPointF
+from PySide6.QtQml import QQmlExpression, qmlContext
 
 from bellwether import layouts
-from bellwether.state import Agent
+from bellwether.state import STATE_COLORS, Agent
 from tests.audit import text_findings, walk
 from tests.test_qml import (  # noqa: F401  (window is a fixture)
     LAYERSHELL_QMLDIR, OFFSCREEN_NOTE, OFFSET, js, many, rows, settle, use_screens, window)
-from tests.test_options import real_options  # noqa: F401  (a fixture)
+from tests.test_options import load_theme, real_options, tags  # noqa: F401  (real_options is a fixture)
 from tests.test_skins import LETTERS, MESSAGE, status_items
 
 pytestmark = pytest.mark.skipif(not LAYERSHELL_QMLDIR.is_file(), reason="org.kde.layershell is not installed")
@@ -188,6 +189,49 @@ def test_a_long_group_stays_on_a_screen_of_1080_pixels_at_the_largest_scale_and_
     for _ in range(10):
         settle(app)
     assert root.property("panel").property("maxAgentRows") == 8
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+@pytest.mark.parametrize("change", ["scale", "layout"])
+@pytest.mark.parametrize("letter", LETTERS)
+def test_a_group_opens_with_one_new_size_after_a_change_of_the_look_while_it_was_closed(app, window, letter, change):
+    """The rows that a large scale took away come back when the group closes: the next open must not show the low
+    number of rows first and all rows one frame later."""
+    root, backend, messages = window
+    backend.setLayout(letter)
+    backend.apply(many(blocked=1, working=3, idle=12))
+    use_screens(root, [("S", 0, 0, 1280, 720)], "S", 0, 0)
+    root.setProperty("openState", "idle")
+    backend.setScale(2.0)
+    for _ in range(10):
+        settle(app)
+    panel = root.property("panel")
+    assert panel.property("maxAgentRows") < 8 and root.height() <= 720  # the large scale took rows away
+    root.setProperty("openState", "")
+    for _ in range(5):
+        settle(app)
+    assert panel.property("rowRoom") == 8  # no group is open: nothing is held back
+    backend.setScale(1.0)
+    if change == "layout":
+        backend.setLayout("C" if letter != "C" else "A")
+    for _ in range(5):
+        settle(app)
+    sizes = []
+    root.heightChanged.connect(lambda *_: sizes.append(root.height()))
+    root.setProperty("openState", "idle")
+    for _ in range(10):
+        settle(app)
+    assert len(sizes) == 1 and panel.property("maxAgentRows") == 8, sizes
+    # And the rule still holds for the next open at the large scale: one size, on the screen.
+    root.setProperty("openState", "")
+    backend.setScale(2.0)
+    for _ in range(5):
+        settle(app)
+    del sizes[:]
+    root.setProperty("openState", "idle")
+    for _ in range(10):
+        settle(app)
+    assert len(sizes) == 1 and sizes[0] <= 720 and panel.property("maxAgentRows") < 8, sizes
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
@@ -506,3 +550,19 @@ def test_a_glyph_icon_of_a_row_is_drawn_again_in_a_new_text_colour(app, window, 
     settle(app)
     assert icon_colour() == (first, first_file)
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def test_the_controller_has_no_colour_rule_of_its_own_and_the_opening_colour_is_the_accent_in_effect(app, window):
+    """The rule "a custom colour, or the colour of the design" is in ThemeBase.qml and in backend.colors only."""
+    text = (layouts.UI_PATH / "PanelModel.qml").read_text()
+    assert "colorOverrides" not in text and not re.search(r'"#[0-9a-fA-F]{6,8}"', text)
+    root, backend, messages = window
+    panel = root.property("panel")
+    assert panel.property("openingColor").name() == backend.defaultColors["accent"] == "#8ab4f8"
+    backend.setColor("accent", "#ff00ff")
+    settle(app)
+    assert panel.property("openingColor").name() == "#ff00ff"
+    backend.resetColor("accent")
+    settle(app)
+    assert panel.property("openingColor").name() == "#8ab4f8"
+
