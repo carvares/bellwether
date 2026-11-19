@@ -38,6 +38,9 @@ Item {
 
     implicitHeight: shown * rowHeight
 
+    // The window needs the height of a row for the rule of a panel that is taller than its screen.
+    Binding { target: list.panel; property: "rowHeight"; value: list.rowHeight }
+
     // A group that opens starts at its first row: also a different group in the one list of a skin.
     onStateNameChanged: view.contentY = 0
     onOpenChanged: if (open) view.contentY = 0

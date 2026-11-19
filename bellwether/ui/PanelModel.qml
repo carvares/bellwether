@@ -70,6 +70,11 @@ QtObject {
     readonly property int cellLimit: 60
     readonly property var cells: cellStates(backend.online ? backend.groups : [], cellLimit)
 
+    // For a part of a skin that is made of pixels (an icon, a canvas): the window draws the skin this many times
+    // larger (the scale of the custom look, but not less than 1), so the part needs this many times the pixels
+    // of its size to stay sharp. The scale itself is not the business of a skin: the window applies it.
+    readonly property real pixelScale: Math.max(1, backend.scale)
+
     // ----- the open group -----
 
     // The state whose agents show ("blocked", ...). "" means that no group is open. One group at a time.
@@ -82,8 +87,13 @@ QtObject {
     readonly property var agents: openGroup ? openGroup.agents : []
     // A list shows this many rows at the most. A longer group scrolls. rowsFor() is the one place that
     // applies it. Read-only: a skin cannot change it (a test makes a controller with a different cap through an
-    // initial property).
-    readonly property int maxAgentRows: 8
+    // initial property). It is rowLimit (8), or less when 8 rows make the panel taller than its screen at a
+    // large scale: rowRoom is the number of rows that fit. Only the window writes rowRoom (fitRows in Main.qml).
+    readonly property int rowLimit: 8
+    property int rowRoom: rowLimit
+    readonly property int maxAgentRows: Math.max(1, Math.min(rowLimit, rowRoom))
+    // The height of one row of the lists of the skin, for that rule. Each AgentList writes it. 0: no list.
+    property real rowHeight: 0
     // The rows of the open group that are on the screen, and true when the group has more.
     readonly property int shown: rowsFor(agents.length)
     readonly property bool scrolls: agents.length > shown

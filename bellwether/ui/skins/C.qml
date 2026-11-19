@@ -279,7 +279,8 @@ Item {
                                     width: 16
                                     height: 16
                                     anchors.verticalCenter: parent.verticalCenter
-                                    sourceSize: Qt.size(16, 16)
+                                    // As many pixels as the icon has on the screen at a large scale.
+                                    sourceSize: Qt.size(16 * skin.panel.pixelScale, 16 * skin.panel.pixelScale)
                                     source: agentRow.modelData.icon
                                 }
                                 Text {

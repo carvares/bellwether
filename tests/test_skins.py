@@ -1,6 +1,7 @@
 """Every layout (skin) through the real Main.qml, the real controller and a fake client, with real pointer events:
 the same information and the same behaviour in each of them. Then what is special in each skin."""
 import json
+import math
 import re
 import shutil
 import threading
@@ -33,18 +34,30 @@ MIXED = [
 ]
 
 
-@pytest.fixture(params=LETTERS)
+# The shared behaviour runs for each skin at the scale of the design and at a scale of the custom look.
+SCALES = (1.0, 1.5)
+
+
+@pytest.fixture(params=[(letter, scale) for scale in SCALES for letter in LETTERS], ids=lambda p: f"{p[0]}-{p[1]}")
 def shown(request, app, window):
-    """Yield (letter, root window, backend, Qt messages) with the layout of the parameter. After the test: no
-    QML warning in any step."""
+    """Yield (letter, root window, backend, Qt messages) with the layout and the scale of the parameter (the scale
+    is `backend.scale`). After the test: no QML warning in any step."""
     root, backend, messages = window
-    if request.param not in layouts.built_skins():
-        pytest.skip(f"layout {request.param} is not built")
-    backend.setLayout(request.param)
+    letter, scale = request.param
+    if letter not in layouts.built_skins():
+        pytest.skip(f"layout {letter} is not built")
+    backend.setLayout(letter)
+    assert backend.setScale(scale) is True
     settle(app)
-    assert backend.layout == request.param and root.isVisible()
-    yield request.param, root, backend, messages
+    assert backend.layout == letter and backend.scale == scale and root.isVisible()
+    yield letter, root, backend, messages
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def surface(root, scale):
+    """The size that the window must have: the size of the skin at the scale, the next whole pixel."""
+    skin = root.property("skin")
+    return tuple(math.ceil(round(skin.property(side) * scale, 6)) for side in ("implicitWidth", "implicitHeight"))
 
 
 def status_items(root):
@@ -93,7 +106,7 @@ def test_the_four_statuses_show_and_one_group_opens_at_a_time(app, shown):
     blocked, done, working, idle = status_items(root)
     assert len(rows(root, "status")) == 4 and rows(root, "agent") == []
     closed = (root.width(), root.height())
-    assert closed == (root.property("skin").property("implicitWidth"), root.property("skin").property("implicitHeight"))
+    assert closed == surface(root, backend.scale)
     click(app, root, working)
     assert root.property("openState") == "working"
     assert [r.property("key") for r in rows(root, "agent")] == ["t2", "t3", "t4"]  # named agents first
@@ -176,7 +189,7 @@ def test_a_group_of_12_shows_8_rows_and_scrolls_and_the_hint_takes_no_click_and_
     flick = flickable(root)
     assert flick.height() == 8 * row_height and flick.property("contentHeight") == 12 * row_height
     assert len(hints(root)) >= 1
-    assert short <= root.height() <= 1080 and root.height() - short <= 40  # only the space of the hint
+    assert short <= root.height() <= 1080 and root.height() - short <= 40 * backend.scale  # only the space of the hint
     # Each scroll hint over the rows (a thumb, a track, a fade): a click on it goes to the row under it, and a wheel
     # turn on it scrolls the list. D has its hint as a footer under the rows, and C has a line of text there.
     view = flick.mapRectToScene(flick.boundingRect())
@@ -290,6 +303,150 @@ def test_each_count_shows_and_the_size_is_never_0(app, shown):
     numerals = {i.property("countFor"): i.property("text") for i in walk(root.contentItem())
                 if i.property("countFor") and i.isVisible()}
     assert numerals == {"blocked": "11", "done": "22", "working": "33", "idle": "44"}
+
+
+# ----- the scale of the custom look -----
+
+LONG = dict(blocked=1, working=3, idle=12)
+
+
+@pytest.mark.parametrize("letter", LETTERS)
+def test_the_window_has_the_size_of_the_skin_at_each_scale_and_the_skin_keeps_its_own_size(app, window, letter):
+    root, backend, messages = window
+    backend.setLayout(letter)
+    backend.apply(many(**LONG))
+    use_screens(root, OFFSET, "B", 100, 20)  # a screen of 1920 × 1080
+    settle(app)
+    sizes = {}
+    for scale in (1.0, 0.75, 1.5, 2.0, 1.1, 1.0):
+        backend.setScale(scale)
+        for state in ("", "working", "idle"):  # closed, a group of 3, a group of 12
+            root.setProperty("openState", state)
+            settle(app)
+            skin = root.property("skin")
+            own = (skin.property("implicitWidth"), skin.property("implicitHeight"))
+            assert sizes.setdefault(state, own) == own, (scale, state)  # the skin does not know the scale
+            assert (root.width(), root.height()) == surface(root, scale), (scale, state)
+            assert root.height() <= 1080 and len(rows(root, "agent")) == {"": 0, "working": 3, "idle": 12}[state]
+            if state == "idle":
+                assert flickable(root).height() == 8 * rows(root, "agent")[0].height()  # 8 rows fit at every scale
+    assert place(root) == ("B", 100, 20) and backend.saves == []
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+@pytest.mark.parametrize("letter", LETTERS)
+def test_one_change_of_the_scale_is_one_new_size_and_the_panel_stays_on_its_screen(app, window, letter):
+    root, backend, messages = window
+    backend.setLayout(letter)
+    backend.apply(many(**LONG))
+    settle(app)
+    use_screens(root, OFFSET, "B", 1920 - root.width(), 1080 - root.height())  # the bottom-right corner
+    settle(app)
+    changes = []
+    root.widthChanged.connect(lambda *_: changes.append("w"))
+    root.heightChanged.connect(lambda *_: changes.append("h"))
+    for scale in (2.0, 0.75, 1.5):
+        changes.clear()
+        backend.setScale(scale)
+        settle(app)
+        assert sorted(changes) == ["h", "w"], scale  # one new size for the layer surface
+        name, x, y = place(root)
+        assert name == "B" and 0 <= x <= 1920 - root.width() and 0 <= y <= 1080 - root.height(), scale
+    assert backend.saves == []  # the saved place is the place that the person chose
+    root.setProperty("atDefault", True)  # a panel at the default corner stays at the corner
+    for scale in (1.0, 2.0):
+        backend.setScale(scale)
+        settle(app)
+        assert place(root) == ("B", 1920 - root.width() - 16, 16), scale
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+@pytest.mark.parametrize("letter", LETTERS)
+def test_a_list_gets_fewer_rows_when_8_rows_make_the_panel_taller_than_its_screen(app, window, letter):
+    root, backend, messages = window
+    backend.setLayout(letter)
+    backend.apply(many(**LONG))
+    use_screens(root, [("S", 0, 0, 1280, 720)], "S", 0, 0)
+    root.setProperty("openState", "idle")
+    settle(app)
+    panel = root.property("panel")
+    assert panel.property("maxAgentRows") == 8 and root.height() <= 720  # 8 rows fit at the scale of the design
+    backend.setScale(2.0)
+    for _ in range(10):
+        settle(app)
+    cap = panel.property("maxAgentRows")
+    row = rows(root, "agent")[0].height()
+    assert 1 <= cap < 8 and flickable(root).height() == cap * row and len(hints(root)) >= 1
+    assert (root.width(), root.height()) == surface(root, 2.0) and root.height() <= 720
+    assert root.height() + 2 * row > 720  # and not fewer rows than necessary
+    wheel(app, root, flickable(root).mapToScene(QPointF(60, 40)).toPoint(), -120 * 20)  # every row can be reached
+    assert flickable(root).property("contentY") == (12 - cap) * row
+    root.setProperty("openState", "working")  # a short group: all its rows
+    settle(app)
+    assert len(rows(root, "agent")) == 3 and flickable(root).height() == 3 * row and root.height() <= 720
+    backend.setScale(1.0)  # the rows have room again
+    root.setProperty("openState", "idle")
+    for _ in range(10):
+        settle(app)
+    assert panel.property("maxAgentRows") == 8 and flickable(root).height() == 8 * row
+    backend.setScale(2.0)
+    use_screens(root, OFFSET, "B", 0, 0)  # a taller screen: the same
+    for _ in range(10):
+        settle(app)
+    assert panel.property("maxAgentRows") == 8 and (root.width(), root.height()) == surface(root, 2.0)
+    assert root.height() <= 1080
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+@pytest.mark.parametrize("letter", LETTERS)
+def test_a_press_that_moves_less_than_6_screen_pixels_is_a_click_at_scale_2_and_6_pixels_is_a_drag(app, window, letter):
+    root, backend, messages = window
+    backend.setLayout(letter)
+    backend.setScale(2.0)
+    backend.apply(MIXED)
+    use_screens(root, OFFSET, "B", 400, 100)
+    settle(app)
+    left, none = Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier
+    working = status_items(root)[2]
+    start = working.mapToScene(QPointF(working.width() / 2, working.height() / 2)).toPoint()
+    assert start.x() > working.width() / 2  # the place of the item in the window is in pixels of the screen
+    QTest.mousePress(root, left, none, start)
+    QTest.mouseMove(root, start + QPoint(3, 2))
+    QTest.mouseRelease(root, left, none, start + QPoint(3, 2))
+    settle(app)
+    assert root.property("openState") == "working" and place(root) == ("B", 400, 100) and backend.saves == []
+    QTest.mousePress(root, left, none, start)
+    QTest.mouseMove(root, start + QPoint(4, 2))
+    settle(app)
+    QTest.mouseRelease(root, left, none, start + QPoint(4, 2))
+    settle(app)
+    assert place(root) == ("B", 404, 102) and backend.saves == [(404, 102)]  # as far as the pointer
+    assert root.property("openState") == "working" and backend._client.focused == []
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+GLYPH = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M2 2h20v20H2z"/></svg>'
+
+
+@pytest.mark.parametrize("letter", LETTERS)
+def test_a_program_icon_has_the_pixels_of_its_size_on_the_screen(app, window, tmp_path, letter):
+    """The window draws the skin larger at a scale above 1: an icon of 16 px then needs more than 16 pixels."""
+    root, backend, messages = window
+    (tmp_path / "app" / "icons").mkdir(parents=True)
+    (tmp_path / "app" / "icons" / "pi.svg").write_text(GLYPH)
+    backend.setLayout(letter)
+    backend.apply([Agent("t1", "working", "ana", "docs", "pi")])
+    use_screens(root, OFFSET, "B", 0, 0)
+    root.setProperty("openState", "working")
+    for scale, pixels in ((1.0, 16), (2.0, 32), (1.5, 24), (0.75, 16)):
+        backend.setScale(scale)
+        settle(app)
+        (icon,) = marked(root, "isProgramIcon")
+        assert (icon.width(), icon.height()) == (16, 16), scale  # its size in the skin stays
+        size = icon.property("sourceSize")
+        assert (size.width(), size.height()) == (pixels, pixels), scale
+        assert root.property("panel").property("pixelScale") == max(1.0, scale)
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
 # ----- switching -----
@@ -629,6 +786,28 @@ def test_layout_e_shows_the_shares_as_a_ring_with_the_total_in_its_centre_and_a_
     settle(app)
     assert total.property("text") == "3001" and total.width() < 62  # the numeral stays inside the ring
     assert ring_colours(root, [5])[0] == STATE_COLORS["blocked"]  # 1 of 3001 can still be seen
+
+
+@only("E")
+def test_layout_e_draws_its_ring_with_the_pixels_of_the_scale(app, layout):
+    root, backend, messages = layout
+    backend.apply(many(blocked=1, done=2, working=3, idle=4))
+    use_screens(root, OFFSET, "B", 0, 0)
+    for scale, pixels in ((1.0, 100), (2.0, 200), (0.75, 100), (1.5, 150)):
+        backend.setScale(scale)
+        settle(app)
+        (canvas,) = marked(root, "isRing")
+        box = canvas.parentItem()
+        assert (canvas.width(), canvas.height()) == (pixels, pixels) and (box.width(), box.height()) == (100, 100)
+        on_screen = canvas.mapRectToScene(canvas.boundingRect())
+        assert (on_screen.width(), on_screen.height()) == (100 * scale, 100 * scale)  # the ring has its place and size
+        image = root.grabWindow()
+        colours = []
+        for angle in (18, 72, 162, 288):  # the middle of each share
+            a = math.radians(angle - 90)
+            point = box.mapToScene(QPointF(50 + 40 * math.cos(a), 50 + 40 * math.sin(a))).toPoint()
+            colours.append(image.pixelColor(point).name())
+        assert colours == [STATE_COLORS[s] for s in ORDER], scale
 
 
 @only("E")

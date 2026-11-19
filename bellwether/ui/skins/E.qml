@@ -40,51 +40,64 @@ Item {
                 height: 124
 
                 // The ring: one arc for each status that has agents. The handlers here only draw.
-                Canvas {
+                // The canvas has the pixels of the ring on the screen (panel.pixelScale) and is drawn that many
+                // times smaller, so the ring stays sharp when the window draws the skin larger.
+                Item {
                     id: ring
-                    readonly property bool isRing: true
-                    readonly property var groups: skin.panel.groups
-                    // The arcs from the controller: a gap between two arcs, and no arc too short to see.
-                    readonly property var arcs: skin.panel.ring(0.07, 0.10)
-                    readonly property string openState: skin.panel.openState
-                    readonly property bool online: skin.panel.online
                     x: 14
                     y: 12
                     width: 100
                     height: 100
-                    onArcsChanged: requestPaint()
-                    onOpenStateChanged: requestPaint()
-                    onOnlineChanged: requestPaint()
-                    onPaint: {
-                        var ctx = getContext("2d")
-                        ctx.reset()
-                        var cx = width / 2, cy = height / 2, r = 40
-                        ctx.lineCap = "butt"
-                        if (!online || skin.panel.parts === 0) {
-                            // No agents: a full grey ring. Offline: a ring of dashes.
-                            ctx.strokeStyle = theme.lineColor
-                            ctx.lineWidth = 9
-                            var dashes = online ? 1 : 24
-                            for (var k = 0; k < dashes; k++) {
-                                var a0 = k / dashes * 2 * Math.PI
-                                var a1 = a0 + (online ? 2 * Math.PI : Math.PI / dashes)
+
+                    Canvas {
+                        id: ringCanvas
+                        readonly property bool isRing: true
+                        readonly property var groups: skin.panel.groups
+                        // The arcs from the controller: a gap between two arcs, and no arc too short to see.
+                        readonly property var arcs: skin.panel.ring(0.07, 0.10)
+                        readonly property string openState: skin.panel.openState
+                        readonly property bool online: skin.panel.online
+                        readonly property real pixels: skin.panel.pixelScale
+                        width: ring.width * pixels
+                        height: ring.height * pixels
+                        scale: 1 / pixels
+                        transformOrigin: Item.TopLeft
+                        onArcsChanged: requestPaint()
+                        onOpenStateChanged: requestPaint()
+                        onOnlineChanged: requestPaint()
+                        onPixelsChanged: requestPaint()
+                        onPaint: {
+                            var ctx = getContext("2d")
+                            ctx.reset()
+                            ctx.scale(pixels, pixels)
+                            var cx = ring.width / 2, cy = ring.height / 2, r = 40
+                            ctx.lineCap = "butt"
+                            if (!online || skin.panel.parts === 0) {
+                                // No agents: a full grey ring. Offline: a ring of dashes.
+                                ctx.strokeStyle = theme.lineColor
+                                ctx.lineWidth = 9
+                                var dashes = online ? 1 : 24
+                                for (var k = 0; k < dashes; k++) {
+                                    var a0 = k / dashes * 2 * Math.PI
+                                    var a1 = a0 + (online ? 2 * Math.PI : Math.PI / dashes)
+                                    ctx.beginPath()
+                                    ctx.arc(cx, cy, r, a0, a1)
+                                    ctx.stroke()
+                                }
+                                return
+                            }
+                            for (var i = 0; i < groups.length; i++) {
+                                if (groups[i].count === 0)
+                                    continue
+                                var open = openState === groups[i].state
+                                // The open status is thicker. The others go dim while a status is open.
+                                ctx.lineWidth = open ? 14 : 9
+                                ctx.globalAlpha = openState === "" || open ? 1 : 0.45
+                                ctx.strokeStyle = groups[i].color
                                 ctx.beginPath()
-                                ctx.arc(cx, cy, r, a0, a1)
+                                ctx.arc(cx, cy, r, -Math.PI / 2 + arcs[i].start, -Math.PI / 2 + arcs[i].start + arcs[i].sweep)
                                 ctx.stroke()
                             }
-                            return
-                        }
-                        for (var i = 0; i < groups.length; i++) {
-                            if (groups[i].count === 0)
-                                continue
-                            var open = openState === groups[i].state
-                            // The open status is thicker. The others go dim while a status is open.
-                            ctx.lineWidth = open ? 14 : 9
-                            ctx.globalAlpha = openState === "" || open ? 1 : 0.45
-                            ctx.strokeStyle = groups[i].color
-                            ctx.beginPath()
-                            ctx.arc(cx, cy, r, -Math.PI / 2 + arcs[i].start, -Math.PI / 2 + arcs[i].start + arcs[i].sweep)
-                            ctx.stroke()
                         }
                     }
                 }
@@ -212,7 +225,8 @@ Item {
                             visible: agentRow.modelData.icon !== "" && status !== Image.Error
                             x: 18; width: 16; height: 16
                             anchors.verticalCenter: parent.verticalCenter
-                            sourceSize: Qt.size(16, 16)
+                            // As many pixels as the icon has on the screen at a large scale.
+                            sourceSize: Qt.size(16 * skin.panel.pixelScale, 16 * skin.panel.pixelScale)
                             source: agentRow.modelData.icon
                         }
                         Text {

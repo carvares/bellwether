@@ -1,6 +1,7 @@
 // The window of the floating panel: the layer surface, its place and its screen, the drag, and the one pointer
 // handler. The state and the rules are in PanelModel.qml. The drawing is a skin (skins/<letter>.qml) that the
-// Loader below shows: the layout of the backend. The skin contract is in the spec
+// Loader below shows: the layout of the backend. The scale of the custom look is applied here, one time, for
+// every skin: the skin is drawn larger or smaller, and the window has that size. The skin contract is in the spec
 // (docs/superpowers/specs/2026-11-18-bellwether-design.md, "options window and layout skins").
 import QtQuick
 import QtQuick.Window
@@ -44,6 +45,9 @@ Window {
     // screen. So a pointer event can come one frame after a move and still be relative to the old place.
     readonly property real minMoveMs: refreshRate > 0 ? Math.min(20, Math.max(4, 2000 / refreshRate)) : 16
     readonly property int edge: 16
+    // The scale of the custom look: the skin is drawn this many times larger (0.75 to 2). The window, its place
+    // and the pointer are in pixels of the screen; the skin has its own pixels (the pixels of the design).
+    readonly property real panelScale: backend.scale
 
     // A layer surface must not have the size 0: the window shows when it has the size of its first skin.
     visible: false
@@ -236,14 +240,52 @@ Window {
         return null
     }
 
-    // The window has the size of the skin. Without a skin, and while a skin reports no size, it keeps its
-    // size: a layer surface must never get the size 0. The width and the height change together: one new size
-    // for the layer surface.
+    // A length of the skin in pixels of the screen: the next whole pixel. (0.000001: 320 × 1.1 is not 353.)
+    function scaled(length) {
+        return Math.ceil(length * panelScale - 0.000001)
+    }
+
+    // The window has the size of the skin at the scale. Without a skin, and while a skin reports no size, it
+    // keeps its size: a layer surface must never get the size 0. The width and the height change together: one
+    // new size for the layer surface.
+    // A panel that would be taller than its screen does not get that size here: fitRows() first takes rows away
+    // from its list. That runs later, when the skin has its final size (the size of a skin can change two times
+    // in one step, for example when one list closes and a different list opens).
     function takeSize() {
         if (!skin || skin.implicitWidth <= 0 || skin.implicitHeight <= 0)
             return
-        if (width !== skin.implicitWidth || height !== skin.implicitHeight)
-            setGeometry(x, y, skin.implicitWidth, skin.implicitHeight)
+        var tall = scaled(skin.implicitHeight) > home.height
+        if (tall || panelModel.rowRoom < panelModel.rowLimit)
+            Qt.callLater(fitRows)
+        if (!tall)
+            resize()
+    }
+
+    function resize() {
+        var w = scaled(skin.implicitWidth)
+        var h = scaled(skin.implicitHeight)
+        if (width !== w || height !== h)
+            setGeometry(x, y, w, h)
+    }
+
+    // The one rule for a panel that is taller than its screen (a long group at a large scale): the lists show
+    // only the rows that fit (panel.rowRoom, from 1 to panel.rowLimit), and the group scrolls. The rows that fit
+    // are the height of the screen less the height of the skin without its rows, divided by the height of a row.
+    // With no open group the lists get all their room again.
+    function fitRows() {
+        if (!skin || skin.implicitWidth <= 0 || skin.implicitHeight <= 0)
+            return
+        var rows = panelModel.shown
+        if (rows === 0 || panelModel.rowHeight <= 0) {
+            panelModel.rowRoom = panelModel.rowLimit
+        } else {
+            var rest = skin.implicitHeight - rows * panelModel.rowHeight
+            var fit = Math.floor((home.height / panelScale - rest) / panelModel.rowHeight + 0.000001)
+            panelModel.rowRoom = Math.max(1, Math.min(panelModel.rowLimit, fit))
+            if (panelModel.shown !== rows)
+                return  // the skin gets a new size, and takeSize() runs again
+        }
+        resize()
     }
 
     // The place at the start, when the size of the panel is known.
@@ -271,7 +313,12 @@ Window {
     onWidthChanged: clampPosition()
     onHeightChanged: clampPosition()
     // Not while the screen of the panel is gone: recover() then gives the panel a screen.
-    onHomeChanged: if (screenNamed(screenName) !== null) clampPosition()
+    onHomeChanged: {
+        if (screenNamed(screenName) !== null)
+            clampPosition()
+        takeSize()
+    }
+    onPanelScaleChanged: takeSize()
     onScreenSourceChanged: recoverTimer.restart()
     // Only the compositor closes the window (the tray hides it): the monitor of the surface went away.
     onClosing: {
@@ -293,6 +340,8 @@ Window {
     // The layout: only drawing. It reads panelModel, and this window finds its rows by their hitRole.
     Loader {
         id: skinLoader
+        // The scale of the custom look, from the top-left corner: the place of the panel stays its top-left corner.
+        transform: Scale { xScale: root.panelScale; yScale: root.panelScale }
         // The skin of the layout of the backend, with the controller as its `panel`.
         function load() {
             panelModel.hoverItem = null
@@ -315,6 +364,7 @@ Window {
 
     // The one pointer handler of the panel. A press that moves 6 px or more drags the widget.
     // A press that moves less is a click on the row under it: a status row opens, an agent row jumps.
+    // The pointer is in pixels of the screen at every scale: the 6 px, and the panel moves as far as the pointer.
     MouseArea {
         id: pointerArea
         anchors.fill: parent
@@ -326,9 +376,12 @@ Window {
         // event that comes before the compositor applies the last margin does not count the motion twice.
         // A dropped event loses nothing: the next one uses the absolute pointer position again.
         property double lastMoveMs: 0
-        // The row or the list of the skin under the pointer.
+        // The row or the list of the skin under the pointer. The skin has its own pixels: the scale is in the map.
         function under(point, roles) {
-            return root.skin ? root.hitAt(root.skin, point.x, point.y, roles) : null
+            if (!root.skin)
+                return null
+            var place = root.skin.mapFromItem(pointerArea, point.x, point.y)
+            return root.hitAt(root.skin, place.x, place.y, roles)
         }
         // lastMoveMs starts again at each press: a clock that went back must not block the drag.
         onPressed: (mouse) => { startX = mouse.x; startY = mouse.y; moved = false; lastMoveMs = 0 }
