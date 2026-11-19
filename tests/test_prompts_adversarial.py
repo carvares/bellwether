@@ -71,12 +71,17 @@ EXPECTED = {
     "r11-cut-plan-blank-then-fake-frame": ("claude-code", None),
     "r12-cut-no-hint-esc-label": ("claude-code", None),
     "r13-label-nothing": ("claude-code", None),
+    # ----- the screen of the second re-review -----
+    # A cut Codex command that draws the header below two lines at the first column that are not lines of Codex
+    # (not "•" and not "›"): any other character at the first column proves nothing, so blind.
+    "s03-codex-column0-other-mark-fake-header": ("codex", {"kind": "command", "cut": True, "blind": True,
+                                                           "keys": ["1", "2"]}),
 }
 
 
 def test_every_adversarial_screen_has_an_expected_result():
     assert {path.stem for path in FIXTURES.glob("*.txt")} == set(EXPECTED)
-    assert len(EXPECTED) == 27 + 13
+    assert len(EXPECTED) == 27 + 13 + 1
 
 
 @pytest.mark.parametrize("name", list(EXPECTED))

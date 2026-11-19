@@ -1356,3 +1356,22 @@ def test_a_text_killed_at_its_deadline_keeps_the_mark_for_the_settle_time(bench)
     b.now[0] += 4.0
     b.backend.apply(list(BLOCKED))
     assert b.until("ready") and b.client.sent == [("t1", "made-up text")]
+
+
+def test_a_second_text_is_refused_while_the_first_is_pending_also_after_its_mark_ended(bench):
+    """The state check of `answerText`: the mark of a text that was killed at its deadline ends 4 s later while the
+    prompt is still pending (the reads go on). A second text must not go then."""
+    b = bench(pending_follow=(0.0,))
+    b.client.screens = [ASK]
+    b.open()
+    gate = threading.Event()
+    b.client.on_press = lambda: b.client.screens.__setitem__(slice(None), [ASK_CURSOR])
+    b.client.send_result = Failure("timeout")
+    b.backend.answerText("made-up text")
+    b.client.screens[:] = [ASK_CURSOR, lambda: (gate.wait(5), ASK_CURSOR)[1]]
+    assert wait_for(b.app, lambda: b.state() == "pending") and b.prompt["reason"] == "send_timeout"
+    b.client.send_result = None
+    b.now[0] += 5.0  # the mark of the killed text has ended
+    assert b.backend.answerText("other text") is False and b.backend.answer("1") is False
+    assert b.state() == "pending" and b.client.sent == [("t1", "made-up text")]
+    gate.set()
