@@ -802,6 +802,7 @@ def test_the_reviewers_probe_digits_typed_for_the_field_do_not_answer_a_new_ques
     assert d.client.pressed == [] and d.state() == "ready"
     assert d.one("isDigitsOff").property("text") == "New question — click or press Tab to use the number keys"
     assert window.property("digitsLocked") is True
+    assert d.one("isFooterNote").property("text") == "Click or press Tab first. Esc closes."
 
 
 @pytest.mark.parametrize("unlock", ["click", "tab"])

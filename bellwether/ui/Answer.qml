@@ -762,8 +762,8 @@ Window {
                 verticalAlignment: Text.AlignVCenter
                 elide: Text.ElideRight
                 textFormat: Text.PlainText
-                text: answer.phase === "ready" && answer.hasQuestion ? "Press the number of an option. Esc closes."
-                                                                     : "Esc closes."
+                text: answer.answerable && answer.digitsLocked ? "Click or press Tab first. Esc closes."
+                    : answer.answerable ? "Press the number of an option. Esc closes." : "Esc closes."
                 color: answer.theme.dimColor
                 font { family: answer.theme.fontFamily; pixelSize: answer.theme.smallSize + 1 }
             }
