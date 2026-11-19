@@ -512,7 +512,8 @@ def test_the_options_window_takes_the_family_and_the_colours_and_the_selected_ca
         assert plate.name() == CUSTOM["accent"] and 20 <= plate.alpha() <= 40  # the opacity of the design
         assert value(other, "border.color").name() == CUSTOM["frame"]  # a line
         assert {i.property("font").family() for i in texts(window)} == {serif}
-        assert {i.property("color").name() for i in texts(window)} == {CUSTOM["text"], "#0b0e11"}  # the tag: dark
+        # The tag is on the accent, a dark red here: it has the light ink (on the accent of a design, the dark one).
+        assert {i.property("color").name() for i in texts(window)} == {CUSTOM["text"], LIGHT_INK}
         assert text_findings(window) == []
         backend.resetLook()
         settle(app)
@@ -566,3 +567,112 @@ def test_the_controller_has_no_colour_rule_of_its_own_and_the_opening_colour_is_
     settle(app)
     assert panel.property("openingColor").name() == "#8ab4f8"
 
+
+# ----- the ink on a solid plate of a status colour or of the accent -----
+
+DARK_INK, LIGHT_INK = "#202124", "#f1f3f4"
+
+
+def ink_on(theme, colour, *more):
+    """theme.inkOn(colour) of a loaded theme object."""
+    arguments = ", ".join(f'"{c}"' for c in (colour, *more))
+    return QQmlExpression(qmlContext(theme), theme, f"inkOn({arguments})").evaluate()[0].name()
+
+
+def test_the_ink_on_a_plate_is_the_one_of_two_with_more_contrast(app):
+    theme, keep, errors = load_theme(layouts.theme_file(layouts.built_skins()["A"]))
+    assert errors == []
+    for colour in (STATE_COLORS[state] for state in ("blocked", "done", "working", "idle")):  # all light: as before
+        assert ink_on(theme, colour) == DARK_INK, colour
+    for colour in ("#000000", "#200000", "#001a00", "#1a2a6c", "#5f0f40", "#0b0e11", "#444444"):
+        assert ink_on(theme, colour) == LIGHT_INK, colour
+    for colour in ("#ffffff", "#f5f0e6", "#b8f000", "#999999"):
+        assert ink_on(theme, colour) == DARK_INK, colour
+    assert ink_on(theme, "#8ab4f8", "#0b0e11") == "#0b0e11"  # a caller can name the dark ink of its design
+    assert ink_on(theme, "#102030", "#0b0e11") == LIGHT_INK
+    assert ink_on(theme, "#102030", "#0b0e11", "#ffffff") == "#ffffff"
+
+
+@pytest.mark.parametrize("skin", ["A.qml", "B.qml", "../Options.qml"])
+def test_no_file_states_a_dark_ink_of_its_own_for_a_solid_plate(skin):
+    text = (layouts.SKINS_PATH / skin).read_text()
+    assert "#202124" not in text and "inkOn(" in text
+    assert not re.search(r'color: [^\n]*\? "#0b0e11"', text)
+
+
+@pytest.mark.parametrize("letter", ["A", "B"])
+def test_the_text_on_a_solid_plate_of_a_dark_status_colour_is_light(app, window, letter):
+    root, backend, messages = window
+    backend.setLayout(letter)
+    backend.apply(many(blocked=2, done=1, working=1))
+    settle(app)
+
+    def inks():
+        """The colours of the texts (and in B of the border) of the items of blocked and of done."""
+        found = {}
+        for item in status_items(root)[:2]:
+            texts_of = [t for t in walk(item) if t.metaObject().className().startswith("QQuickText") and t.isVisible()]
+            if letter == "A":  # only the count is on the filled badge
+                texts_of = [t for t in texts_of if t.property("countFor")]
+            found[item.property("stateName")] = {t.property("color").name() for t in texts_of}
+        return found
+
+    assert inks() == {"blocked": {DARK_INK}, "done": {DARK_INK}}
+    backend.setColor("blocked", "#200000")
+    settle(app)
+    assert inks() == {"blocked": {LIGHT_INK}, "done": {DARK_INK}}
+    if letter == "B":  # the open solid tile: its mark and its border too
+        root.setProperty("openState", "blocked")
+        settle(app)
+        tile = status_items(root)[0]
+        assert inks()["blocked"] == {LIGHT_INK} and str(value(tile, "border.color.toString()")) == LIGHT_INK
+        assert sum(1 for t in walk(tile) if t.property("isOpenMark") and t.isVisible()) == 1
+    backend.setColor("done", "#001a00"), backend.resetColor("blocked")
+    settle(app)
+    assert inks() == {"blocked": {DARK_INK}, "done": {LIGHT_INK}}
+    # The ink can be read: the count of done is light pixels on the dark plate.
+    image = root.grabWindow()
+    count = next(t for t in walk(status_items(root)[1]) if t.property("countFor"))
+    box = count.mapRectToScene(count.boundingRect()).toRect()
+    light = sum(1 for x in range(box.left(), box.right()) for y in range(box.top(), box.bottom())
+                if image.pixelColor(x, y).lightness() > 200)
+    assert light > 8
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def test_the_tag_of_the_selected_card_can_be_read_on_a_dark_accent(app, real_options):
+    window, backend, messages = real_options
+    tag = next(t for t in walk(window.contentItem()) if t.property("isTag") and t.isVisible())
+    ink = lambda: next(t for t in walk(tag) if t.property("text")).property("color").name()
+    assert ink() == "#0b0e11"  # the design
+    backend.setColor("accent", "#102030")
+    settle(app)
+    assert tag.property("color").name() == "#102030" and ink() == LIGHT_INK
+
+
+# ----- Layout E: the fade over a long list stays inside the round corners of the frame -----
+
+def test_the_fade_of_layout_e_has_the_bottom_corners_of_the_frame(app, window):
+    root, backend, messages = window
+    backend.setLayout("E")
+    backend.apply(many(blocked=1, working=3, idle=12))
+    root.setProperty("openState", "idle")
+    settle(app)
+    image = root.grabWindow()
+    width, height = image.width(), image.height()
+    frame = next(i for i in walk(root.contentItem()) if i.property("radius") == 16 and i.width() == width)
+    assert frame.height() == height
+    # Outside the round corner of the frame nothing is drawn. The picture of a short list (no fade) tells which
+    # pixels of the two bottom corner areas of 16 x 16 pixels are outside, and where the frame line is.
+    def corner_alphas(picture):
+        return [picture.pixelColor(x, y).alpha() for xs in (range(0, 16), range(picture.width() - 16, picture.width()))
+                for x in xs for y in range(picture.height() - 16, picture.height())]
+    long_list = corner_alphas(image)
+    root.setProperty("openState", "working")
+    settle(app)
+    short_list = corner_alphas(root.grabWindow())
+    outside = [place for place, alpha in enumerate(short_list) if alpha == 0]
+    assert len(outside) > 60 and [long_list[place] for place in outside] == [0] * len(outside)
+    edge = [place for place, alpha in enumerate(short_list) if 0 < alpha < 242]  # the smooth edge of the frame
+    assert len(edge) > 10 and [long_list[place] for place in edge] == [short_list[place] for place in edge]
+    assert image.pixelColor(1, height - 4).alpha() == 0 and image.pixelColor(width - 2, height - 4).alpha() == 0

@@ -100,4 +100,48 @@ QtObject {
     function accent(design) {
         return role("accent", design)
     }
+
+    // ----- the ink on a solid plate -----
+    // A text (or a mark, or a border) on a solid plate of a status colour or of the accent is not text on the
+    // panel: it has the dark or the light ink, the one that the plate lets a person read better. Every status
+    // colour of the designs is light, so the designs keep their dark ink. This is the one place of this rule.
+
+    readonly property color darkInk: "#202124"
+    readonly property color lightInk: "#f1f3f4"
+
+    // The relative luminance of a colour (WCAG 2), from 0 (black) to 1 (white). The opacity is not counted.
+    function luminance(colour) {
+        function linear(part) {
+            return part <= 0.03928 ? part / 12.92 : Math.pow((part + 0.055) / 1.055, 2.4)
+        }
+        var c = Qt.color(colour)
+        return 0.2126 * linear(c.r) + 0.7152 * linear(c.g) + 0.0722 * linear(c.b)
+    }
+
+    // The contrast of two colours (WCAG 2), from 1 (the same) to 21 (black and white).
+    function contrast(one, other) {
+        var a = luminance(one), b = luminance(other)
+        return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
+    }
+
+    // The ink for a solid plate: `dark` or `light`, the one with more contrast. A design gives its own dark ink
+    // when it has one.
+    function inkOn(plate, dark, light) {
+        var darkOne = Qt.color(dark === undefined ? darkInk : dark)
+        var lightOne = Qt.color(light === undefined ? lightInk : light)
+        return contrast(plate, darkOne) >= contrast(plate, lightOne) ? darkOne : lightOne
+    }
+
+    // `wanted` when a person can tell it from `plate` (a contrast of 3 or more), else the ink for that plate.
+    // For a control that must stay usable whatever colours the user chose (the options window: its close control
+    // and "Reset to defaults").
+    function readable(wanted, plate) {
+        return contrast(wanted, plate) >= 3 ? Qt.color(wanted) : inkOn(plate)
+    }
+
+    // A colour without its opacity: a plate that hides what is behind it.
+    function solid(colour) {
+        var c = Qt.color(colour)
+        return Qt.rgba(c.r, c.g, c.b, 1)
+    }
 }

@@ -58,13 +58,15 @@ Item {
                         readonly property bool empty: group.count === 0
                         // A status that needs attention is a solid tile. The others are tinted.
                         readonly property bool solid: group.alert
+                        // The text, the mark and the border on the solid tile: the ink for its colour.
+                        readonly property color ink: theme.inkOn(group.color)
                         readonly property bool hovered: skin.panel.hoverItem === tile
                         width: (column.width - skin.gap) / 2
                         height: theme.fit(74)
                         radius: theme.itemRadius
                         color: solid ? group.color : empty ? "transparent" : skin.panel.faded(group.color, 0.13)
                         border.width: open ? 2 : empty ? 1 : 0
-                        border.color: open ? (solid ? "#202124" : group.color) : theme.lineColor
+                        border.color: open ? (solid ? ink : group.color) : theme.lineColor
                         Accessible.role: Accessible.Button
                         Accessible.name: skin.panel.spokenStatus(group)
                         Accessible.onPressAction: skin.panel.toggle(stateName)
@@ -80,7 +82,7 @@ Item {
                             x: 12
                             y: 9
                             text: tile.group.label
-                            color: tile.solid ? "#202124" : tile.empty ? theme.faintColor : theme.textColor
+                            color: tile.solid ? tile.ink : tile.empty ? theme.faintColor : theme.textColor
                             font {
                                 family: skin.sans; pixelSize: theme.titleSize
                                 weight: tile.solid ? Font.DemiBold : Font.Medium
@@ -92,7 +94,7 @@ Item {
                             anchors.bottom: parent.bottom
                             anchors.bottomMargin: 3
                             text: skin.panel.online ? tile.group.count : "–"
-                            color: tile.solid ? "#202124" : tile.empty ? theme.ghostColor : tile.group.color
+                            color: tile.solid ? tile.ink : tile.empty ? theme.ghostColor : tile.group.color
                             font { family: skin.sans; pixelSize: theme.numeralSize; weight: Font.DemiBold; features: { "tnum": 1 } }
                         }
                         // The mark of the open tile: a chevron that points to the list.
@@ -104,7 +106,7 @@ Item {
                             anchors.bottom: parent.bottom
                             anchors.bottomMargin: 10
                             text: "▾"
-                            color: tile.solid ? "#202124" : tile.group.color
+                            color: tile.solid ? tile.ink : tile.group.color
                             font { family: skin.sans; pixelSize: theme.markSize }
                         }
                     }

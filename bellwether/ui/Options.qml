@@ -22,6 +22,8 @@ Window {
     readonly property int tagHeight: theme.fit(18)
     readonly property int cardHeight: 8 + 124 + nameHeight + 6 + descriptionHeight + 8 + tagHeight + 8
     readonly property int cardGap: 12
+    // The dark text of the tag on the accent.
+    readonly property color tagInk: "#0b0e11"
     // The header asks for a move of the window: the compositor moves it (no position code here).
     signal systemMoveRequested()
 
@@ -299,7 +301,9 @@ Window {
                                 id: tagText
                                 anchors.centerIn: parent
                                 text: card.selected ? "SELECTED" : "COMING NEXT"
-                                color: card.selected ? "#0b0e11" : options.theme.textColor
+                                // On the accent: the dark ink of this window, or the light ink on a dark accent.
+                                color: card.selected ? options.theme.inkOn(options.theme.accentColor, options.tagInk)
+                                    : options.theme.textColor
                                 font {
                                     family: options.theme.fontFamily; pixelSize: options.theme.size(9)
                                     letterSpacing: 1; weight: Font.Bold

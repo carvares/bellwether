@@ -294,6 +294,10 @@ Item {
                             x: 2
                             y: agentList.height + 8 - height
                             width: agentList.width - 4; height: 30
+                            // The fade ends at the bottom of the panel, inside its frame: it has the round
+                            // corners of the inside of the frame, so nothing shows outside the panel.
+                            bottomLeftRadius: theme.radius - theme.frameWidth
+                            bottomRightRadius: theme.radius - theme.frameWidth
                             // From clear to the colour of the panel.
                             gradient: Gradient {
                                 GradientStop { position: 0; color: skin.panel.faded(theme.panelColor, 0) }

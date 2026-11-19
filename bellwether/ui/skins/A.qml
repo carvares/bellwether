@@ -115,7 +115,7 @@ Item {
                                 readonly property string countFor: statusRow.stateName
                                 anchors.centerIn: parent
                                 text: groupItem.group.count
-                                color: groupItem.group.alert ? "#202124" : groupItem.empty ? theme.faintColor : theme.textColor
+                                color: groupItem.group.alert ? theme.inkOn(groupItem.group.color) : groupItem.empty ? theme.faintColor : theme.textColor
                                 font { family: skin.sans; pixelSize: theme.numeralSize; weight: Font.DemiBold; features: { "tnum": 1 } }
                             }
                         }
