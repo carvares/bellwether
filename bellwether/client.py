@@ -16,6 +16,7 @@ import logging
 import re
 import shutil
 import subprocess
+import threading
 import time
 import unicodedata
 from dataclasses import dataclass, field
@@ -51,9 +52,19 @@ TEXT_LIMIT = 2000  # characters of one free-text answer
 _KIND = re.compile(r"[a-z_]{1,32}")  # an error kind of herdr-core, for example "not_found"
 # `herdr-core send` puts a tag with the address of the caller around the text when these are set.
 _CALLER_VARIABLES = ("HC_TERMINAL_ID", "HC_SCOPE", "HC_TERMINAL_SOCKET")
-# Format characters that a text may have: the joiners and tags of emoji sequences are fine. These are not: they
-# change the order in which the text shows (bidirectional controls), so the text can show a different thing.
-_BIDI = frozenset("\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069")
+# A text can have no invisible character: a model can read it and the person cannot see it. Format characters
+# (bidirectional controls, zero-width spaces, tag characters, …) are refused, with two parts of emoji as the only
+# exceptions: a joiner (U+200D) between two emoji, and a variation selector (U+FE0E, U+FE0F) after an emoji or a
+# keycap base. Tag characters only in the flag of a region ("\U0001F3F4" + 2 to 6 small letters or digits as tags +
+# the cancel tag): at most 6 tags, which cannot carry a sentence.
+_FLAG = re.compile("\U0001F3F4[\U000E0061-\U000E007A]{2}[\U000E0030-\U000E0039\U000E0061-\U000E007A]{0,4}\U000E007F")
+_JOINER, _SELECTORS = "\u200d", "\ufe0e\ufe0f"
+_KEYCAP_BASES = "0123456789#*"
+# The poll of a command that a cancel can end, in seconds.
+CANCEL_POLL = 0.05
+# The codes of a failed check (`get`) that say that herdr-core does not have the terminal: they stay as they are.
+# Any other failed check has its own code: nothing ran, so the key or the text did not go.
+_GONE = frozenset({"herdr_not_found", "herdr_finished"})
 
 
 @dataclass(frozen=True)
@@ -76,16 +87,38 @@ def valid_address(address: object) -> bool:
 def text_problem(text: object) -> str:
     """Why a free-text answer cannot be sent, as a reason code; "" when it can. A text is one line that a person can
     see, with text in it, not longer than TEXT_LIMIT characters: no control characters (no line break, no escape
-    sequence), and no bidirectional controls. Emoji sequences (joiners, tags) are fine."""
+    sequence), and no invisible characters (bidirectional controls, zero-width spaces, tag characters). The parts of
+    emoji sequences (a joiner, a variation selector, the tags of a region flag) are fine inside an emoji."""
     if not isinstance(text, str) or not text.strip():
         return "text_empty"
     if len(text) > TEXT_LIMIT:
         return "text_long"
     if any(char in "\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029" for char in text):
         return "text_lines"
-    if not all(char.isprintable() or (unicodedata.category(char) == "Cf" and char not in _BIDI) for char in text):
-        return "text_control"
-    return ""
+    return "" if _visible(_FLAG.sub("\U0001F3F4", text)) else "text_control"
+
+
+def _emoji(char: str) -> bool:
+    """A symbol of an emoji sequence: a pictograph (category So), or a skin tone (U+1F3FB to U+1F3FF)."""
+    return unicodedata.category(char) == "So" or "\U0001F3FB" <= char <= "\U0001F3FF"
+
+
+def _visible(text: str) -> bool:
+    """True when each character shows, or is a joiner or a variation selector inside an emoji."""
+    for place, char in enumerate(text):
+        before = text[place - 1] if place else ""
+        after = text[place + 1] if place + 1 < len(text) else ""
+        if char == _JOINER:
+            # Between two emoji; the emoji before can end with its variation selector.
+            if not (after and _emoji(after) and before and (_emoji(before) or before in _SELECTORS)):
+                return False
+        elif char in _SELECTORS:
+            if not (before and (_emoji(before) or before in _KEYCAP_BASES)):
+                return False
+        elif not char.isprintable() or unicodedata.category(char) == "Cf" or "\ufe00" <= char <= "\ufe0f" or (
+                "\U000E0100" <= char <= "\U000E01EF"):
+            return False
+    return True
 
 
 def valid_text(text: object) -> bool:
@@ -116,12 +149,17 @@ def _run(argv: list[str], timeout: float = TIMEOUT) -> subprocess.CompletedProce
     return subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout)
 
 
+def _spawn(argv: list[str]) -> subprocess.Popen:
+    return subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+
 class HerdrClient:
     def __init__(self, app: str | None, core: str | None, run=_run, sleep=time.sleep, clock=time.monotonic,
-                 busctl: str = "busctl", systemd_run: str = "systemd-run", env: str = "env") -> None:
+                 busctl: str = "busctl", systemd_run: str = "systemd-run", env: str = "env", spawn=_spawn) -> None:
         self._app = app
         self._core = core
         self._run = run
+        self._spawn = spawn
         self._sleep = sleep
         self._clock = clock
         self._busctl = busctl
@@ -183,14 +221,15 @@ class HerdrClient:
         log.info("screen keys ok terminal=%s keys=%s", terminal, ",".join(keys))
         return None
 
-    def send_text(self, terminal: str, text: str) -> Failure | None:
+    def send_text(self, terminal: str, text: str, cancel: threading.Event | None = None) -> Failure | None:
         """Paste the text in the terminal and press Enter, also when its program is blocked (`--force`: the text
         answers the text entry of its dialog). `--` ends the options: a text that starts with "-" is text. None:
-        herdr-core typed it."""
+        herdr-core typed it. `cancel`: when it is set, the command is killed (herdr-core then does not type a text
+        that it holds, measured) and the call gives the code "cancelled" after the process has ended."""
         if not valid_text(text):
             return self._failed("send", terminal, "bad_text")
         done = self._screen_call("send", terminal, ["send", "--force", "--", terminal, text], SEND_TIMEOUT,
-                                 no_caller=True)
+                                 no_caller=True, cancel=cancel)
         if isinstance(done, Failure):
             return done
         log.info("screen send ok terminal=%s", terminal)
@@ -201,8 +240,8 @@ class HerdrClient:
         log.warning("screen %s failed terminal=%s code=%s", action, terminal if valid_address(terminal) else "?", code)
         return Failure(code)
 
-    def _screen_call(self, action: str, terminal: str, args: list[str], timeout: float,
-                     no_caller: bool = False) -> subprocess.CompletedProcess | Failure:
+    def _screen_call(self, action: str, terminal: str, args: list[str], timeout: float, no_caller: bool = False,
+                     cancel: threading.Event | None = None) -> subprocess.CompletedProcess | Failure:
         """Run one herdr-core command for a terminal of the last list. The output of a command that failed is
         not logged and not kept: it can hold the text of a screen."""
         if not valid_address(terminal):
@@ -214,7 +253,8 @@ class HerdrClient:
         # A terminal can have a NAME that has the form of an address. Ask which terminal the text names.
         found = self._command([self._core, "get", terminal, "--json"], READ_TIMEOUT)
         if isinstance(found, Failure):
-            return self._failed(action, terminal, found.code)
+            code = found.code if found.code in _GONE else "check_timeout" if found.code == "timeout" else "check_failed"
+            return self._failed(action, terminal, code)
         try:
             address = json.loads(found.stdout).get("address")
         except (ValueError, AttributeError):
@@ -224,7 +264,7 @@ class HerdrClient:
         argv = [self._core, *args]
         if no_caller:
             argv = [self._env, *(part for name in _CALLER_VARIABLES for part in ("-u", name)), *argv]
-        done = self._command(argv, timeout)
+        done = self._command(argv, timeout) if cancel is None else self._watched(argv, timeout, cancel)
         return self._failed(action, terminal, done.code) if isinstance(done, Failure) else done
 
     def _command(self, argv: list[str], timeout: float) -> subprocess.CompletedProcess | Failure:
@@ -238,6 +278,32 @@ class HerdrClient:
         if done.returncode != 0:
             return Failure(self._error_kind(done.stderr) or f"exit_{done.returncode}")
         return done
+
+    def _watched(self, argv: list[str], timeout: float, cancel: threading.Event
+                 ) -> subprocess.CompletedProcess | Failure:
+        """Run one herdr-core command that `cancel` can end: then it is killed. The call returns only after the
+        process has ended, so a kill is confirmed. Its output is not logged and not kept when it fails."""
+        if cancel.is_set():
+            return Failure("cancelled")
+        try:
+            process = self._spawn(argv)
+        except (OSError, subprocess.SubprocessError):
+            return Failure("no_run")
+        deadline = self._clock() + timeout
+        while True:
+            try:
+                stdout, stderr = process.communicate(timeout=CANCEL_POLL)
+                break
+            except subprocess.TimeoutExpired:
+                if cancel.is_set() or self._clock() >= deadline:
+                    process.kill()
+                    process.wait()  # the process has ended
+                    for pipe in (process.stdout, process.stderr):
+                        pipe.close()
+                    return Failure("cancelled" if cancel.is_set() else "timeout")
+        if process.returncode != 0:
+            return Failure(self._error_kind(stderr) or f"exit_{process.returncode}")
+        return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
 
     @staticmethod
     def _error_kind(stderr: bytes) -> str | None:

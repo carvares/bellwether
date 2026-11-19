@@ -2,7 +2,10 @@
 No test starts the real herdr-core. MARKER stands for the private text of a screen: it must be in no log record."""
 import json
 import logging
+import os
 import subprocess
+import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -144,8 +147,11 @@ def test_a_terminal_whose_name_is_the_address_of_an_other_one_gets_no_command(ca
                (done(b"[]"), "not_this_terminal"), (done({"state": "live"}), "not_this_terminal"),
                (done(MARKER.encode(), 3, json.dumps({"error": {"kind": "not_found", "message": MARKER}}).encode()),
                 "herdr_not_found"),
-               (subprocess.TimeoutExpired(["x"], 2.0, output=MARKER.encode()), "timeout"),
-               (FileNotFoundError(MARKER), "no_run")]
+               # The check itself did not work: nothing ran. Its own codes, so that no one reads "may still arrive".
+               (subprocess.TimeoutExpired(["x"], 2.0, output=MARKER.encode()), "check_timeout"),
+               (FileNotFoundError(MARKER), "check_failed"),
+               (done(MARKER.encode(), 1, MARKER.encode()), "check_failed"),
+               (done(b"", 3, json.dumps({"error": {"kind": "unavailable"}}).encode()), "check_failed")]
     for answer, code in answers:
         client, runner = client_with(done({"complete": True, "text": MARKER}), names={"t1": answer})
         assert call(client) == Failure(code), answer
@@ -236,7 +242,9 @@ def test_only_the_digits_of_the_options_are_keys(keys, records):
     "a", "yes, do it", "ação é ñ 日本語 ?", "--force", "-x", "x" * TEXT_LIMIT, "  padded  ",
     "a coder \U0001F469\u200D\U0001F4BB here",  # an emoji sequence with a zero-width joiner
     "\U0001F3F4\U000E0067\U000E0062\U000E0073\U000E0063\U000E0074\U000E007F",  # a flag with tag characters
-    "\u2764\ufe0f ok", "\U0001F44D\U0001F3FD"])
+    "\u2764\ufe0f ok", "\U0001F44D\U0001F3FD",
+    "\U0001F3F3\ufe0f\u200d\U0001F308 flag",  # a variation selector and a joiner inside one emoji
+    "keycap 1\ufe0f\u20e3", "\U0001F468\U0001F3FD\u200d\U0001F4BB", "\u2764\ufe0f\u200d\U0001F525"])
 def test_a_text_of_one_line_is_valid(text):
     assert valid_text(text) and text_problem(text) == ""
 
@@ -249,7 +257,17 @@ def test_a_text_of_one_line_is_valid(text):
     ("tab\there", "text_control"), ("bell\x07", "text_control"), ("esc\x1b[2J", "text_control"),
     ("paste end\x1b[201~", "text_control"), ("nul\x00", "text_control"), ("\x7f", "text_control"),
     ("c1\x9b", "text_control"), ("rm \u202eexe.txt", "text_control"), ("a\u2066b\u2069", "text_control"),
-    ("a\u200fb", "text_control")])
+    ("a\u200fb", "text_control"),
+    # Invisible characters that a model can read and a person cannot see: tag characters out of a flag, the language
+    # tag, the zero-width space, the soft hyphen, the word joiner, and a joiner or a variation selector out of an emoji.
+    ("ok\U000E0069\U000E0067\U000E006E\U000E006F\U000E0072\U000E0065", "text_control"),
+    ("\U0001F3F4\U000E0069\U000E0067\U000E006E\U000E006F\U000E0072\U000E0065\U000E0020\U000E0061\U000E007F",
+     "text_control"),  # a black flag with a long tag text
+    ("\U0001F3F4\U000E0067\U000E0062\U000E0073\U000E0063\U000E0074", "text_control"),  # no cancel tag at the end
+    ("\U000E0001\U000E0065\U000E006E", "text_control"), ("a\u200bb", "text_control"), ("a\u00adb", "text_control"),
+    ("a\u2060b", "text_control"), ("\ufeffa", "text_control"), ("a\u200db", "text_control"),
+    ("\u200d\U0001F4BB", "text_control"), ("a\ufe0f", "text_control"), ("x\ufe00", "text_control"),
+    ("\U0001F469\u200d", "text_control")])
 def test_an_empty_long_or_control_text_is_not_valid(text, problem, records):
     assert not valid_text(text) and text_problem(text) == problem
     client, runner = client_with(done({}))
@@ -317,3 +335,115 @@ def test_without_herdr_core_the_calls_are_values():
     assert client.press("t1", ["1"]) == Failure("no_core")
     assert client.send_text("t1", "x") == Failure("no_core")
     assert runner.calls == []
+
+
+# ----- a text that is held can be cancelled: its command is killed -----
+
+class Process:
+    """A fake Popen: it runs until `ends` (a number of polls) or forever, and records the kill and the wait."""
+
+    def __init__(self, ends=None, returncode=0, stdout=b"{}", stderr=b""):
+        self.ends, self.returncode, self.out, self.err = ends, returncode, stdout, stderr
+        self.polls = 0
+        self.killed = self.waited = False
+        self.stdout = self.stderr = SimpleNamespace(close=lambda: None)
+
+    def communicate(self, timeout=None):
+        self.polls += 1
+        if self.ends is None or self.polls < self.ends:
+            raise subprocess.TimeoutExpired(["x"], timeout)
+        return self.out, self.err
+
+    def kill(self):
+        self.killed = True
+
+    def wait(self, timeout=None):
+        self.waited = True
+        return -9
+
+
+def cancellable_client(process, clock=None):
+    runner = Runner(done({}))
+    spawned = []
+    client = HerdrClient(None, CORE, run=runner, spawn=lambda argv: spawned.append(argv) or process,
+                         **({"clock": clock} if clock else {}))
+    client.list_agents()
+    return client, runner, spawned
+
+
+def test_a_text_with_a_cancel_runs_as_a_process_that_is_watched():
+    process = Process(ends=3)
+    client, runner, spawned = cancellable_client(process)
+    assert client.send_text("t1", "made-up text", cancel=threading.Event()) is None
+    assert spawned == [["env", "-u", "HC_TERMINAL_ID", "-u", "HC_SCOPE", "-u", "HC_TERMINAL_SOCKET",
+                        CORE, "send", "--force", "--", "t1", "made-up text"]]
+    assert runner.gets == [([CORE, "get", "t1", "--json"], READ_TIMEOUT)] and not process.killed
+
+
+def test_a_text_whose_cancel_is_set_is_killed_and_ends_after_the_process(records):
+    """A held `send` that is killed is not typed (measured). The call returns only when the process has ended."""
+    process = Process()
+    cancel = threading.Event()
+    client, _, _ = cancellable_client(process)
+    original = process.communicate
+
+    def communicate(timeout=None):
+        if process.polls == 2:
+            cancel.set()
+        return original(timeout)
+
+    process.communicate = communicate
+    assert client.send_text("t1", MARKER, cancel=cancel) == Failure("cancelled")
+    assert process.killed and process.waited
+    assert no_marker(records)
+
+
+def test_a_cancel_that_is_set_before_the_text_runs_nothing():
+    process = Process(ends=1)
+    cancel = threading.Event()
+    cancel.set()
+    client, runner, spawned = cancellable_client(process)
+    assert client.send_text("t1", "text", cancel=cancel) == Failure("cancelled")
+    assert spawned == [] and runner.calls == []
+
+
+def test_a_watched_text_past_its_deadline_is_killed_with_the_timeout_code():
+    now = [0.0]
+    process = Process()
+
+    def communicate(timeout=None):
+        now[0] += 20.0
+        raise subprocess.TimeoutExpired(["x"], timeout)
+
+    process.communicate = communicate
+    client, _, _ = cancellable_client(process, clock=lambda: now[0])
+    assert client.send_text("t1", "text", cancel=threading.Event()) == Failure("timeout")
+    assert process.killed and process.waited and SEND_TIMEOUT <= now[0] <= SEND_TIMEOUT + 20.0
+
+
+def test_a_watched_text_that_herdr_refuses_has_the_error_kind():
+    process = Process(ends=1, returncode=3, stdout=MARKER.encode(),
+                      stderr=json.dumps({"error": {"kind": "not_found", "message": MARKER}}).encode())
+    client, _, _ = cancellable_client(process)
+    assert client.send_text("t1", "text", cancel=threading.Event()) == Failure("herdr_not_found")
+
+
+def test_a_real_process_is_killed_and_gone_when_the_call_returns(tmp_path):
+    """With a real child process (a shell script in the place of herdr-core, not herdr-core): the cancel kills it,
+    and the call returns after it ended."""
+    script = tmp_path / "fake-core"
+    pid_file = tmp_path / "pid"
+    script.write_text(f"#!/bin/sh\necho $$ > {pid_file}\nexec sleep 30\n")
+    script.chmod(0o755)
+    runner = Runner(done({}))
+    client = HerdrClient(None, str(script), run=runner)
+    client._known = frozenset({"t1"})
+    cancel = threading.Event()
+    timer = threading.Timer(0.3, cancel.set)
+    timer.start()
+    began = time.monotonic()
+    assert client.send_text("t1", "text", cancel=cancel) == Failure("cancelled")
+    assert time.monotonic() - began < 3.0
+    pid = int(pid_file.read_text())
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
