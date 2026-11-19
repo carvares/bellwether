@@ -31,9 +31,17 @@ LEFT, NONE = Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier
 HINT = "Use a colour like #8ab4f8"
 
 
+def hold_the_save(backend):
+    """The save of the look comes 0.4 s after the last change (tests/test_look.py checks that). Here a test says
+    when that time is over (`fire`), so a slow machine cannot write the file in the middle of a test."""
+    assert backend._look_timer.interval() == 400
+    backend._look_timer.setInterval(600_000)
+
+
 def make(app, fake_client, path, families=FAMILIES, room=1080):
     """(window, backend, messages, engine): the options window on a screen of `room` pixels of height."""
     backend = Backend(fake_client, settings_path=path, skins=built_skins(), families=families)
+    hold_the_save(backend)
     messages = []
     engine = QQmlApplicationEngine()
     engine.warnings.connect(lambda errors: messages.extend(e.toString() for e in errors))
@@ -837,6 +845,7 @@ needs_layershell = pytest.mark.skipif(not LAYERSHELL_QMLDIR.is_file(), reason="o
 def both(app, fake_client, state_path):
     """Yield (options window, panel window, backend): the two windows in one engine, as in the program."""
     backend = Backend(fake_client, settings_path=state_path, skins=built_skins(), families=FAMILIES)
+    hold_the_save(backend)
     messages = []
     previous = qInstallMessageHandler(lambda mode, context, text: messages.append(text))
     engine = QQmlApplicationEngine()
