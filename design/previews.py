@@ -23,7 +23,6 @@ from bellwether import layouts  # noqa: E402
 from bellwether.__main__ import IMPORT_PATH  # noqa: E402
 from bellwether.backend import Backend  # noqa: E402
 from bellwether.state import Agent  # noqa: E402
-from bellwether.tray import STATE_COLORS  # noqa: E402
 
 WIDTH = 360
 COUNTS = {"blocked": 1, "done": 2, "working": 3, "idle": 4}
@@ -46,7 +45,6 @@ def panel(letter: str, folder: Path) -> QImage:
     engine = QQmlApplicationEngine()
     engine.warnings.connect(lambda ws: R.warnings.extend(w.toString() for w in ws))
     engine.rootContext().setContextProperty("backend", backend)
-    engine.rootContext().setContextProperty("stateColors_", STATE_COLORS)
     engine.addImportPath(str(IMPORT_PATH))
     engine.load(layouts.UI_PATH / "Main.qml")
     root = engine.rootObjects()[0]

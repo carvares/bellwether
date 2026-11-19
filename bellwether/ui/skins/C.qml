@@ -150,7 +150,7 @@ Item {
                             x: index * 10 - 40; y: -10
                             width: 1; height: parent.height + 28
                             rotation: 35
-                            color: "#1d242b"
+                            color: theme.hatchColor
                         }
                     }
                     Text {
@@ -202,7 +202,7 @@ Item {
                             width: 8; height: 8
                             color: groupItem.empty ? "transparent" : groupItem.tone
                             border.width: 1
-                            border.color: groupItem.empty ? "#4a535c" : groupItem.tone
+                            border.color: groupItem.empty ? theme.markColor : groupItem.tone
                         }
                         Text {
                             id: nameText
@@ -225,7 +225,7 @@ Item {
                             clip: true
                             Repeater {
                                 model: 40
-                                Rectangle { width: 2; height: 1; color: "#343d46" }
+                                Rectangle { width: 2; height: 1; color: theme.dotColor }
                             }
                         }
                         // The count with two digits. The zero at the front is dim.
@@ -236,13 +236,13 @@ Item {
                             Text {
                                 visible: groupItem.group.count < 10
                                 text: "0"
-                                color: "#3a444d"
+                                color: theme.guideColor
                                 font { family: skin.mono; pixelSize: theme.numeralSize; weight: Font.Bold }
                             }
                             Text {
                                 readonly property string countFor: statusRow.stateName
                                 text: groupItem.group.count
-                                color: groupItem.empty ? "#4a555f" : groupItem.group.attention ? groupItem.tone : skin.ink
+                                color: groupItem.empty ? theme.ghostColor : groupItem.group.attention ? groupItem.tone : skin.ink
                                 font { family: skin.mono; pixelSize: theme.numeralSize; weight: Font.Bold }
                             }
                         }
@@ -276,9 +276,9 @@ Item {
                                 Rectangle {
                                     x: 5; width: 1
                                     height: agentRow.last ? parent.height / 2 : parent.height
-                                    color: "#3a444d"
+                                    color: theme.guideColor
                                 }
-                                Rectangle { x: 5; y: parent.height / 2; width: 9; height: 1; color: "#3a444d" }
+                                Rectangle { x: 5; y: parent.height / 2; width: 9; height: 1; color: theme.guideColor }
                                 // The icon that the Herdr app shows for the program of the agent.
                                 Image {
                                     id: programIcon
@@ -354,18 +354,18 @@ Item {
                                                 && index < agentList.first + agentList.shown
                                             width: 3
                                             height: (track.span - 2 * (track.count - 1)) / track.count
-                                            color: lit ? "#8a949e" : "#2b333b"
+                                            color: lit ? skin.dim : skin.line
                                         }
                                     }
                                 }
-                                Rectangle { visible: !track.ticks; width: 3; height: track.span; color: "#2b333b" }
+                                Rectangle { visible: !track.ticks; width: 3; height: track.span; color: skin.line }
                                 Rectangle {
                                     visible: !track.ticks
                                     width: 3
                                     height: Math.max(8, track.span * agentList.height / Math.max(1, agentList.contentHeight))
                                     y: (track.span - height) * agentList.contentY
                                         / Math.max(1, agentList.contentHeight - agentList.height)
-                                    color: "#8a949e"
+                                    color: skin.dim
                                 }
                             }
                         }

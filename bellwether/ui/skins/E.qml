@@ -65,6 +65,8 @@ Item {
                         readonly property string openState: skin.panel.openState
                         readonly property bool online: skin.panel.online
                         readonly property real pixels: skin.panel.pixelScale
+                        // The ring with no agents and offline.
+                        readonly property color neutral: theme.lineColor
                         width: ring.width * pixels
                         height: ring.height * pixels
                         scale: 1 / pixels
@@ -74,6 +76,8 @@ Item {
                         onOnlineChanged: requestPaint()
                         onPixelsChanged: requestPaint()
                         onWidthChanged: requestPaint()
+                        onGroupsChanged: requestPaint()
+                        onNeutralChanged: requestPaint()
                         onPaint: {
                             var ctx = getContext("2d")
                             ctx.reset()
@@ -84,7 +88,7 @@ Item {
                             ctx.lineCap = "butt"
                             if (!online || skin.panel.parts === 0) {
                                 // No agents: a full grey ring. Offline: a ring of dashes.
-                                ctx.strokeStyle = theme.lineColor
+                                ctx.strokeStyle = neutral
                                 ctx.lineWidth = 9 * unit
                                 var dashes = online ? 1 : 24
                                 for (var k = 0; k < dashes; k++) {
@@ -168,7 +172,7 @@ Item {
                                 width: 9; height: 9; radius: 4.5
                                 color: item.empty ? "transparent" : item.group.color
                                 border.width: item.empty ? 1 : 0
-                                border.color: "#5f6368"
+                                border.color: theme.ghostColor
                             }
                             Text {
                                 x: 25

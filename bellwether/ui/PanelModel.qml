@@ -9,8 +9,9 @@ QtObject {
     // ----- data -----
 
     readonly property bool online: backend.online
-    // "#rrggbb" for "blocked", "done", "working", "idle", "offline" and "none".
-    readonly property var stateColors: stateColors_
+    // "#rrggbb" for "blocked", "done", "working", "idle", "offline" and "none". The user can change the first four
+    // (the custom look): the groups, topColor and openColor follow.
+    readonly property var stateColors: backend.stateColors
     // The four states in the display order (blocked, done, working, idle), always four. Each is
     // {state, label, count, attention, alert, color, share, start, agents}:
     //   attention  the state needs the person (blocked, done), with or without agents
@@ -102,9 +103,10 @@ QtObject {
 
     // The key of the agent that a jump goes to now. "" when no jump runs. Its row shows "opening…".
     readonly property string opening: backend.opening
-    // The colours of a failure message and of "opening…", the same in every layout (see AgentRow.note).
-    readonly property color failedColor: "#f28b82"
-    readonly property color openingColor: "#8ab4f8"
+    // The colours of a failure message and of "opening…", the same in every layout (see AgentRow.note): the
+    // colour of the status blocked (a failed jump needs the person), and the accent of the custom look.
+    readonly property color failedColor: stateColors["blocked"]
+    readonly property color openingColor: backend.colorOverrides.accent || "#8ab4f8"
     // The agent of the last failed jump and the message for it. Empty again after 3 seconds.
     property string failedKey: ""
     property string failedMessage: ""

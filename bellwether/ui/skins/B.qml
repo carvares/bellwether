@@ -92,7 +92,7 @@ Item {
                             anchors.bottom: parent.bottom
                             anchors.bottomMargin: 3
                             text: skin.panel.online ? tile.group.count : "–"
-                            color: tile.solid ? "#202124" : tile.empty ? "#5f6368" : tile.group.color
+                            color: tile.solid ? "#202124" : tile.empty ? theme.ghostColor : tile.group.color
                             font { family: skin.sans; pixelSize: theme.numeralSize; weight: Font.DemiBold; features: { "tnum": 1 } }
                         }
                         // The mark of the open tile: a chevron that points to the list.
@@ -131,7 +131,7 @@ Item {
                 width: parent.width
                 height: skin.headHeight + agentList.height + 6
                 radius: 10
-                color: "#101114"
+                color: theme.insetColor
                 border.width: 1
                 border.color: skin.panel.faded(skin.panel.openColor, 0.45)
 
@@ -182,7 +182,7 @@ Item {
                         Rectangle {
                             visible: agentRow.index > 0
                             x: 12; width: parent.width - 24; height: 1
-                            color: "#26282c"
+                            color: theme.separatorColor
                         }
                         // The icon that the Herdr app shows for the program of the agent.
                         Image {

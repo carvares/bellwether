@@ -214,3 +214,264 @@ def test_the_texts_of_the_options_window_follow_the_font_scale_and_keep_their_ro
     backend.resetLook()
     settle(app)
     assert pixel_sizes(window) == design and (window.width(), window.height()) == (1076, 344)
+
+
+# ----- the font family -----
+
+def families(backend):
+    """A proportional and a monospace family of this system that the user can choose, both not the font of a theme."""
+    from PySide6.QtGui import QFontDatabase
+    listed = backend.fontFamilies
+    themes = {"Adwaita Sans", "Inter", "Noto Sans", "DejaVu Sans", "Hack", "JetBrains Mono", "DejaVu Sans Mono"}
+    serif = next((f for f in ("DejaVu Serif", "Liberation Serif", "Noto Serif") if f in listed), None) or next(
+        f for f in listed if f not in themes and not QFontDatabase.isFixedPitch(f))
+    mono = next((f for f in ("Liberation Mono", "Adwaita Mono", "Noto Sans Mono") if f in listed), None) or next(
+        f for f in listed if f not in themes and QFontDatabase.isFixedPitch(f))
+    return serif, mono
+
+
+@pytest.mark.parametrize("letter", LETTERS)
+def test_the_font_family_of_the_user_reaches_every_text_and_every_text_keeps_its_room(app, window, letter):
+    root, backend, messages = window
+    backend.setLayout(letter)
+    use_screens(root, OFFSET, "B", 0, 0)
+    backend.apply(TEAM)
+    root.setProperty("openState", "working")
+    settle(app)
+    design = {i.property("font").family() for i in texts(root)}
+    assert len(design) == 1  # each layout has one font
+    for family in families(backend):
+        assert family not in design and backend.setFontFamily(family) is True
+        for scale in (1.0, 1.4):  # also the widest case: a monospace font and the largest text
+            backend.setFontScale(scale)
+            for scene in scenes(app, root, backend):
+                assert {i.property("font").family() for i in texts(root)} == {family}, scene
+                assert text_findings(root) == [], (family, scale, scene)
+    backend.setLayout("C" if letter != "C" else "A")  # a layout switch keeps the family
+    settle(app)
+    assert {i.property("font").family() for i in texts(root)} == {families(backend)[1]}
+    backend.setLayout(letter)
+    backend.resetLook()
+    backend.apply(TEAM)
+    root.setProperty("openState", "working")
+    settle(app)
+    assert {i.property("font").family() for i in texts(root)} == design
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+# ----- the colours -----
+
+CUSTOM = {"blocked": "#ff2d95", "done": "#ff9f1c", "working": "#00c2ff", "idle": "#b8f000",
+          "background": "#f5f0e6", "text": "#3b1f6b", "frame": "#0f8a5f", "accent": "#d00000"}
+# Colours of a skin that are not one of the roles: the dark text on a solid plate of a status colour, the white
+# veil under the pointer on such a plate, and the colour of "no agents" and "offline" (the user cannot change it).
+FIXED = {"#202124", "#ffffff", "#5f6368"}
+
+
+def has(item, name):
+    return item.metaObject().indexOfProperty(name) >= 0
+
+
+def value(item, expression):
+    """A value of an item that Python cannot read as a property (the border of a Rectangle, a gradient)."""
+    from PySide6.QtQml import QQmlExpression, qmlContext
+    result = QQmlExpression(qmlContext(item), item, expression).evaluate()
+    return result[0] if isinstance(result, tuple) else result
+
+
+def colours(root):
+    """Every colour that a visible item of the panel has: (the kind of item, what it is, "#rrggbb", alpha)."""
+    out = []
+    for item in walk(root.contentItem()):
+        if not item.isVisible():
+            continue
+        kind = item.metaObject().className().split("_")[0]
+        found = [("color", item.property("color"))]
+        # A Rectangle with no border has the border values width 1 and black, and draws no line.
+        if has(item, "border") and value(item, "border.width") > 0 and value(item, "border.color").name() != "#000000":
+            found.append(("border", value(item, "border.color")))
+        if has(item, "gradient"):
+            found += [("stop", value(item, f"gradient.stops[{n}].color"))
+                      for n in range(int(value(item, "gradient ? gradient.stops.length : 0")))]
+        if has(item, "tone"):  # the corner brackets of Layout C
+            found.append(("tone", item.property("tone")))
+        out += [(kind, what, colour.name(), colour.alpha()) for what, colour in found
+                if colour is not None and hasattr(colour, "alpha") and colour.isValid() and colour.alpha() > 0]
+    return out
+
+
+def pixels(image, colour):
+    """The number of pixels of the image that have exactly this colour."""
+    from PySide6.QtGui import QColor
+    wanted = QColor(colour).rgb()
+    return sum(1 for y in range(image.height()) for x in range(image.width()) if image.pixel(x, y) == wanted)
+
+
+def custom_look(backend, colors=CUSTOM):
+    for role, colour in colors.items():
+        assert backend.setColor(role, colour) is True
+
+
+@pytest.mark.parametrize("letter", LETTERS)
+def test_with_eight_custom_colours_no_colour_of_the_design_is_left_in_any_state(app, window, letter):
+    root, backend, messages = window
+    backend.setLayout(letter)
+    use_screens(root, OFFSET, "B", 0, 0)
+    custom_look(backend)
+    from PySide6.QtGui import QColor
+    inset = QColor(CUSTOM["background"]).darker(120).name()  # a card or a footer inside the panel
+    allowed = set(CUSTOM.values()) | FIXED | {inset}
+    roles_seen = set()
+    for scene in scenes(app, root, backend):
+        found = colours(root)
+        left = sorted({(kind, what, colour) for kind, what, colour, _ in found if colour not in allowed})
+        assert left == [], (letter, scene)
+        roles_seen |= {role for role, colour in CUSTOM.items() if any(c == colour for _, _, c, _ in found)}
+        if scene == "a jump runs":  # "opening…" has the accent
+            assert any(kind == "QQuickText" and c == CUSTOM["accent"] for kind, _, c, _ in found)
+        if scene == "a jump failed":  # the message has the colour of blocked
+            (message,) = [i for i in texts(root) if i.property("text").endswith(MESSAGE)]
+            assert message.property("color").name() == CUSTOM["blocked"]
+    assert roles_seen == set(CUSTOM)  # each of the eight colours is on the screen in some state
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+@pytest.mark.parametrize("letter", LETTERS)
+def test_each_status_colour_is_drawn_and_the_colour_of_the_design_is_gone(app, window, letter):
+    root, backend, messages = window
+    backend.setLayout(letter)
+    backend.apply(many(blocked=1, done=2, working=3, idle=4))
+    settle(app)
+    from tests.test_skins import STATE_COLORS
+    before = root.grabWindow()
+    assert all(pixels(before, STATE_COLORS[state]) > 0 for state in CUSTOM if state in STATE_COLORS)
+    for state in ("blocked", "done", "working", "idle"):
+        assert backend.setColor(state, CUSTOM[state]) is True
+        settle(app)
+        image = root.grabWindow()
+        assert pixels(image, CUSTOM[state]) >= pixels(before, STATE_COLORS[state]) > 0, state
+        assert pixels(image, STATE_COLORS[state]) == 0, state
+        group = next(g for g in js(root, "root.panel.groups").toVariant() if g["state"] == state)
+        assert group["color"] == CUSTOM[state]
+    assert js(root, "'' + root.panel.topColor") == CUSTOM["blocked"]  # the border or the brackets: the top status
+    backend.resetColor("blocked")
+    settle(app)
+    assert pixels(root.grabWindow(), STATE_COLORS["blocked"]) == pixels(before, STATE_COLORS["blocked"])
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+@pytest.mark.parametrize("letter", LETTERS)
+def test_the_background_keeps_the_opacity_of_the_design_or_takes_its_own(app, window, letter):
+    root, backend, messages = window
+    backend.setLayout(letter)
+    backend.apply(TEAM)
+    settle(app)
+    plate = max((i for i in walk(root.contentItem()) if i.isVisible() and has(i, "border")
+                 and i.width() == root.width()), key=lambda i: i.height())  # the frame of the panel
+    design = plate.property("color")
+    assert design.name(design.NameFormat.HexArgb) == backend.defaultColors["background"] and 200 < design.alpha() < 255
+    backend.setColor("background", "#102030")
+    settle(app)
+    assert plate.property("color").name() == "#102030" and plate.property("color").alpha() == design.alpha()
+    backend.setColor("background", "#80102030")
+    settle(app)
+    assert plate.property("color").name() == "#102030" and plate.property("color").alpha() == 0x80
+    backend.setColor("background", "#ff102030")
+    settle(app)
+    image = root.grabWindow()
+    assert pixels(image, "#102030") > image.width() * image.height() * 0.3  # the panel has this colour
+    backend.resetColor("background")
+    settle(app)
+    assert plate.property("color") == design
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+@pytest.mark.parametrize("letter", LETTERS)
+def test_the_frame_colour_shows_with_no_agents_and_the_text_colour_gives_the_dim_and_the_faint_text(app, window, letter):
+    root, backend, messages = window
+    backend.setLayout(letter)
+    backend.apply([])
+    backend.setColor("frame", CUSTOM["frame"])
+    settle(app)
+    image = root.grabWindow()
+    assert image.pixelColor(root.width() // 2, 0).name() == CUSTOM["frame"]  # the neutral frame, at its top edge
+    if letter == "C":
+        assert image.pixelColor(0, 0).name() == CUSTOM["frame"]  # and the corner brackets with no agents
+    backend.apply(TEAM)
+    root.setProperty("openState", "working")
+    settle(app)
+    before = [i.property("color") for i in texts(root)]
+    greys = {c.name() for c in before if c.red() == c.green() or abs(c.red() - c.blue()) < 24}
+    assert len(greys) >= 3  # the text, the dim text and the faint text of the design
+    backend.setColor("text", CUSTOM["text"])
+    settle(app)
+    alphas = set()
+    assert len(texts(root)) == len(before)
+    for item, old in zip(texts(root), before):
+        colour = item.property("color")
+        if old.name() in greys and old.name() != "#202124":
+            assert colour.name() == CUSTOM["text"], item.property("text")
+            alphas.add(colour.alpha())
+        else:
+            assert colour == old, item.property("text")  # a status colour, or the dark text on a solid plate
+    assert 255 in alphas and round(0.62 * 255) in alphas and min(alphas) >= round(0.28 * 255) and len(alphas) >= 3
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+@pytest.mark.parametrize("letter", LETTERS)
+def test_reset_gives_the_pixels_of_the_design_again(app, window, letter):
+    """Set everything, reset everything, in one run: the panel is the same picture as before, in every state."""
+    root, backend, messages = window
+    backend.setLayout(letter)
+    use_screens(root, OFFSET, "B", 0, 0)
+    serif, mono = families(backend)
+
+    def pictures():
+        out = {}
+        for scene in scenes(app, root, backend):
+            root.setProperty("hoverRow", None)
+            settle(app)
+            out[scene] = root.grabWindow()
+        return out
+
+    design = pictures()
+    custom_look(backend)
+    backend.setScale(1.5), backend.setFontScale(1.4), backend.setFontFamily(serif)
+    custom = pictures()
+    assert all(custom[scene] != design[scene] for scene in design)
+    backend.resetLook()
+    again = pictures()
+    assert [scene for scene in design if again[scene] != design[scene]] == []
+    assert (backend.scale, backend.fontScale, backend.fontFamily, backend.colorOverrides) == (1.0, 1.0, "", {})
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+# ----- the options window has the custom look too -----
+
+def test_the_options_window_takes_the_family_and_the_colours_and_the_selected_card_has_the_accent(app, real_options):
+    window, backend, messages = real_options
+    from tests.test_options import cards, named
+    frame = named(window, "isFrame")
+    design = (frame.property("color"), value(frame, "border.color"))
+    serif, mono = families(backend)
+    for letter in LETTERS:
+        backend.setLayout(letter)
+        custom_look(backend)
+        backend.setFontFamily(serif)
+        settle(app)
+        selected = next(c for c in cards(window) if c.property("selected"))
+        other = next(c for c in cards(window) if not c.property("selected"))
+        assert frame.property("color").name() == CUSTOM["background"]
+        assert value(frame, "border.color").name() == CUSTOM["frame"]
+        assert value(selected, "border.color").name() == CUSTOM["accent"]
+        plate = selected.property("color")
+        assert plate.name() == CUSTOM["accent"] and 20 <= plate.alpha() <= 40  # the opacity of the design
+        assert value(other, "border.color").name() == CUSTOM["frame"]  # a line
+        assert {i.property("font").family() for i in texts(window)} == {serif}
+        assert {i.property("color").name() for i in texts(window)} == {CUSTOM["text"], "#0b0e11"}  # the tag: dark
+        assert text_findings(window) == []
+        backend.resetLook()
+        settle(app)
+    backend.setLayout("C")
+    settle(app)
+    assert (frame.property("color"), value(frame, "border.color")) == design

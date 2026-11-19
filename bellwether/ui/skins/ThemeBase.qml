@@ -1,9 +1,24 @@
 // The base of every theme file (skins/<letter>Theme.qml). A theme file states the values of its design; the
 // helpers here apply the custom look of the user to them. This is the one place of that rule, and the one file
 // of the themes and the skins that reads `backend`. The spec has the list ("Change on 2026-11-19: custom look").
+//
+// A theme file gives each value of its design to the helper of its kind:
+//   readonly property int titleSize: size(15)
+//   readonly property string fontFamily: family(Fonts.first([...], fallback))
+//   readonly property color panelColor: background("#f21f2023")
+//   readonly property color dimColor: dim("#9aa0a6")
+// With no custom look every helper returns the value of the design, not changed.
 import QtQuick
 
 QtObject {
+    // The colours that the user changed: role -> "#rrggbb" (the background also "#aarrggbb"). Empty: none.
+    readonly property var custom: backend.colorOverrides
+    // What a custom text colour keeps of itself in a dim and in a faint text (the rest is the panel behind it).
+    readonly property real dimAlpha: 0.62
+    readonly property real faintAlpha: 0.45
+
+    // ----- sizes -----
+
     // The size of a text of the design, at the font scale of the custom look.
     function size(pixels) {
         return Math.round(pixels * backend.fontScale)
@@ -14,5 +29,75 @@ QtObject {
     // with a font scale below 1: the design keeps its proportions, with more air.
     function fit(pixels) {
         return Math.round(pixels * Math.max(1, backend.fontScale))
+    }
+
+    // ----- the font -----
+
+    // The font family of the design, or the family of the user.
+    function family(design) {
+        return backend.fontFamily !== "" ? backend.fontFamily : design
+    }
+
+    // ----- colours -----
+    // Each helper returns `design` while the user did not change the colour of its role.
+
+    // The custom colour of a role with the opacity of the colour of the design: a plate that the design draws
+    // at 14 % stays at 14 %.
+    function role(name, design) {
+        var set = custom[name]
+        if (set === undefined)
+            return design
+        var c = Qt.color(set)
+        return Qt.rgba(c.r, c.g, c.b, Qt.color(design).a)
+    }
+
+    // The custom colour of a role at an opacity of its own, for a grey of the design that has no opacity.
+    function faded(name, design, alpha) {
+        var set = custom[name]
+        if (set === undefined)
+            return design
+        var c = Qt.color(set)
+        return Qt.rgba(c.r, c.g, c.b, alpha)
+    }
+
+    // The panel. "#rrggbb" keeps the opacity of the design, "#aarrggbb" sets it.
+    function background(design) {
+        var set = custom.background
+        return set !== undefined && set.length === 9 ? Qt.color(set) : role("background", design)
+    }
+
+    // A plate inside the panel that is darker than the panel (a card, a footer).
+    function inset(design) {
+        return custom.background === undefined ? design : Qt.darker(background(design), 1.2)
+    }
+
+    // The text. Also a plate of the text colour (the look under the pointer): `design` has its opacity.
+    function text(design) {
+        return role("text", design)
+    }
+
+    // The greys of a design are text of less weight: the dim text, the faint text, and with `tone` every other
+    // grey that is ink on the panel (a guide line, the outline of an empty mark, a separator). With a custom text
+    // colour each is that colour at a fixed opacity, so the user sets one colour.
+    function dim(design) {
+        return faded("text", design, dimAlpha)
+    }
+
+    function faint(design) {
+        return faded("text", design, faintAlpha)
+    }
+
+    function tone(design, alpha) {
+        return faded("text", design, alpha)
+    }
+
+    // The neutral frame and the lines.
+    function frame(design) {
+        return role("frame", design)
+    }
+
+    // The accent, and a plate of the accent (the selected card): `design` has its opacity.
+    function accent(design) {
+        return role("accent", design)
     }
 }

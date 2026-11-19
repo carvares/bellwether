@@ -866,7 +866,6 @@ def test_the_texts_of_each_layout_take_their_size_and_colour_from_its_theme_toke
     engine = QQmlApplicationEngine()
     engine.warnings.connect(lambda errors: messages.extend(e.toString() for e in errors))
     engine.rootContext().setContextProperty("backend", backend)
-    engine.rootContext().setContextProperty("stateColors_", STATE_COLORS)
     engine.addImportPath(str(IMPORT_PATH))
     engine.load(ui / "Main.qml")
     try:

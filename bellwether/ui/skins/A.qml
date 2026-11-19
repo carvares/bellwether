@@ -44,7 +44,7 @@ Item {
                 Rectangle {
                     x: 10; width: 4; height: 18; radius: 2
                     anchors.verticalCenter: parent.verticalCenter
-                    color: "transparent"; border.width: 1; border.color: "#5f6368"
+                    color: "transparent"; border.width: 1; border.color: theme.ghostColor
                 }
                 Text {
                     readonly property bool isOfflineLine: true
@@ -89,7 +89,7 @@ Item {
                             anchors.verticalCenter: parent.verticalCenter
                             color: groupItem.empty ? "transparent" : groupItem.group.color
                             border.width: groupItem.empty ? 1 : 0
-                            border.color: "#5f6368"
+                            border.color: theme.ghostColor
                         }
                         Text {
                             x: 26

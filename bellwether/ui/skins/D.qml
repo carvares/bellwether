@@ -79,7 +79,8 @@ Item {
                         x: 9
                         anchors.verticalCenter: parent.verticalCenter
                         width: 8; height: 8; radius: 4
-                        color: skin.panel.quiet ? "#5f6368" : skin.panel.topColor
+                        // Quiet: the colour of "no agents" (the chip does not show when Herdr is offline).
+                        color: skin.panel.topColor
                     }
                     Text {
                         id: chipText
@@ -105,7 +106,7 @@ Item {
                     visible: skin.panel.parts === 0
                     anchors.fill: parent
                     radius: 4
-                    color: "#2d2f33"
+                    color: theme.trackColor
                 }
                 Repeater {
                     model: 4
@@ -159,14 +160,14 @@ Item {
                             anchors.horizontalCenter: parent.horizontalCenter
                             y: 5
                             text: skin.panel.online ? tab.group.count : "–"
-                            color: tab.empty ? "#5f6368" : tab.group.color
+                            color: tab.empty ? theme.ghostColor : tab.group.color
                             font { family: skin.sans; pixelSize: theme.numeralSize; weight: Font.DemiBold; features: { "tnum": 1 } }
                         }
                         Text {
                             anchors.horizontalCenter: parent.horizontalCenter
                             y: theme.fit(30)
                             text: tab.group.label
-                            color: tab.empty ? theme.faintColor : tab.open ? theme.textColor : "#bdc1c6"
+                            color: tab.empty ? theme.faintColor : tab.open ? theme.textColor : theme.mutedColor
                             font { family: skin.sans; pixelSize: theme.labelSize; weight: Font.Medium }
                         }
                         // An attention status with agents has a small lamp next to its number.
@@ -273,7 +274,7 @@ Item {
                     width: parent.width - 4
                     height: skin.footerHeight
                     radius: 11
-                    color: "#17181b"
+                    color: theme.insetColor
                     Text {
                         readonly property bool isScrollHint: true
                         readonly property int below: agentList.count - agentList.first - agentList.shown

@@ -20,7 +20,7 @@ from .icons import Icons
 from .layouts import UI_PATH
 from .options import Options
 from .paths import NAME, OLD_NAME, move_old_folders, runtime_dir, state_home
-from .tray import STATE_COLORS, Tray
+from .tray import Tray
 
 LOG_PATH = state_home() / NAME / f"{NAME}.log"
 # Holds only a link to the system module org.kde.layershell. The Qt of the wheel does not find it alone.
@@ -104,7 +104,6 @@ def main() -> int:
     backend = Backend(HerdrClient(app_path, core_path), icons=Icons(), events=events)
     engine = QQmlApplicationEngine()
     engine.rootContext().setContextProperty("backend", backend)
-    engine.rootContext().setContextProperty("stateColors_", STATE_COLORS)
     engine.addImportPath(str(IMPORT_PATH))
     if (IMPORT_PATH / "org" / "kde" / "layershell" / "qmldir").is_file():
         engine.load(UI_PATH / "Main.qml")

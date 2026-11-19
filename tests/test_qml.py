@@ -74,7 +74,6 @@ def window(app, fake_client, tmp_path):
     engine = QQmlApplicationEngine()
     engine.warnings.connect(lambda errors: messages.extend(e.toString() for e in errors))
     engine.rootContext().setContextProperty("backend", backend)
-    engine.rootContext().setContextProperty("stateColors_", STATE_COLORS)
     engine.addImportPath(str(IMPORT_PATH))
     engine.load(UI_PATH / "Main.qml")
     try:
