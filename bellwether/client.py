@@ -17,6 +17,7 @@ import re
 import shutil
 import subprocess
 import time
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -32,12 +33,16 @@ JUMP_SECONDS = 8.0
 START_PAUSE = 0.25
 # After that: ask the new window for the agent this many times, with the same pause (2 seconds).
 SHOW_TRIES = 8
-# The deadlines of the screen calls. herdr-core can hold keys and a text for a short time before it types them.
+# The deadlines of the screen calls. herdr-core holds keys and a text before it types them (measured with
+# herdr-core 0.1.21): `keys` until 3 s after the last key that a person typed in that terminal (with no limit while
+# the person goes on typing); `send` while the person has a draft there, up to 60 s after their last key. A held
+# `keys` is NOT cancelled when its command is killed: the key still arrives. A held `send` is cancelled.
 READ_TIMEOUT = TIMEOUT
-PRESS_TIMEOUT = 5.0
-SEND_TIMEOUT = 8.0
+PRESS_TIMEOUT = 10.0
+SEND_TIMEOUT = 65.0
 # The form of a terminal address: "t7", "t1c", or "machine/t7". herdr-core takes also the name of a terminal in
-# the place of an address: this form keeps a name out.
+# the place of an address. A name can have this form too ("t5"): each screen call first asks herdr-core which
+# terminal the text names (`get`), and runs only when that is the terminal with this address.
 _ADDRESS = re.compile(r"(?:[a-z0-9][a-z0-9._-]{0,31}/)?t[0-9a-z]{1,8}")
 # The keys that `press` can press: the digit of an option. The readers give no other key.
 KEYS = frozenset("123456789")
@@ -46,6 +51,9 @@ TEXT_LIMIT = 2000  # characters of one free-text answer
 _KIND = re.compile(r"[a-z_]{1,32}")  # an error kind of herdr-core, for example "not_found"
 # `herdr-core send` puts a tag with the address of the caller around the text when these are set.
 _CALLER_VARIABLES = ("HC_TERMINAL_ID", "HC_SCOPE", "HC_TERMINAL_SOCKET")
+# Format characters that a text may have: the joiners and tags of emoji sequences are fine. These are not: they
+# change the order in which the text shows (bidirectional controls), so the text can show a different thing.
+_BIDI = frozenset("\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069")
 
 
 @dataclass(frozen=True)
@@ -65,10 +73,23 @@ def valid_address(address: object) -> bool:
     return isinstance(address, str) and _ADDRESS.fullmatch(address) is not None
 
 
+def text_problem(text: object) -> str:
+    """Why a free-text answer cannot be sent, as a reason code; "" when it can. A text is one line that a person can
+    see, with text in it, not longer than TEXT_LIMIT characters: no control characters (no line break, no escape
+    sequence), and no bidirectional controls. Emoji sequences (joiners, tags) are fine."""
+    if not isinstance(text, str) or not text.strip():
+        return "text_empty"
+    if len(text) > TEXT_LIMIT:
+        return "text_long"
+    if any(char in "\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029" for char in text):
+        return "text_lines"
+    if not all(char.isprintable() or (unicodedata.category(char) == "Cf" and char not in _BIDI) for char in text):
+        return "text_control"
+    return ""
+
+
 def valid_text(text: object) -> bool:
-    """A free-text answer: one line that a person can see, with text in it, not longer than TEXT_LIMIT."""
-    return (isinstance(text, str) and 0 < len(text) <= TEXT_LIMIT and bool(text.strip())
-            and all(char.isprintable() for char in text))
+    return text_problem(text) == ""
 
 
 class HerdrOffline(Exception):
@@ -164,7 +185,8 @@ class HerdrClient:
 
     def send_text(self, terminal: str, text: str) -> Failure | None:
         """Paste the text in the terminal and press Enter, also when its program is blocked (`--force`: the text
-        answers the text entry of its dialog). None: herdr-core took it."""
+        answers the text entry of its dialog). `--` ends the options: a text that starts with "-" is text. None:
+        herdr-core typed it."""
         if not valid_text(text):
             return self._failed("send", terminal, "bad_text")
         done = self._screen_call("send", terminal, ["send", "--force", "--", terminal, text], SEND_TIMEOUT,
@@ -189,17 +211,32 @@ class HerdrClient:
             return self._failed(action, terminal, "unknown_terminal")
         if self._core is None:
             return self._failed(action, terminal, "no_core")
+        # A terminal can have a NAME that has the form of an address. Ask which terminal the text names.
+        found = self._command([self._core, "get", terminal, "--json"], READ_TIMEOUT)
+        if isinstance(found, Failure):
+            return self._failed(action, terminal, found.code)
+        try:
+            address = json.loads(found.stdout).get("address")
+        except (ValueError, AttributeError):
+            address = None
+        if address != terminal:
+            return self._failed(action, terminal, "not_this_terminal")
         argv = [self._core, *args]
         if no_caller:
             argv = [self._env, *(part for name in _CALLER_VARIABLES for part in ("-u", name)), *argv]
+        done = self._command(argv, timeout)
+        return self._failed(action, terminal, done.code) if isinstance(done, Failure) else done
+
+    def _command(self, argv: list[str], timeout: float) -> subprocess.CompletedProcess | Failure:
+        """Run one herdr-core command. Its output is not logged and not kept when it fails."""
         try:
             done = self._run(argv, timeout=timeout)
         except subprocess.TimeoutExpired:
-            return self._failed(action, terminal, "timeout")
+            return Failure("timeout")
         except (OSError, subprocess.SubprocessError):
-            return self._failed(action, terminal, "no_run")
+            return Failure("no_run")
         if done.returncode != 0:
-            return self._failed(action, terminal, self._error_kind(done.stderr) or f"exit_{done.returncode}")
+            return Failure(self._error_kind(done.stderr) or f"exit_{done.returncode}")
         return done
 
     @staticmethod

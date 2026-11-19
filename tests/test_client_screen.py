@@ -8,7 +8,8 @@ from types import SimpleNamespace
 import pytest
 
 from bellwether.client import (
-    PRESS_TIMEOUT, READ_TIMEOUT, SEND_TIMEOUT, TEXT_LIMIT, Failure, HerdrClient, Screen, valid_address, valid_text)
+    PRESS_TIMEOUT, READ_TIMEOUT, SEND_TIMEOUT, TEXT_LIMIT, Failure, HerdrClient, Screen, text_problem, valid_address,
+    valid_text)
 
 CORE = "/fake/herdr-core"
 MARKER = "MARKER-private-screen-text"
@@ -25,23 +26,33 @@ def done(stdout=b"", returncode=0, stderr=b""):
 
 
 class Runner:
-    """Answers `ls` with LIST and every other command with `answer` (an exception is raised)."""
+    """Answers `ls` with LIST, `get <t> --json` with the terminal whose address is <t> (or `names[<t>]`: the address
+    of the terminal that herdr-core finds for that text), and every other command with `answer` (an exception is
+    raised). `calls` has the commands other than `ls` and `get`; `gets` has the `get` commands."""
 
-    def __init__(self, answer=None):
+    def __init__(self, answer=None, names=None):
         self.answer = answer
+        self.names = names or {}
         self.calls: list[tuple[list[str], float]] = []
+        self.gets: list[tuple[list[str], float]] = []
 
     def __call__(self, argv, timeout=2.0):
         if argv[1:] == ["ls", "--json"]:
             return done(LIST)
+        if argv[1] == "get":
+            self.gets.append((argv, timeout))
+            found = self.names.get(argv[2], argv[2])
+            if isinstance(found, Exception):
+                raise found
+            return found if not isinstance(found, str) else done({"address": found, "state": "live"})
         self.calls.append((argv, timeout))
         if isinstance(self.answer, Exception):
             raise self.answer
         return self.answer
 
 
-def client_with(answer=None, core=CORE, listed=True) -> tuple[HerdrClient, Runner]:
-    runner = Runner(answer)
+def client_with(answer=None, core=CORE, listed=True, names=None) -> tuple[HerdrClient, Runner]:
+    runner = Runner(answer, names)
     client = HerdrClient(None, core, run=runner)
     if listed:
         client.list_agents()
@@ -102,8 +113,44 @@ def test_send_text_pastes_the_text_as_one_argument_with_no_caller_tag():
          CORE, "send", "--force", "--", "t1", "--force; rm -r x && $(echo \"é\") 'q'"], SEND_TIMEOUT)]
 
 
-def test_the_deadlines_are_short():
-    assert READ_TIMEOUT <= 2.0 and PRESS_TIMEOUT <= 5.0 and SEND_TIMEOUT <= 8.0
+def test_the_deadlines_are_above_the_holds_of_herdr_core():
+    """herdr-core holds a key until 3 s after the last key that a person typed in the terminal, and a text while the
+    person has a draft there, up to 60 s (measured with herdr-core 0.1.21). A deadline below that would end the
+    command while the key or the text can still arrive."""
+    assert READ_TIMEOUT <= 2.0 and 3.0 + 5.0 <= PRESS_TIMEOUT <= 15.0 and 60.0 + 3.0 <= SEND_TIMEOUT <= 70.0
+
+
+# ----- a name that has the form of an address -----
+
+@pytest.mark.parametrize("call", [
+    lambda client: client.read_screen("t1"), lambda client: client.press("t1", ["1"]),
+    lambda client: client.send_text("t1", "text"),
+], ids=["read", "press", "send"])
+def test_each_call_first_asks_herdr_core_which_terminal_the_address_names(call):
+    client, runner = client_with(done({"complete": True, "text": "x"}))
+    call(client)
+    assert runner.gets == [([CORE, "get", "t1", "--json"], READ_TIMEOUT)] and len(runner.calls) == 1
+
+
+@pytest.mark.parametrize("call", [
+    lambda client: client.read_screen("t1"), lambda client: client.press("t1", ["1"]),
+    lambda client: client.send_text("t1", "text"),
+], ids=["read", "press", "send"])
+def test_a_terminal_whose_name_is_the_address_of_an_other_one_gets_no_command(call, records):
+    """A terminal can be NAMED "t1". When herdr-core takes the text "t1" for that terminal (its address is "t9"),
+    the call does not run: it would read or press in a terminal that is not the agent of the row."""
+    answers = [("t9", "not_this_terminal"), (done({"address": None}), "not_this_terminal"),
+               (done({"address": 7}), "not_this_terminal"), (done(b"not json"), "not_this_terminal"),
+               (done(b"[]"), "not_this_terminal"), (done({"state": "live"}), "not_this_terminal"),
+               (done(MARKER.encode(), 3, json.dumps({"error": {"kind": "not_found", "message": MARKER}}).encode()),
+                "herdr_not_found"),
+               (subprocess.TimeoutExpired(["x"], 2.0, output=MARKER.encode()), "timeout"),
+               (FileNotFoundError(MARKER), "no_run")]
+    for answer, code in answers:
+        client, runner = client_with(done({"complete": True, "text": MARKER}), names={"t1": answer})
+        assert call(client) == Failure(code), answer
+        assert runner.calls == [] and len(runner.gets) == 1
+    assert no_marker(records)
 
 
 def test_the_screen_object_does_not_show_its_text():
@@ -164,6 +211,8 @@ def test_the_addresses_of_the_app_list_are_known():
 
     def run(argv, timeout=2.0):
         calls.append(argv)
+        if argv[1] == "get":
+            return done({"address": argv[2]})
         return done(app_list if argv[0] == "/fake/herdr-app" else {"complete": True, "text": "x"})
 
     client = HerdrClient("/fake/herdr-app", CORE, run=run)
@@ -183,19 +232,29 @@ def test_only_the_digits_of_the_options_are_keys(keys, records):
     assert runner.calls == [] and no_marker(records)
 
 
-@pytest.mark.parametrize("text", ["a", "yes, do it", "ação é ñ 日本語 ?", "--force", "x" * TEXT_LIMIT, "  padded  "])
-def test_a_text_of_one_line_is_valid(text):
-    assert valid_text(text)
-
-
 @pytest.mark.parametrize("text", [
-    "", "   ", "two\nlines", "a\rb", "tab\there", "bell\x07", "esc\x1b[2J", "x" * (TEXT_LIMIT + 1), "nul\x00", "\x7f",
-    "c1\x9b", "sep line", None, 5, b"bytes"])
-def test_an_empty_long_or_control_text_is_not_valid(text, records):
-    assert not valid_text(text)
+    "a", "yes, do it", "ação é ñ 日本語 ?", "--force", "-x", "x" * TEXT_LIMIT, "  padded  ",
+    "a coder \U0001F469\u200D\U0001F4BB here",  # an emoji sequence with a zero-width joiner
+    "\U0001F3F4\U000E0067\U000E0062\U000E0073\U000E0063\U000E0074\U000E007F",  # a flag with tag characters
+    "\u2764\ufe0f ok", "\U0001F44D\U0001F3FD"])
+def test_a_text_of_one_line_is_valid(text):
+    assert valid_text(text) and text_problem(text) == ""
+
+
+@pytest.mark.parametrize("text,problem", [
+    ("", "text_empty"), ("   ", "text_empty"), (None, "text_empty"), (5, "text_empty"), (b"bytes", "text_empty"),
+    ("x" * (TEXT_LIMIT + 1), "text_long"),
+    ("two\nlines", "text_lines"), ("a\rb", "text_lines"), ("sep\u2028line", "text_lines"), ("p\u2029q", "text_lines"),
+    ("a\x85b", "text_lines"), ("a\vb", "text_lines"),
+    ("tab\there", "text_control"), ("bell\x07", "text_control"), ("esc\x1b[2J", "text_control"),
+    ("paste end\x1b[201~", "text_control"), ("nul\x00", "text_control"), ("\x7f", "text_control"),
+    ("c1\x9b", "text_control"), ("rm \u202eexe.txt", "text_control"), ("a\u2066b\u2069", "text_control"),
+    ("a\u200fb", "text_control")])
+def test_an_empty_long_or_control_text_is_not_valid(text, problem, records):
+    assert not valid_text(text) and text_problem(text) == problem
     client, runner = client_with(done({}))
     assert client.send_text("t1", text) == Failure("bad_text")
-    assert runner.calls == []
+    assert runner.calls == [] and runner.gets == []
 
 
 # ----- errors are values, and no text of the screen is in a log -----
