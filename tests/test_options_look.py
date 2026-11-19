@@ -1094,17 +1094,20 @@ def test_a_change_of_the_layout_keeps_the_editor_open_with_the_colour_of_the_new
     assert window.property("theme").metaObject().className().startswith("ETheme") and text_findings(window) == []
 
 
-CONTROL_FILES = sorted((layouts.UI_PATH / "controls").glob("*.qml")) + [layouts.UI_PATH / "Options.qml"]
+# The components of the two windows, the options window, the answer window, and the "Answer" control of an agent row
+# (it is drawn in the panel, with the theme of a skin as `tokens`).
+CONTROL_FILES = sorted((layouts.UI_PATH / "controls").glob("*.qml")) + [
+    layouts.UI_PATH / "Options.qml", layouts.UI_PATH / "Answer.qml", layouts.UI_PATH / "AnswerControl.qml"]
 # What a text size of a control may be made of, after the rule of the skins (tests/test_look_qml.py): a theme token
 # (`theme.bodySize`), or a size of the design through the font scale (`theme.size(10)`). Two forms on top of it:
 # a token one pixel larger (`theme.smallSize + 1`: it keeps the font scale of the token), and the smaller of two
 # such sizes (`Math.min(a, b)`), or one of two by a flag of the control (`button.small ? a : b`).
-SIZE = r"(?:\w+\.)?theme\.(?:\w+Size(?:\s*\+\s*1)?|size\(\d+\))"
+SIZE = r"(?:\w+\.)?(?:theme|tokens)\.(?:\w+Size(?:\s*\+\s*1)?|size\(\d+\))"
 SIZE_FORMS = [rf"{SIZE}", rf"Math\.min\({SIZE},\s*{SIZE}\)", rf"\w+\.\w+\s*\?\s*{SIZE}\s*:\s*{SIZE}"]
 
 
 def test_no_control_file_has_a_text_size_or_a_look_of_qt_quick_controls():
-    assert len(CONTROL_FILES) == 10
+    assert len(CONTROL_FILES) == 15
     for file in CONTROL_FILES:
         text = file.read_text()
         assert "QtQuick.Controls" not in text, file.name

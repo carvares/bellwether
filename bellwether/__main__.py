@@ -13,6 +13,7 @@ from PySide6.QtCore import QObject
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
+from .answer import Answer
 from .backend import Backend
 from .client import HerdrClient, find_executables
 from .events import EventSource
@@ -116,6 +117,7 @@ def main() -> int:
     follow_refresh_rate(engine.rootObjects()[0])
     logging.getLogger("bellwether").info("screen refresh rate: %.0f Hz", engine.rootObjects()[0].property("refreshRate"))
 
+    answer = Answer(engine, backend)  # the answer window, at the "Answer" control of a blocked agent row
     tray = None
     if QSystemTrayIcon.isSystemTrayAvailable():
         tray = Tray(backend, engine.rootObjects()[0], app, Options(engine).open)
@@ -129,6 +131,7 @@ def main() -> int:
     # The tray first: its options entry holds the engine. Then the QML engine (and its windows), before the
     # backend: the bindings of the engine read the backend until they are gone.
     del tray
+    del answer
     del engine
     del backend
     return code
