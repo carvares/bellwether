@@ -134,9 +134,11 @@ QtObject {
 
     // `wanted` when a person can tell it from `plate` (a contrast of 3 or more), else the ink for that plate.
     // For a control that must stay usable whatever colours the user chose (the options window: its close control
-    // and "Reset to defaults").
+    // and "Reset to defaults"). A `wanted` with an opacity is judged as it is drawn: mixed with the plate.
     function readable(wanted, plate) {
-        return contrast(wanted, plate) >= 3 ? Qt.color(wanted) : inkOn(plate)
+        var w = Qt.color(wanted), p = Qt.color(plate)
+        var drawn = Qt.rgba(w.r * w.a + p.r * (1 - w.a), w.g * w.a + p.g * (1 - w.a), w.b * w.a + p.b * (1 - w.a), 1)
+        return contrast(drawn, p) >= 3 ? w : inkOn(p)
     }
 
     // A colour without its opacity: a plate that hides what is behind it.

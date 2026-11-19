@@ -206,6 +206,7 @@ def test_the_background_colour_in_effect_is_the_colour_that_is_drawn_with_its_op
 
 def test_the_steps_of_the_two_sliders_come_from_the_backend(backend):
     assert (backend.scaleStep, backend.fontScaleStep) == (0.05, 0.05)
+    assert (backend.opacityMin, backend.opacityMax, backend.opacityStep) == (0.1, 1.0, 0.05)  # the background's
     assert backend.lookIsCustom is False
     told = []
     backend.lookIsCustomChanged.connect(lambda: told.append(backend.lookIsCustom))

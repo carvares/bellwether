@@ -14,8 +14,9 @@ from . import layouts
 from .client import HerdrError, HerdrOffline
 from .icons import TEXT_COLOR
 from .settings import (
-    COLOR_ROLES, DEFAULT_LOOK, DEFAULT_PATH, FONT_SCALE_LIMITS, FONT_SCALE_STEP, SCALE_LIMITS, SCALE_STEP, clamped, load_layout, load_look,
-    load_position, save_layout, save_look, save_position, save_screen, valid_color)
+    COLOR_ROLES, DEFAULT_LOOK, DEFAULT_PATH, FONT_SCALE_LIMITS, FONT_SCALE_STEP, OPACITY_LIMITS, OPACITY_STEP,
+    SCALE_LIMITS, SCALE_STEP, clamped, load_layout, load_look, load_position, save_layout, save_look, save_position,
+    save_screen, valid_color)
 from .state import ATTENTION, STATE_COLORS, STATES, Agent, count_states, top_state
 
 log = logging.getLogger("bellwether")
@@ -268,6 +269,20 @@ class Backend(QObject):
     def fontScaleStep(self) -> float:
         """The step of the text size slider of the options window."""
         return FONT_SCALE_STEP
+
+    @Property(float, constant=True)
+    def opacityMin(self) -> float:
+        """The least opacity of the background that the slider of the options window gives."""
+        return OPACITY_LIMITS[0]
+
+    @Property(float, constant=True)
+    def opacityMax(self) -> float:
+        return OPACITY_LIMITS[1]
+
+    @Property(float, constant=True)
+    def opacityStep(self) -> float:
+        """The step of the opacity slider of the background."""
+        return OPACITY_STEP
 
     @Property(bool, notify=lookIsCustomChanged)
     def lookIsCustom(self) -> bool:

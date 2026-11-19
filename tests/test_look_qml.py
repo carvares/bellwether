@@ -5,6 +5,7 @@ import re
 
 import pytest
 from PySide6.QtCore import QPointF
+from PySide6.QtGui import QColor
 from PySide6.QtQml import QQmlExpression, qmlContext
 
 from bellwether import layouts
@@ -593,6 +594,22 @@ def test_the_ink_on_a_plate_is_the_one_of_two_with_more_contrast(app):
     assert ink_on(theme, "#8ab4f8", "#0b0e11") == "#0b0e11"  # a caller can name the dark ink of its design
     assert ink_on(theme, "#102030", "#0b0e11") == LIGHT_INK
     assert ink_on(theme, "#102030", "#0b0e11", "#ffffff") == "#ffffff"
+
+
+def readable(theme, wanted, plate):
+    """theme.readable(wanted, plate) of a loaded theme object, as #aarrggbb."""
+    value = QQmlExpression(qmlContext(theme), theme, f'readable("{wanted}", "{plate}")').evaluate()[0]
+    return value.name(QColor.NameFormat.HexArgb)
+
+
+def test_a_wanted_colour_with_an_opacity_is_judged_as_it_is_drawn_on_the_plate(app):
+    theme, keep, errors = load_theme(layouts.theme_file(layouts.built_skins()["A"]))
+    assert errors == []
+    dark = "#ff" + DARK_INK[1:]
+    assert readable(theme, "#ffffff", "#808080") == "#ffffffff"  # 3.95:1
+    assert readable(theme, "#9effffff", "#808080") == dark  # white at 62 % on grey is drawn at about 2.5:1
+    assert readable(theme, "#9effffff", "#000000") == "#9effffff"  # on black it can be read: it stays
+    assert readable(theme, "#00ffffff", "#ffffff") == dark  # nothing is drawn: the ink
 
 
 @pytest.mark.parametrize("skin", ["A.qml", "B.qml", "../Options.qml"])

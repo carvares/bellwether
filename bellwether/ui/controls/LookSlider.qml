@@ -30,8 +30,12 @@ Item {
         return Math.round(Math.max(from, Math.min(to, from + steps * step)) * 100) / 100
     }
 
+    // `steps` whole steps up (more than 0) or down. From a value between two steps (a value of the file, or the
+    // opacity of a layout) the first step goes to the next step in that direction: 94 % up gives 95 %.
     function nudge(steps) {
-        moved(snapped(snapped(value) + steps * step))
+        var place = (value - from) / step
+        var start = steps > 0 ? Math.floor(place + 0.000001) : Math.ceil(place - 0.000001)
+        moved(snapped(from + (start + steps) * step))
     }
 
     // The value for the place x of the pointer.

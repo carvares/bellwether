@@ -15,6 +15,10 @@ Rectangle {
     property bool withOpacity: false
     // The opacity is a choice of the user. False: a new colour is "#rrggbb" and keeps the opacity of each layout.
     property bool ownOpacity: false
+    // The limits and the step of the opacity slider (from the backend).
+    property real opacityFrom
+    property real opacityTo
+    property real opacityStep
     readonly property string rgb: "#" + colour.slice(-6)
     readonly property real alpha: colour.length === 9 ? parseInt(colour.substr(1, 2), 16) / 255 : 1
     readonly property string hint: "Use a colour like #8ab4f8"
@@ -254,9 +258,9 @@ Rectangle {
         y: fieldBox.y + (fieldBox.height - height) / 2
         width: 240
         label: editor.name + " opacity"
-        from: 0.1
-        to: 1
-        step: 0.05
+        from: editor.opacityFrom
+        to: editor.opacityTo
+        step: editor.opacityStep
         value: editor.alpha
         onMoved: (value) => editor.chosen("#" + editor.hex2(value) + editor.rgb.slice(1))
     }

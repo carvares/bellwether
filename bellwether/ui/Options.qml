@@ -54,9 +54,14 @@ Window {
     property bool resetArmed: false
     // Two controls must stay usable whatever colours the user chose (also a text in the colour of the panel): the
     // close control and "Reset to defaults". They have a plate of the panel colour without its opacity, and an
-    // ink that a person can tell from that plate (ThemeBase.readable).
+    // ink that a person can tell from that plate (ThemeBase.readable). The close control shows its plate only when
+    // it is needed: an ink of its marks is not the colour of the layout, or the panel lets more of the desktop
+    // through than the layout does.
     readonly property color safePlate: theme.solid(theme.panelColor)
     readonly property color safeInk: theme.readable(theme.textColor, safePlate)
+    readonly property color closeInk: theme.readable(theme.dimColor, safePlate)
+    readonly property bool closePlated: safeInk !== theme.textColor || closeInk !== theme.dimColor
+                                        || theme.panelColor.a < Qt.color(backend.defaultColors.background).a - 0.001
     // The header asks for a move of the window: the compositor moves it (no position code here).
     signal systemMoveRequested()
 
@@ -673,6 +678,9 @@ Window {
                         colour: backend.colors[options.editingRole] || "#000000"
                         withOpacity: options.editingRole === "background"
                         ownOpacity: (backend.colorOverrides.background || "").length === 9
+                        opacityFrom: backend.opacityMin
+                        opacityTo: backend.opacityMax
+                        opacityStep: backend.opacityStep
                         onChosen: (colour) => backend.setColor(options.editingRole, colour)
                         onCloseRequested: options.closeEditor()
                     }
@@ -773,13 +781,14 @@ Window {
             id: closeControl
             readonly property bool isClose: true
             readonly property bool lit: closeArea.containsMouse || activeFocus
+            readonly property bool plated: options.closePlated
             anchors.right: parent.right
             anchors.rightMargin: 10
             y: (options.headerHeight - height) / 2
             width: 28
             height: 28
             radius: options.theme.itemRadius
-            color: options.safePlate
+            color: plated ? options.safePlate : "transparent"
             activeFocusOnTab: true
             Accessible.role: Accessible.Button
             Accessible.name: "Close"
@@ -793,7 +802,8 @@ Window {
                 visible: closeArea.containsMouse
                 anchors.fill: parent
                 radius: parent.radius
-                color: Qt.rgba(options.safeInk.r, options.safeInk.g, options.safeInk.b, 0.10)
+                color: closeControl.plated ? Qt.rgba(options.safeInk.r, options.safeInk.g, options.safeInk.b, 0.10)
+                                           : options.theme.hoverColor
             }
             Repeater {
                 model: [45, -45]
@@ -805,8 +815,7 @@ Window {
                     height: 1.5
                     rotation: modelData
                     antialiasing: true
-                    color: options.theme.readable(closeControl.lit ? options.theme.textColor : options.theme.dimColor,
-                                                  options.safePlate)
+                    color: closeControl.lit ? options.safeInk : options.closeInk
                 }
             }
             MouseArea {

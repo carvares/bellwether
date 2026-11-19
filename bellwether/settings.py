@@ -18,6 +18,9 @@ FONT_SCALE_LIMITS = (0.8, 1.4)
 # The step of a slider of the options window, for both numbers.
 SCALE_STEP = 0.05
 FONT_SCALE_STEP = 0.05
+# The opacity slider of the background in the options window: its limits and its step. A file can hold any opacity.
+OPACITY_LIMITS = (0.1, 1.0)
+OPACITY_STEP = 0.05
 # The colours that the user can change. Only the background can have an alpha ("#aarrggbb").
 COLOR_ROLES = ("blocked", "done", "working", "idle", "background", "text", "frame", "accent")
 # No custom look: a file without these keys. fontFamily "": the font of the layout. colors: only the changed roles.

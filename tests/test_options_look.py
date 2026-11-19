@@ -7,7 +7,7 @@ import time
 import pytest
 import shiboken6
 from PySide6.QtCore import QPoint, QPointF, Qt, qInstallMessageHandler
-from PySide6.QtGui import QWheelEvent
+from PySide6.QtGui import QColor, QWheelEvent
 from PySide6.QtQml import QQmlApplicationEngine, QQmlExpression, qmlContext
 from PySide6.QtTest import QTest
 
@@ -234,9 +234,18 @@ def test_the_arrow_keys_move_a_slider_by_one_step_and_stop_at_its_ends(app, show
     assert value() == low and window.isVisible()
     key(app, window, Qt.Key.Key_Right)
     assert value() == round(low + 0.05, 2) and spoken(slider) == f"{label}, {round((low + 0.05) * 100)} percent"
-    getattr(backend, setter)(1.23)  # a value of the file between two steps: the next step from the nearest one
+    getattr(backend, setter)(1.23)  # a value of the file between two steps: the next step above or below it
     key(app, window, Qt.Key.Key_Right)
-    assert value() == 1.3
+    assert value() == 1.25
+    getattr(backend, setter)(1.23)
+    key(app, window, Qt.Key.Key_Left)
+    assert value() == 1.2
+    getattr(backend, setter)(1.21)  # near a step: still the next one, not that one
+    key(app, window, Qt.Key.Key_Right)
+    assert value() == 1.25
+    getattr(backend, setter)(1.24)
+    key(app, window, Qt.Key.Key_PageDown)  # Page Down: the next step below, and three more
+    assert value() == 1.05
 
 
 @pytest.mark.parametrize("name, label, low, high, setter", SLIDERS)
@@ -489,12 +498,15 @@ def test_the_opacity_of_the_background_is_a_slider_and_gives_a_colour_with_alpha
     click(app, window, swatch(window, "background"))
     slider, shown_value = find(window, "isOpacitySlider"), find(window, "isOpacityValue")
     assert spoken(slider) == "Background opacity, 94 percent" and shown_value.property("text") == "94 %"
-    assert (slider.property("from"), slider.property("to")) == (0.1, 1)
+    limits = (backend.opacityMin, backend.opacityMax, backend.opacityStep)
+    assert (slider.property("from"), slider.property("to"), slider.property("step")) == limits == (0.1, 1, 0.05)
     # A colour with no choice of the opacity is saved as "#rrggbb": it keeps the opacity of each layout.
     click(app, window, preset(window, "#1f2023"))
     assert backend.colorOverrides == {"background": "#1f2023"} and backend.colors["background"] == "#f01f2023"
     slider.forceActiveFocus()
-    key(app, window, Qt.Key.Key_Left)  # from 94 % to the step below
+    key(app, window, Qt.Key.Key_Right)  # from 94 % to the next step above, not one step further
+    assert backend.colorOverrides == {"background": "#f21f2023"} and shown_value.property("text") == "95 %"
+    key(app, window, Qt.Key.Key_Left)
     assert backend.colorOverrides == {"background": "#e61f2023"} and shown_value.property("text") == "90 %"
     QTest.mousePress(window, LEFT, NONE, point_for(slider, 0.5))
     QTest.mouseRelease(window, LEFT, NONE, point_for(slider, 0.5))
@@ -889,6 +901,36 @@ def test_with_the_text_in_the_colour_of_the_panel_the_close_control_and_reset_ca
     assert not window.isVisible()
 
 
+@pytest.mark.parametrize("letter", LETTERS)
+def test_the_close_control_has_a_plate_only_when_its_marks_need_one(app, shown, letter):
+    window, backend, messages = shown
+    backend.setLayout(letter)
+    settle(app)
+    close = find(window, "isClose")
+
+    def plate_and_header():
+        """The colour inside the close control at its left, and the colour of the header just at its left."""
+        image = window.grabWindow()
+        box = close.mapRectToScene(close.boundingRect()).toRect()
+        middle = box.top() + box.height() // 2
+        argb = QColor.NameFormat.HexArgb
+        return image.pixelColor(box.left() + 3, middle).name(argb), image.pixelColor(box.left() - 4, middle).name(argb)
+
+    inside, outside = plate_and_header()
+    assert inside == outside  # the designs: the header of before
+    assert close.property("plated") is False
+    backend.setColor("text", "#ffffff"), backend.setColor("background", "#808080")  # only the dim mark needs it
+    settle(app)
+    inside, outside = plate_and_header()
+    assert close.property("plated") and inside == "#ff808080" != outside
+    backend.setColor("background", "#1a000000")  # white can be read on black, but the panel shows the desktop
+    settle(app)
+    assert close.property("plated")
+    backend.resetLook()
+    settle(app)
+    assert not close.property("plated")
+
+
 def test_the_ink_of_the_two_controls_is_the_text_colour_while_it_can_be_read(app, shown):
     window, backend, messages = shown
     theme = window.property("theme")
@@ -901,6 +943,11 @@ def test_the_ink_of_the_two_controls_is_the_text_colour_while_it_can_be_read(app
     backend.setColor("background", "#fafafa")  # dark on light can be read: the colour of the user
     settle(app)
     assert window.property("safeInk").name() == "#101010"
+    backend.setColor("text", "#ffffff"), backend.setColor("background", "#808080")
+    settle(app)
+    # White can be read on grey (3.95:1), the dim mark (white at 62 %) cannot: the idle mark has the ink.
+    assert window.property("safeInk").name() == "#ffffff"
+    assert {m.property("color").name() for m in marks} == {"#202124"}
 
 
 # ----- the options window and the panel in one program -----
