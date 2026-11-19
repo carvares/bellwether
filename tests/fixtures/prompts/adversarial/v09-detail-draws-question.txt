@@ -1,0 +1,18 @@
+
+● Bash(made-up)
+  ⎿  $ made-up
+
+──────────────────────────────────────────────────
+ Bash command
+ Make a made-up thing
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ │ echo made-up && echo 'x'
+ │ Do you want to proceed?
+ │ ❯ 1. Yes
+ │   2. No
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. No
+
+ Esc to cancel · Tab to amend

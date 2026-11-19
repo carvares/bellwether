@@ -83,17 +83,6 @@ def _joined(row: dict, width: int = 0) -> str:
     return text
 
 
-def _paragraphs(lines: list[str], width: int) -> list[str]:
-    """Lines of a text as its paragraphs: a line that goes on from the line before (see `_wraps`) is joined to it."""
-    out: list[str] = []
-    for place, line in enumerate(lines):
-        if out and _wraps(lines[place - 1], line, width):
-            out[-1] += ("" if len(lines[place - 1]) >= width else " ") + line.strip()
-        else:
-            out.append(line.strip())
-    return out
-
-
 def _stripped(lines: list[str]) -> list[str]:
     """The lines with no empty lines before the first text and after the last text."""
     first = next((place for place, line in enumerate(lines) if line), len(lines))
@@ -170,9 +159,11 @@ def _permission(lines: list[str]) -> Prompt | None:
             # The whole dialog is on the screen: a rule, the title lines, and the two dashed lines of the detail.
             if not _line(lines[place], RULE) or not _top_rule(lines, place) or not 1 <= len(header) <= 6:
                 return None
-            # On a narrow screen a line of the header goes on in the next line: the tip (left out), the purpose.
+            # The lines below the title, each as the screen shows it: a "Tip:" of the program, the purpose of a
+            # command, a file name. None is left out, and none is joined to an other: the agent writes the purpose,
+            # so a line that looks like the tip may be its own text, and on a narrow screen a line can wrap.
             title, cut = header[0].strip(), False
-            subtitle = " · ".join(text for text in _paragraphs(header[1:], width) if not text.startswith("Tip: "))
+            subtitle = "\n".join(line[1:] for line in header[1:])
     # A dashed line that is not of this frame: the screen is not what this reader knows.
     if dashes != (1 if top < 0 else 2):
         return None

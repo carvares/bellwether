@@ -1,6 +1,6 @@
 
   >_ OpenAI Codex (v0.170.0)
-     ~/Projects/Personal/…/t25-live/work
+     ~/Workarea/Examples/…/t00-test/work
 
 
 › Run exactly this shell command and nothing

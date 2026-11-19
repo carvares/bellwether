@@ -1,7 +1,7 @@
 
  ▐▛███▛█   Claude Code v2.1.322
 ▝▜██████▀  Model 11 with high effort · Sample Plans
- ▝▝   ▝▝   ~/…/.superpowers/sdd/2026-11-18-bellwether/t25-live/work
+ ▝▝   ▝▝   ~/…/.madeupnotes/run/2000-01-01-madeupproj/t00-test/work
 
 
 ❯ In notes.txt replace the line 'made-up line two' with this one long line:

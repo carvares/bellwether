@@ -12,6 +12,7 @@ from bellwether.client import Failure, Screen
 from bellwether.icons import Icons
 from bellwether import prompts
 from bellwether.prompts import ACCEPT, DECLINE, TEXT, Option, Prompt, parse
+from tests.test_prompts import TIP
 from bellwether.state import Agent
 
 from .conftest import FakeClient
@@ -165,7 +166,7 @@ def test_open_reads_the_screen_off_the_ui_thread_and_shows_the_prompt(bench):
     assert b.states == ["loading", "ready"] and b.client.reads == ["t1"]
     assert b.prompt == {
         **CLOSED, "state": "ready", "shown": 1, "key": "t1", "label": "rev", "program": "claude-code", "address": "t1",
-        "kind": "permission", "title": "Bash command", "subtitle": "Create an empty test file",
+        "kind": "permission", "title": "Bash command", "subtitle": TIP + "\nCreate an empty test file",
         "question": "Do you want to proceed?", "detail": [" touch made-by-test.txt"], "cursor": "1",
         "options": [
             {"key": "1", "label": "Yes", "description": "", "kind": "choice", "effect": "accept", "wide": False,

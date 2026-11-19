@@ -15,7 +15,7 @@ from bellwether.prompt_session import MESSAGES
 from bellwether.state import Agent
 from tests.audit import text_findings
 from tests.test_answer_control import LEFT, LETTERS, NONE, Panel, centre
-from tests.test_backend_prompt import ASK, BASH, CREATE, FIXTURES, NO_DIALOG, shown, wait_for
+from tests.test_backend_prompt import ASK, BASH, CREATE, FIXTURES, NO_DIALOG, TIP, shown, wait_for
 from tests.test_options_look import focused, items, js, key, tab_order, type_text
 from tests.test_qml import LAYERSHELL_QMLDIR, click, settle, walk
 from tests.test_skins import spoken, wait_jump
@@ -101,7 +101,7 @@ def test_the_window_shows_the_agent_the_question_and_one_button_for_each_option_
     window = d.answer_for("t1")
     assert d.one("isAgentLabel").property("text") == "rev" and d.one("isAgentAddress").property("text") == "t1"
     assert d.one("isPromptTitle").property("text") == "Bash command"
-    assert d.one("isPromptSubtitle").property("text") == "Create an empty test file"
+    assert d.one("isPromptSubtitle").property("text") == TIP + "\nCreate an empty test file"
     assert d.one("isQuestion").property("text") == "Do you want to proceed?"
     assert [i.property("text") for i in items(window, "isScreenLine")] == [" touch made-by-test.txt"]
     assert [spoken(b) for b in d.buttons()] == [

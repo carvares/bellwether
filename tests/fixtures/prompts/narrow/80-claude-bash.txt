@@ -1,7 +1,7 @@
 
  ▐▛███▛█   Claude Code v2.1.322
 ▝▜██████▀  Model 11 with high effort · Sample Plans
- ▝▝   ▝▝   ~/…/.superpowers/sdd/2026-11-18-bellwether/t25-live/work
+ ▝▝   ▝▝   ~/…/.madeupnotes/run/2000-01-01-madeupproj/t00-test/work
 
 
 ❯ Run exactly this one bash command with the Bash tool and nothing else, do not
@@ -29,8 +29,8 @@
 ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
  Do you want to proceed?
  ❯ 1. Yes
-   2. Yes, and always allow access to /home/someuser/Projects/Personal/bellwethe
-      r/.superpowers/sdd/2026-11-18-bellwether/t25-live/work from this project
+   2. Yes, and always allow access to /home/someuser/Workarea/Examples/madeuppro
+      j/.madeupnotes/run/2000-01-01-madeupproj/t00-test/work from this project
    3. Yes, and switch to auto mode · auto mode handles these prompts for you
    4. No
 

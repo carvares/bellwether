@@ -1,6 +1,6 @@
 
   >_ OpenAI Codex (v0.170.0)
-     ~/Projects/Personal/bellwether/.superpowers/sdd/…/t25-live/work
+     ~/Workarea/Examples/madeupproj/.madeupnotes/run/…/t00-test/work
 
 
 › Run exactly this shell command and nothing else: touch made-up-alpha.txt

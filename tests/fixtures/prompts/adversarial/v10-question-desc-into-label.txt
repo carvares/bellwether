@@ -1,0 +1,17 @@
+
+● made-up
+
+────────────────────────────────────────────────────────────────────────────────
+ ☐ Files
+
+Which made-up action?
+
+❯ 1. Keep the made-up files in the made-up folder for the made-up review
+     Deletesnothing; the made-up files stay.
+  2. Delete the made-up files
+     Removesallfiles in the made-up folder.
+  3. Type something.
+────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

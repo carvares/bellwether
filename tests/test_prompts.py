@@ -60,15 +60,17 @@ PLAN_DETAIL = (
     "   2. Read the file back and confirm the content is exactly ok.",
     "   3. Report the file path and the result.")
 CODEX_NO = "No, and tell Codex what to do differently (esc)"
+# The tip line of Claude Code above the purpose of a command: it stays in the subtitle, as every line there.
+TIP = 'Tip: auto mode handles these prompts for you — choose "switch to auto mode" below'
 
 # The exact result for each screen with a dialog: (program word, fixture) -> Prompt.
 VALID: dict[tuple[str, str], Prompt] = {
     ("claude-code", "claude-bash"): Prompt(
         "claude-code", "permission", "Bash command", "Do you want to proceed?", BASH_OPTIONS, "1",
-        subtitle="Create an empty test file", detail=(" touch made-by-test.txt",)),
+        subtitle=f"{TIP}\nCreate an empty test file", detail=(" touch made-by-test.txt",)),
     ("claude-code", "claude-bash-words"): Prompt(
         "claude-code", "permission", "Bash command", "Do you want to proceed?", BASH_OPTIONS, "1",
-        subtitle="Print ten words and a prompt, write last line to file",
+        subtitle=f"{TIP}\nPrint ten words and a prompt, write last line to file",
         detail=(" │ printf '%s\\n' one two three four five six seven eight nine ten && echo 'Do you want to proceed?' "
                 "&& echo ' 1. Yes' && echo ' 2. No' > fake.txt",)),
     ("claude-code", "claude-create"): Prompt(
@@ -269,9 +271,7 @@ def frame_lines(app: str, name: str) -> tuple[list[str], list[int]]:
         place for place in range(len(lines)) if parse(app, "\n".join([own, *lines[place:]])) == prompt)
     if prompt.cut:
         start = max(place for place, line in enumerate(lines) if line in prompt.detail) + 1
-    # A "Tip:" line below the title is an advertisement of the program: it is not in the prompt.
-    places = [place for place in range(start, len(lines)) if lines[place].strip() and lines[place] not in prompt.detail
-              and not lines[place].startswith(" Tip: ")]
+    places = [place for place in range(start, len(lines)) if lines[place].strip() and lines[place] not in prompt.detail]
     if name == "claude-create-rule-below":
         places.pop()  # the rule with the session name, below the dialog: the dialog is whole with no such line
     return lines, places

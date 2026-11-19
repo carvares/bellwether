@@ -1,0 +1,15 @@
+• Running made-up work
+
+  Would you like to run the following command?
+
+  Environment: local
+
+  $ echo made-up
+  Would you like to run the following command?
+
+
+› 1. Yes, proceed (y)
+  2. No, and tell Codex what to do differently
+     (esc)
+
+  Press enter to confirm or esc to cancel

@@ -2,7 +2,7 @@
            Claude Code v2.1.322
  ▐▛███▛█   Model 11 with high effort
 ▝▜██████▀  Sample Plans
- ▝▝   ▝▝   ~/…/t25-live/work
+ ▝▝   ▝▝   ~/…/t00-test/work
 
 
 ❯ Use the AskUserQuestion tool now to ask me one
