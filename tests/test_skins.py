@@ -66,6 +66,7 @@ def wait_jump(app, backend):
         settle(app)
         if backend.opening == "":
             break
+    assert backend.opening == "", f"the jump to {backend.opening!r} did not end in 100 settles"
 
 
 def count_text(root, text):
@@ -170,9 +171,26 @@ def test_a_group_of_12_shows_8_rows_and_scrolls_and_the_hint_takes_no_click_and_
     assert flick.height() == 8 * row_height and flick.property("contentHeight") == 12 * row_height
     assert len(hints(root)) >= 1
     assert short <= root.height() <= 1080 and root.height() - short <= 40  # only the space of the hint
+    # Each scroll hint over the rows (a thumb, a track, a fade): a click on it goes to the row under it, and a wheel
+    # turn on it scrolls the list. D has its hint as a footer under the rows, and C has a line of text there.
+    view = flick.mapRectToScene(flick.boundingRect())
+    over = [h for h in hints(root) + marked(root, "isScrollTick")
+            if view.contains(h.mapToScene(QPointF(h.width() / 2, h.height() / 2)))]
+    assert over or letter == "D", "no scroll hint over the rows"
+    for hint in over:
+        flick.setProperty("contentY", 0)
+        settle(app)
+        point = hint.mapToScene(QPointF(hint.width() / 2, hint.height() / 2)).toPoint()
+        (under,) = [r for r in rows(root, "agent") if r.mapRectToScene(r.boundingRect()).contains(QPointF(point))]
+        backend._client.focused.clear()
+        QTest.mouseClick(root, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
+        wait_jump(app, backend)
+        assert backend._client.focused == [under.property("key")], hint
+        wheel(app, root, point)
+        assert flick.property("contentY") == 2 * row_height, hint
     row = rows(root, "agent")[1]
     for edge in (QPointF(row.width() - 1, row.height() / 2), QPointF(row.width() / 2, row.height() - 1),
-                 QPointF(1, 1)):  # the last pixels of the row, where a track or a fade is
+                 QPointF(1, 1)):  # the edges of a row
         flick.setProperty("contentY", 0)
         point = row.mapToScene(edge).toPoint()
         wheel(app, root, point)
