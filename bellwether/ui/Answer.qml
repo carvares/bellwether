@@ -447,11 +447,20 @@ Window {
                     width: parent.width - 2 * answer.pad
                     spacing: 10
                     // The height of everything in the column but the detail, with the spaces: the detail takes
-                    // what the screen leaves free.
+                    // what the screen leaves free. The line "Scroll to the end …" shows only while the detail
+                    // scrolls, so its room is kept whenever it can show (else the height of the detail would
+                    // depend on itself).
                     readonly property real restHeight: {
                         var total = 0, shown = 0
                         for (var i = 0; i < children.length; i++) {
                             var child = children[i]
+                            if (child.isSeenNote === true) {
+                                if (answer.hasAccept && !answer.blind && detailLoader.active) {
+                                    total += child.implicitHeight
+                                    shown += 1
+                                }
+                                continue
+                            }
                             if (child === detailLoader || !child.visible)
                                 continue
                             total += child.height
