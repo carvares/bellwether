@@ -4,14 +4,20 @@
 answer two times one after the other, `herdr-core ls --json` is the source: herdr-core keeps the terminals
 alive without the window. One read that fails changes nothing: the last list of the app stays.
 The jump shows an agent in the app window. It starts the app first when the window is closed.
+
+The screen calls (`read_screen`, `press`, `send_text`) are for the answer to a blocked agent. They take only an
+address of the last list of agents. Their errors are values with a reason code. The text of a screen is private:
+no log line, no error and no file of this module has it, and the output of a failed command is never logged.
 """
 from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import subprocess
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .state import Agent, parse_app, parse_core
@@ -26,6 +32,43 @@ JUMP_SECONDS = 8.0
 START_PAUSE = 0.25
 # After that: ask the new window for the agent this many times, with the same pause (2 seconds).
 SHOW_TRIES = 8
+# The deadlines of the screen calls. herdr-core can hold keys and a text for a short time before it types them.
+READ_TIMEOUT = TIMEOUT
+PRESS_TIMEOUT = 5.0
+SEND_TIMEOUT = 8.0
+# The form of a terminal address: "t7", "t1c", or "machine/t7". herdr-core takes also the name of a terminal in
+# the place of an address: this form keeps a name out.
+_ADDRESS = re.compile(r"(?:[a-z0-9][a-z0-9._-]{0,31}/)?t[0-9a-z]{1,8}")
+# The keys that `press` can press: the digit of an option. The readers give no other key.
+KEYS = frozenset("123456789")
+MAX_KEYS = 4
+TEXT_LIMIT = 2000  # characters of one free-text answer
+_KIND = re.compile(r"[a-z_]{1,32}")  # an error kind of herdr-core, for example "not_found"
+# `herdr-core send` puts a tag with the address of the caller around the text when these are set.
+_CALLER_VARIABLES = ("HC_TERMINAL_ID", "HC_SCOPE", "HC_TERMINAL_SOCKET")
+
+
+@dataclass(frozen=True)
+class Screen:
+    """The text on the screen of one terminal. `complete` False: Herdr could not give the whole screen."""
+    text: str = field(repr=False)  # Private: not in the text form of this object.
+    complete: bool = True
+
+
+@dataclass(frozen=True)
+class Failure:
+    """A screen call that did not work. `code` is a reason code, never the output of a command."""
+    code: str
+
+
+def valid_address(address: object) -> bool:
+    return isinstance(address, str) and _ADDRESS.fullmatch(address) is not None
+
+
+def valid_text(text: object) -> bool:
+    """A free-text answer: one line that a person can see, with text in it, not longer than TEXT_LIMIT."""
+    return (isinstance(text, str) and 0 < len(text) <= TEXT_LIMIT and bool(text.strip())
+            and all(char.isprintable() for char in text))
 
 
 class HerdrOffline(Exception):
@@ -54,7 +97,7 @@ def _run(argv: list[str], timeout: float = TIMEOUT) -> subprocess.CompletedProce
 
 class HerdrClient:
     def __init__(self, app: str | None, core: str | None, run=_run, sleep=time.sleep, clock=time.monotonic,
-                 busctl: str = "busctl", systemd_run: str = "systemd-run") -> None:
+                 busctl: str = "busctl", systemd_run: str = "systemd-run", env: str = "env") -> None:
         self._app = app
         self._core = core
         self._run = run
@@ -62,6 +105,9 @@ class HerdrClient:
         self._clock = clock
         self._busctl = busctl
         self._systemd_run = systemd_run
+        self._env = env
+        # The addresses of the last list of agents. A screen call takes no other address.
+        self._known: frozenset[str] = frozenset()
         self._source: str | None = None  # "app", "core" or "none": where the last list came from
         self._app_failures = 0  # reads of the app that failed, one after the other
         self._app_agents: list[Agent] | None = None  # the last list of the app; None before its first answer
@@ -72,6 +118,7 @@ class HerdrClient:
             self._set_source("app")
             self._app_failures = 0
             self._app_agents = parse_app(rows)
+            self._known = frozenset(agent.key for agent in self._app_agents)
             return list(self._app_agents)
         self._app_failures += 1
         if self._app_failures == 1 and self._app_agents is not None:
@@ -80,9 +127,89 @@ class HerdrClient:
         rows = self._read(self._core, ["ls", "--json"], "terminals")
         if rows is not None:
             self._set_source("core")
-            return parse_core(rows)
+            agents = parse_core(rows)
+            self._known = frozenset(agent.key for agent in agents)
+            return agents
+        self._known = frozenset()
         self._set_source("none")
         raise HerdrOffline("herdr-app and herdr-core did not answer")
+
+    # ----- the screen of one agent -----
+
+    def read_screen(self, terminal: str) -> Screen | Failure:
+        """The text on the screen of the terminal."""
+        done = self._screen_call("read", terminal, ["read", terminal, "--json"], READ_TIMEOUT)
+        if isinstance(done, Failure):
+            return done
+        try:
+            data = json.loads(done.stdout)
+        except ValueError:
+            data = None
+        text = data.get("text") if isinstance(data, dict) else None
+        complete = data.get("complete") if isinstance(data, dict) else None
+        if not isinstance(text, str) or not isinstance(complete, bool):
+            return self._failed("read", terminal, "bad_reply")
+        return Screen(text, complete)
+
+    def press(self, terminal: str, keys) -> Failure | None:
+        """Press the keys in the terminal, in sequence. None: herdr-core took them."""
+        if (not isinstance(keys, (list, tuple)) or not 0 < len(keys) <= MAX_KEYS
+                or not all(isinstance(key, str) and key in KEYS for key in keys)):
+            return self._failed("keys", terminal, "bad_key")
+        done = self._screen_call("keys", terminal, ["keys", terminal, *keys], PRESS_TIMEOUT)
+        if isinstance(done, Failure):
+            return done
+        log.info("screen keys ok terminal=%s keys=%s", terminal, ",".join(keys))
+        return None
+
+    def send_text(self, terminal: str, text: str) -> Failure | None:
+        """Paste the text in the terminal and press Enter, also when its program is blocked (`--force`: the text
+        answers the text entry of its dialog). None: herdr-core took it."""
+        if not valid_text(text):
+            return self._failed("send", terminal, "bad_text")
+        done = self._screen_call("send", terminal, ["send", "--force", "--", terminal, text], SEND_TIMEOUT,
+                                 no_caller=True)
+        if isinstance(done, Failure):
+            return done
+        log.info("screen send ok terminal=%s", terminal)
+        return None
+
+    def _failed(self, action: str, terminal: object, code: str) -> Failure:
+        # An address that is not valid can be any text: it is not in the log.
+        log.warning("screen %s failed terminal=%s code=%s", action, terminal if valid_address(terminal) else "?", code)
+        return Failure(code)
+
+    def _screen_call(self, action: str, terminal: str, args: list[str], timeout: float,
+                     no_caller: bool = False) -> subprocess.CompletedProcess | Failure:
+        """Run one herdr-core command for a terminal of the last list. The output of a command that failed is
+        not logged and not kept: it can hold the text of a screen."""
+        if not valid_address(terminal):
+            return self._failed(action, terminal, "bad_address")
+        if terminal not in self._known:
+            return self._failed(action, terminal, "unknown_terminal")
+        if self._core is None:
+            return self._failed(action, terminal, "no_core")
+        argv = [self._core, *args]
+        if no_caller:
+            argv = [self._env, *(part for name in _CALLER_VARIABLES for part in ("-u", name)), *argv]
+        try:
+            done = self._run(argv, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return self._failed(action, terminal, "timeout")
+        except (OSError, subprocess.SubprocessError):
+            return self._failed(action, terminal, "no_run")
+        if done.returncode != 0:
+            return self._failed(action, terminal, self._error_kind(done.stderr) or f"exit_{done.returncode}")
+        return done
+
+    @staticmethod
+    def _error_kind(stderr: bytes) -> str | None:
+        """The error kind that herdr-core wrote, as a reason code. Only a short word of small letters is taken."""
+        try:
+            kind = json.loads(stderr)["error"]["kind"]
+        except (ValueError, TypeError, KeyError):
+            return None
+        return f"herdr_{kind}" if isinstance(kind, str) and _KIND.fullmatch(kind) else None
 
     def focus_agent(self, key: str) -> None:
         """Show the agent in the app window and bring the window to the front. Start the app if it is closed.
