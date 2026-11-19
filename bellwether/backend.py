@@ -399,7 +399,7 @@ class Backend(QObject):
     def stop(self) -> None:
         self._stop.set()
         self._wake.set()
-        self.closePrompt()  # the question and the screen text do not stay in memory
+        self._session.finish()  # the question and the screen text do not stay in memory; a held text is killed
         if self._events is not None:
             self._events.stop()  # Ends the child process of the event stream.
         if self._thread is not None:

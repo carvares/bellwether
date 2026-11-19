@@ -10,7 +10,8 @@ import pytest
 from bellwether.backend import Backend
 from bellwether.client import Failure, Screen
 from bellwether.icons import Icons
-from bellwether.prompts import parse
+from bellwether import prompts
+from bellwether.prompts import ACCEPT, DECLINE, TEXT, Option, Prompt, parse
 from bellwether.state import Agent
 
 from .conftest import FakeClient
@@ -47,6 +48,7 @@ class ScreenClient(FakeClient):
         self.send_result = None
         self.read_gate: threading.Event | None = None
         self.on_press = None  # called after a key or a text went to the terminal
+        self.press_gate: threading.Event | None = None  # a key waits for it: herdr-core holds the key
 
     def read_screen(self, terminal):
         self.reads.append(terminal)
@@ -57,11 +59,13 @@ class ScreenClient(FakeClient):
 
     def press(self, terminal, keys):
         self.pressed.append((terminal, list(keys)))
+        if self.press_gate is not None:
+            self.press_gate.wait(5)
         if self.press_result is None and self.on_press:
             self.on_press()
         return self.press_result
 
-    def send_text(self, terminal, text):
+    def send_text(self, terminal, text, cancel=None):
         self.sent.append((terminal, text))
         if self.send_result is None and self.on_press:
             self.on_press()
@@ -676,7 +680,8 @@ def test_a_text_answer_whose_key_went_before_a_screen_with_no_dialog_says_so(ben
 @pytest.mark.parametrize("text,reason,message", [
     ("", "text_empty", "Type a text first."), ("   ", "text_empty", "Type a text first."),
     ("two\nlines", "text_lines", "The text must be one line."),
-    ("esc\x1b[2J", "text_control", "The text has characters that cannot be sent (control or direction characters)."),
+    ("esc\x1b[2J", "text_control",
+     "The text has characters that cannot be sent (control, direction or invisible characters)."),
     ("x" * 2001, "text_long", "The text is too long: at most 2000 characters.")], ids=range(5))
 def test_a_text_that_is_not_valid_is_refused_with_a_reason(bench, text, reason, message):
     """The window learns why from the prompt: `reason` and `message`. The question stays ready."""
@@ -1002,3 +1007,352 @@ def test_no_text_of_a_screen_is_in_a_log_record_or_in_a_file(app, tmp_path, capl
         if path.is_file():
             assert MARKER.encode() not in path.read_bytes(), path.name
     assert MARKER not in repr(vars(b.backend))
+
+
+# ----- the mark: an earlier answer to a terminal may still arrive, also after a close -----
+
+EARLIER = ("An earlier answer to this agent may still arrive. Nothing more can be sent until the agent goes on or "
+           "shows a different question. Check in Herdr.")
+BOTH_BLOCKED = [Agent("t1", "blocked", "rev", "Main", "claude-code"), Agent("t2", "blocked", "dev", "Main", "codex")]
+
+
+def unconfirmed_key(b, when="failed"):
+    """Answer "1" on BASH; herdr-core does not confirm the key (a killed `keys` still delivers it). The reads after
+    it see the same question. `when`: "failed" (the reads ended), or "pending" (a read after the key waits)."""
+    b.open()
+    gate = threading.Event()
+    b.client.press_result = Failure("timeout")
+    b.client.screens = [BASH, lambda: (gate.wait(5), BASH)[1]] if when == "pending" else [BASH]
+    b.backend.answer("1")
+    assert wait_for(b.app, lambda: b.state() == when)
+    b.client.press_result = None
+    return gate
+
+
+def nothing_can_be_clicked(prompt: dict) -> bool:
+    return all(option["allowed"] is False for option in prompt["options"]) and prompt["freeText"] is False
+
+
+@pytest.mark.parametrize("when", ["pending", "failed"])
+def test_a_close_and_a_reopen_after_an_unconfirmed_key_press_no_second_key(bench, when):
+    """The probe of the re-review: Esc, a reopen and a click pressed a second key while the first could still
+    arrive. The mark of the terminal stays after the close."""
+    b = bench(pending_follow=(0.0, 0.0))
+    gate = unconfirmed_key(b, when)
+    b.backend.closePrompt()
+    gate.set()
+    b.backend.openPrompt("t1")
+    assert b.until("pending")
+    assert b.prompt["reason"] == "earlier" and b.prompt["message"] == EARLIER and b.backend.answering is True
+    assert b.prompt["question"] == "Do you want to proceed?" and nothing_can_be_clicked(b.prompt)
+    for key in ("1", "2", "3"):
+        assert b.backend.answer(key) is False
+    assert b.backend.answerText("made-up text") is False
+    b.backend.closePrompt()
+    b.backend.openPrompt("t1")  # again, and again: the same
+    assert b.until("pending") and b.backend.answer("2") is False
+    assert b.client.pressed == [("t1", ["1"])] and b.client.sent == []
+
+
+def test_after_pending_and_failed_an_answer_presses_nothing(bench):
+    b = bench(pending_follow=(0.0,))
+    unconfirmed_key(b)
+    assert b.backend.answer("1") is False and b.backend.answer("2") is False
+    b.backend.closePrompt()
+    b.backend.openPrompt("t1")
+    assert b.until("pending") and b.backend.answer("2") is False
+    assert b.client.pressed == [("t1", ["1"])]
+
+
+def test_the_same_question_never_ends_the_mark_by_time_alone(bench):
+    b = bench(pending_follow=(0.0,))
+    unconfirmed_key(b)
+    b.backend.closePrompt()
+    b.backend.openPrompt("t1")
+    assert b.until("pending")
+    for _ in range(3):
+        b.now[0] += 1000.0
+        reads = len(b.client.reads)
+        b.backend.apply(list(BLOCKED))
+        assert wait_for(b.app, lambda: len(b.client.reads) == reads + 1 and not b.backend._session.busy)
+        assert b.state() == "pending" and b.prompt["reason"] == "earlier"
+    assert b.backend.answer("2") is False and b.client.pressed == [("t1", ["1"])]
+
+
+def test_a_different_question_ends_the_mark_after_the_settle_time(bench):
+    b = bench(pending_follow=(0.0,))
+    unconfirmed_key(b)
+    b.backend.closePrompt()
+    b.client.screens = [CREATE]
+    b.backend.openPrompt("t1")
+    assert b.until("pending")
+    assert b.prompt["title"] == "Create file" and nothing_can_be_clicked(b.prompt)  # the new question, no option
+    b.now[0] += 3.9  # herdr-core gives a held key 3.0 s after the last key of a person
+    b.backend.apply(list(BLOCKED))
+    assert wait_for(b.app, lambda: not b.backend._session.busy) and b.state() == "pending"
+    b.now[0] += 0.2
+    b.backend.apply(list(BLOCKED))
+    assert b.until("ready")
+    assert b.prompt["title"] == "Create file" and b.prompt["reason"] == "" and b.prompt["options"][0]["allowed"]
+    b.client.on_press = lambda: b.backend._snapshot.emit(WORKING)
+    assert b.backend.answer("1") is True
+    assert b.until("closed") and b.client.pressed == [("t1", ["1"]), ("t1", ["1"])]
+
+
+def test_the_answered_question_that_comes_back_starts_the_settle_time_again(bench):
+    b = bench(pending_follow=(0.0,))
+    unconfirmed_key(b)
+    b.backend.closePrompt()
+    b.client.screens = [CREATE, BASH, BASH]
+    b.backend.openPrompt("t1")
+    assert b.until("pending")
+    b.now[0] += 3.0
+    b.backend.apply(list(BLOCKED))  # BASH again: the key may still come to it
+    assert wait_for(b.app, lambda: len(b.client.reads) == 5 and not b.backend._session.busy)
+    b.now[0] += 3.0
+    b.backend.apply(list(BLOCKED))
+    assert wait_for(b.app, lambda: len(b.client.reads) == 6 and not b.backend._session.busy)
+    assert b.state() == "pending" and b.backend.answer("1") is False
+
+
+def test_an_agent_that_is_not_blocked_ends_the_mark_after_the_settle_time_also_with_no_prompt_open(bench):
+    b = bench(pending_follow=(0.0,))
+    unconfirmed_key(b)
+    b.backend.closePrompt()
+    reads = len(b.client.reads)
+    b.backend.apply(list(WORKING))  # the agent went on: the list shows it, no screen is read
+    b.now[0] += 2.0
+    b.backend.apply(list(BLOCKED))  # a new question, 2 s later
+    b.client.screens = [CREATE]
+    b.backend.openPrompt("t1")
+    assert b.until("pending")  # not yet: a key that a person's typing holds lands 3 s after their last key
+    b.now[0] += 2.5
+    b.backend.apply(list(BLOCKED))
+    assert b.until("ready") and b.prompt["title"] == "Create file"
+    assert len(b.client.reads) == reads + 2
+
+
+def test_offline_is_not_a_proof_that_the_agent_went_on(bench):
+    b = bench(pending_follow=(0.0,))
+    unconfirmed_key(b)
+    b.backend.closePrompt()
+    b.backend.apply(None)  # Herdr is offline: the list is empty
+    b.now[0] += 100.0
+    b.backend.apply(None)
+    b.backend.apply(list(BLOCKED))
+    b.backend.openPrompt("t1")
+    assert b.until("pending") and b.backend.answer("2") is False
+
+
+def test_a_pending_prompt_of_an_earlier_answer_is_gone_when_the_agent_goes_on(bench):
+    b = bench(pending_follow=(0.0,))
+    unconfirmed_key(b)
+    b.backend.closePrompt()
+    b.backend.openPrompt("t1")
+    assert b.until("pending")
+    b.backend.apply(list(WORKING))
+    assert b.until("gone")
+
+
+def test_a_key_that_herdr_core_holds_at_the_close_marks_the_terminal_until_it_returns(bench):
+    b = bench()
+    b.open()
+    b.client.press_gate = threading.Event()
+    b.backend.answer("1")
+    assert wait_for(b.app, lambda: b.client.pressed == [("t1", ["1"])])
+    b.backend.closePrompt()
+    b.backend.openPrompt("t1")
+    assert b.until("pending") and b.prompt["reason"] == "earlier" and b.backend.answer("2") is False
+    b.client.press_gate.set()  # herdr-core typed the key: nothing more can arrive
+    assert b.until("ready") and b.prompt["reason"] == ""
+    assert b.client.pressed == [("t1", ["1"])]
+
+
+def test_a_held_key_that_is_not_confirmed_after_a_close_keeps_the_mark(bench):
+    b = bench()
+    b.open()
+    b.client.press_gate = threading.Event()
+    b.client.press_result = Failure("timeout")
+    b.backend.answer("1")
+    assert wait_for(b.app, lambda: b.client.pressed == [("t1", ["1"])])
+    b.backend.closePrompt()
+    b.client.press_gate.set()
+    assert wait_for(b.app, lambda: not b.backend._session._marks["t1"].running)
+    b.backend.openPrompt("t1")
+    assert b.until("pending") and b.backend.answer("2") is False
+
+
+def held_text(b):
+    """A text answer whose `send` herdr-core holds until the cancel of the call is set (then it is killed)."""
+    b.client.screens = [ASK]
+    b.open()
+    b.client.on_press = lambda: b.client.screens.__setitem__(slice(None), [ASK_CURSOR])
+    started, returned = threading.Event(), threading.Event()
+
+    def send_text(terminal, text, cancel=None):
+        b.client.sent.append((terminal, text))
+        started.set()
+        killed = cancel.wait(5)
+        returned.set()
+        return Failure("cancelled") if killed else None
+
+    b.client.send_text = send_text
+    assert b.backend.answerText("made-up text") is True
+    assert started.wait(3)
+    return returned
+
+
+def test_a_close_during_a_held_text_kills_it_and_ends_the_mark(bench):
+    b = bench()
+    returned = held_text(b)
+    b.backend.closePrompt()
+    assert returned.wait(3)
+    b.client.screens = [ASK]
+    b.backend.openPrompt("t1")
+    assert b.until("ready") and b.prompt["reason"] == ""
+    assert b.client.sent == [("t1", "made-up text")] and b.client.pressed == [("t1", ["3"])]
+
+
+def test_the_stop_kills_a_held_text_before_it_returns(bench):
+    b = bench()
+    returned = held_text(b)
+    b.backend.stop()
+    assert returned.is_set()
+
+
+def test_the_marks_of_two_terminals_are_apart(bench):
+    b = bench(agents=BOTH_BLOCKED, pending_follow=(0.0,))
+    unconfirmed_key(b)
+    b.backend.closePrompt()
+    b.client.screens = [CODEX]
+    b.backend.openPrompt("t2")
+    assert b.until("ready") and b.prompt["key"] == "t2" and b.prompt["options"][0]["allowed"]
+    b.client.on_press = lambda: b.backend._snapshot.emit([BOTH_BLOCKED[0], WORKING[1]])
+    assert b.backend.answer("1") is True
+    assert b.until("closed")
+    b.client.screens = [BASH]
+    b.backend.openPrompt("t1")
+    assert b.until("pending") and b.backend.answer("2") is False
+    assert b.client.pressed == [("t1", ["1"]), ("t2", ["1"])]
+
+
+def test_a_key_that_went_or_an_answer_that_sent_nothing_leaves_no_mark(bench):
+    b = bench()
+    b.open()
+    b.client.screens = [CREATE]  # the question changed: nothing goes
+    b.backend.answer("1")
+    assert b.until("ready") and b.client.pressed == []
+    b.client.on_press = lambda: b.client.screens.__setitem__(slice(None), [BASH])
+    b.backend.answer("1")  # the key went; the next question is the same as before: the reads end with no_effect
+    assert b.until("failed", "ready")
+    b.backend.closePrompt()
+    b.backend.openPrompt("t1")
+    assert b.until("ready") and b.backend._session._marks == {}
+
+
+def test_an_answer_refused_by_a_mark_says_so(bench):
+    """The engine refuses also when the window shows a ready prompt of a terminal with a mark."""
+    from bellwether.prompt_session import Mark
+
+    b = bench()
+    b.client.screens = [ASK]
+    b.open()
+    mark = Mark("t1", "a fingerprint")
+    mark.running = False
+    b.backend._session._marks["t1"] = mark
+    assert b.backend.answer("1") is False
+    assert b.state() == "pending" and b.prompt["reason"] == "earlier" and b.client.pressed == []
+    b.backend._session._set("ready", prompt=b.backend._session.prompt)
+    assert b.backend.answerText("made-up text") is False and b.prompt["reason"] == "earlier"
+
+
+# ----- nothing can be clicked while an answer is on its way -----
+
+def test_no_option_can_be_clicked_while_an_answer_is_on_its_way(bench):
+    b = bench(pending_follow=(0.0,))
+    b.client.screens = [ASK]
+    b.open()
+    assert b.prompt["freeText"] is True and all(option["allowed"] for option in b.prompt["options"])
+    b.client.read_gate = threading.Event()
+    b.backend.answer("1")
+    assert b.state() == "answering" and nothing_can_be_clicked(b.prompt) and b.prompt["options"]
+    b.client.press_result = Failure("timeout")
+    b.client.read_gate.set()
+    assert wait_for(b.app, lambda: b.state() == "pending")
+    assert nothing_can_be_clicked(b.prompt) and b.prompt["options"]
+
+
+# ----- a failed check of the address: nothing was sent -----
+
+def test_a_check_that_fails_before_the_key_is_a_plain_failure_that_sent_nothing(bench):
+    b = bench()
+    b.open()
+    b.client.press_result = Failure("check_timeout")
+    b.backend.answer("1")
+    assert b.until("failed")
+    assert b.prompt["reason"] == "check_timeout" and b.states[-2:] == ["answering", "failed"]
+    assert b.prompt["message"] == "Herdr did not answer the check of the terminal. Nothing was sent."
+    b.client.press_result = Failure("check_failed")
+    b.backend.closePrompt()
+    b.backend.openPrompt("t1")
+    assert b.until("ready")  # no mark: nothing can arrive
+    b.backend.answer("1")
+    assert b.until("failed") and b.prompt["message"] == "Herdr could not check the terminal. Nothing was sent."
+
+
+def test_a_check_that_fails_before_the_text_says_that_the_text_did_not_go(bench):
+    b = bench()
+    b.client.screens = [ASK]
+    b.open()
+    b.client.on_press = lambda: b.client.screens.__setitem__(slice(None), [ASK_CURSOR])
+    b.client.send_result = Failure("check_timeout")
+    b.backend.answerText("made-up text")
+    assert b.until("failed")
+    assert b.prompt["reason"] == "text_check" and "The text was not sent." in b.prompt["message"]
+
+
+# ----- the engine refusals that no reader reaches today -----
+
+def test_a_blind_prompt_whose_text_option_accepts_refuses_the_text(bench, monkeypatch):
+    """No reader gives this prompt: built here, it shows that `answerText` asks `allows` of the text option."""
+    blind = Prompt("claude-code", "plan", "", "Made-up question?", (
+        Option("1", "No", effect=DECLINE), Option("2", "Made-up text entry", kind=TEXT, effect=ACCEPT)), "1",
+        cut=True, blind=True)
+    monkeypatch.setattr(prompts, "parse", lambda app, text, complete=True: blind)
+    b = bench()
+    b.open()
+    assert b.prompt["freeText"] is False and [o["allowed"] for o in b.prompt["options"]] == [True, False]
+    assert b.backend.answerText("made-up text") is False
+    assert b.state() == "ready" and b.client.pressed == [] and b.client.sent == [] and b.client.reads == ["t1"]
+
+
+def test_a_new_question_while_pending_fails_at_once_and_reads_no_more(bench):
+    """The read that shows a different question ends the reads: it does not wait for the end of PENDING_FOLLOW."""
+    b = bench(pending_follow=(0.0,) * 8)
+    b.open()
+    b.client.press_result = Failure("timeout")
+    b.client.screens = [BASH, BASH, CREATE]  # before the key, the first read after it, then a new question
+    b.backend.answer("1")
+    assert b.until("failed")
+    assert b.states[-2:] == ["pending", "failed"] and b.prompt["reason"] == "press_timeout"
+    assert not b.backend._session._follow_timer.isActive() and b.backend._session._follow_left == ()
+    wait_for(b.app, lambda: False, timeout=0.2)
+    assert b.client.reads == ["t1"] * 4
+
+
+def test_a_text_killed_at_its_deadline_keeps_the_mark_for_the_settle_time(bench):
+    """A killed `send` is not typed (measured), but herdr-core may have been typing it at the kill: a short bound."""
+    b = bench(pending_follow=(0.0,))
+    b.client.screens = [ASK]
+    b.open()
+    b.client.on_press = lambda: b.client.screens.__setitem__(slice(None), [ASK_CURSOR])
+    b.client.send_result = Failure("timeout")
+    b.backend.answerText("made-up text")
+    assert b.until("failed") and b.prompt["reason"] == "send_timeout"
+    b.client.send_result = None
+    b.backend.closePrompt()
+    b.backend.openPrompt("t1")
+    assert b.until("pending") and b.prompt["reason"] == "earlier" and b.backend.answerText("other text") is False
+    b.now[0] += 4.0
+    b.backend.apply(list(BLOCKED))
+    assert b.until("ready") and b.client.sent == [("t1", "made-up text")]
