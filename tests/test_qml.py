@@ -1205,6 +1205,28 @@ def test_the_cap_of_8_rows_has_one_source(app, window):
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
+def test_the_note_of_a_row_is_the_failure_then_opening_then_the_detail(app, window):
+    root, backend, messages = window
+    backend.apply(AGENTS)
+    settle(app)
+    click(app, root, rows(root, "status")[2])
+
+    def notes():
+        return {r.property("key"): (r.property("note"), r.property("noteText")) for r in rows(root, "agent")}
+
+    assert notes() == {"t2": ("", "api / 1"), "t3": ("", "")}
+    backend._set_opening("t2")
+    settle(app)
+    assert notes() == {"t2": ("opening", "opening…"), "t3": ("", "")}
+    backend.focusFailed.emit("t2", "could not raise the window")  # a failure comes before "opening"
+    settle(app)
+    assert notes() == {"t2": ("failed", "could not raise the window"), "t3": ("", "")}
+    panel = root.property("panel")
+    assert (panel.property("failedColor").name(), panel.property("openingColor").name()) == ("#f28b82", "#8ab4f8")
+    backend._set_opening("")
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
 def test_a_group_that_opens_again_starts_at_its_first_row(app, window):
     root, backend, messages = window
     backend.apply(many(working=10, idle=12))

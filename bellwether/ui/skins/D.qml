@@ -251,12 +251,12 @@ Item {
                             anchors.verticalCenter: parent.verticalCenter
                             width: Math.min(implicitWidth, agentRow.failed ? 190 : 124)
                             elide: Text.ElideRight
-                            text: agentRow.failed ? skin.panel.failedMessage
-                                : agentRow.opening ? "opening…" : agentRow.modelData.detail
-                            color: agentRow.failed ? "#f28b82" : agentRow.opening ? "#8ab4f8" : theme.dimColor
+                            text: agentRow.noteText
+                            color: agentRow.note === "failed" ? skin.panel.failedColor
+                                : agentRow.note === "opening" ? skin.panel.openingColor : theme.dimColor
                             font {
                                 family: skin.sans; pixelSize: 12
-                                weight: agentRow.failed || agentRow.opening ? Font.Medium : Font.Normal
+                                weight: agentRow.note !== "" ? Font.Medium : Font.Normal
                             }
                         }
                     }
@@ -292,7 +292,7 @@ Item {
                 verticalAlignment: Text.AlignVCenter
                 elide: Text.ElideRight
                 text: skin.panel.failedMessage
-                color: "#f28b82"
+                color: skin.panel.failedColor
                 font { family: skin.sans; pixelSize: 12; weight: Font.Medium }
             }
         }

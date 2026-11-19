@@ -91,6 +91,9 @@ QtObject {
 
     // The key of the agent that a jump goes to now. "" when no jump runs. Its row shows "opening…".
     readonly property string opening: backend.opening
+    // The colours of a failure message and of "opening…", the same in every layout (see AgentRow.note).
+    readonly property color failedColor: "#f28b82"
+    readonly property color openingColor: "#8ab4f8"
     // The agent of the last failed jump and the message for it. Empty again after 3 seconds.
     property string failedKey: ""
     property string failedMessage: ""

@@ -18,6 +18,12 @@ Item {
     readonly property bool failed: view.panel.failedKey === key
     // A jump to this agent runs: the row shows "opening…" in the place of its detail.
     readonly property bool opening: view.panel.opening === key
+    // The note in the place of the detail: "failed" (the message of the failed jump), "opening" (a jump to this
+    // agent runs) or "" (no note: the detail). A failure comes before "opening". The skin chooses the colour
+    // (panel.failedColor, panel.openingColor) and the place.
+    readonly property string note: failed ? "failed" : opening ? "opening" : ""
+    // The text in that place: the failure message, "opening…", or the detail of the agent.
+    readonly property string noteText: failed ? view.panel.failedMessage : opening ? "opening…" : modelData.detail
     // The pointer is on this row.
     readonly property bool hovered: view.panel.hoverItem === row
     // The last row of the group.
