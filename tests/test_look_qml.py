@@ -475,3 +475,34 @@ def test_the_options_window_takes_the_family_and_the_colours_and_the_selected_ca
     backend.setLayout("C")
     settle(app)
     assert (frame.property("color"), value(frame, "border.color")) == design
+
+
+# ----- the program icons have the text colour of the user -----
+
+@pytest.mark.parametrize("letter", LETTERS)
+def test_a_glyph_icon_of_a_row_is_drawn_again_in_a_new_text_colour(app, window, tmp_path, letter):
+    from tests.test_skins import GLYPH, marked
+    root, backend, messages = window
+    (tmp_path / "app" / "icons").mkdir(parents=True)
+    (tmp_path / "app" / "icons" / "pi.svg").write_text(GLYPH)  # a black square: the widget draws it in the text colour
+    backend.setLayout(letter)
+    backend.apply([Agent("t1", "working", "ana", "docs", "pi")])
+    root.setProperty("openState", "working")
+    backend.setColor("background", "#ff000000")  # so the picture has the pure colours of the icon
+    settle(app)
+
+    def icon_colour():
+        (icon,) = marked(root, "isProgramIcon")
+        assert value(icon, "status === Image.Ready") is True
+        return root.grabWindow().pixelColor(icon.mapToScene(QPointF(8, 8)).toPoint()).name(), icon.property("source")
+
+    first, first_file = icon_colour()
+    assert first == "#e8eaed"  # with no custom text colour: one light colour in every layout
+    backend.setColor("text", "#ff8800")
+    settle(app)
+    second, second_file = icon_colour()
+    assert second == "#ff8800" and second_file != first_file
+    backend.resetColor("text")
+    settle(app)
+    assert icon_colour() == (first, first_file)
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []

@@ -8,6 +8,7 @@ import pytest
 
 from bellwether import layouts, settings
 from bellwether.backend import Backend
+from bellwether.icons import TEXT_COLOR, Icons
 from bellwether.state import STATE_COLORS, Agent
 
 SKINS = {"C": layouts.built_skins()["C"], "A": layouts.built_skins()["A"], "T": Path("/skins/T.qml")}
@@ -262,3 +263,35 @@ def test_a_saved_look_with_bad_values_gives_the_defaults_for_them_and_one_log_li
         "the saved custom look has values that cannot be used: scale, colors.text, colors, fontFamily"]
     assert "secret" not in caplog.text and "white" not in caplog.text and "Not On" not in caplog.text
     assert path.read_text() == text  # the file stays as it is
+# ----- the program icons follow the text colour -----
+
+GLYPH = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M2 2h20v20H2z"/></svg>'
+
+
+def icon_file(backend):
+    from urllib.parse import unquote, urlparse
+    return Path(unquote(urlparse(backend.groups[2]["agents"][0]["icon"]).path))
+
+
+def test_a_new_text_colour_makes_new_program_icons_and_removes_the_old_copies(app, fake_client, tmp_path, path):
+    (tmp_path / "app" / "icons").mkdir(parents=True)
+    (tmp_path / "app" / "icons" / "pi.svg").write_text(GLYPH)
+    cache = tmp_path / "cache"
+    backend = make(fake_client, path, icons=Icons(tmp_path / "app", cache))
+    backend.apply([Agent("t1", "working", "ana", "", "pi")])
+    first = icon_file(backend)
+    assert TEXT_COLOR in first.read_text() and first.parent == cache
+    changes = []
+    backend.changed.connect(lambda: changes.append(icon_file(backend)))
+    backend.setColor("text", "#112233")
+    second = icon_file(backend)
+    assert changes == [second] and second != first and "#112233" in second.read_text() and TEXT_COLOR not in second.read_text()
+    assert sorted(cache.iterdir()) == [second]  # the copy in the old colour is gone: the cache does not grow
+    backend.setColor("accent", "#445566")  # a different role: the icons stay
+    assert changes == [second]
+    backend.resetColor("text")
+    assert icon_file(backend).read_text() == first.read_text() and sorted(cache.iterdir()) == [icon_file(backend)]
+    path.write_text(json.dumps({"colors": {"text": "#abcdef"}}))  # a saved text colour: the icons have it at the start
+    later = make(fake_client, path, icons=Icons(tmp_path / "app", cache))
+    later.apply([Agent("t1", "working", "ana", "", "pi")])
+    assert "#abcdef" in icon_file(later).read_text()

@@ -12,7 +12,7 @@ from .paths import NAME, cache_home
 log = logging.getLogger("bellwether")
 
 CACHE_PATH = cache_home() / NAME / "icons"
-TEXT_COLOR = "#e8eaed"  # The colour of the row text in Main.qml.
+TEXT_COLOR = "#e8eaed"  # The colour of the glyph icons with no custom text colour.
 GENERIC = "agent"
 # Program words of agents whose icon does not have the name of the word or of its first part.
 # From the "match" lists in the program table of the app (herdr-app 2026-11).
@@ -73,6 +73,24 @@ class Icons:
         self._color = color
         self._files: dict[str, Path | None] = {}  # program word -> the file that QML gets
         self._logged: set[str] = set()
+
+    @property
+    def color(self) -> str:
+        return self._color
+
+    def set_color(self, color: str) -> None:
+        """Use a different colour for the glyph icons from now on. The copies in the old colour that this object
+        made are removed: the cache does not grow when the user tries many colours."""
+        if color == self._color:
+            return
+        self._color = color
+        for file in self._files.values():
+            if file is not None and file.parent == self._cache:  # never a file of the app
+                try:
+                    file.unlink()
+                except OSError:
+                    pass  # gone already, or it cannot be removed: it only stays in the cache
+        self._files.clear()
 
     def url(self, app: str) -> str:
         file = self._files.get(app)

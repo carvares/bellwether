@@ -34,7 +34,7 @@ def test_the_tray_dot_has_the_colour_of_the_top_state_of_the_backend(app, fake_c
     made = []
     monkeypatch.setattr(tray, "make_icon", lambda color: made.append(color))
     item = tray.Tray.__new__(tray.Tray)  # no real tray item: only refresh() runs
-    item._backend, item._shown_state, item._icon = backend, None, FakeIcon()
+    item._backend, item._shown_color, item._icon = backend, None, FakeIcon()
     item._icons = tray.TrayIcons(None)  # no Herdr app icon: the circle
     item.refresh()
     backend.apply([Agent("t1", "idle", "a", ""), Agent("t2", "working", "b", ""), Agent("t3", "working", "c", "")])
@@ -71,7 +71,7 @@ def test_refresh_with_a_real_icon_sets_the_icon_only_when_the_top_state_changes(
     painter.end()
     backend = Backend(fake_client, settings_path=tmp_path / "state.json")
     item = tray.Tray.__new__(tray.Tray)
-    item._backend, item._shown_state, item._icon = backend, None, CountingIcon()
+    item._backend, item._shown_color, item._icon = backend, None, CountingIcon()
     item._icons = tray.TrayIcons(source)
     item.refresh()  # offline
     item.refresh()
@@ -232,3 +232,50 @@ def test_the_menu_has_options_above_hide_and_each_click_opens_the_options(app, f
     options.trigger()
     assert opens == [1, 1]
     backend.changed.disconnect(item.refresh)
+
+
+# ----- the custom look: the tray icon follows the status colours -----
+
+def test_the_tray_icon_takes_a_new_status_colour_at_once_and_only_for_the_top_state(app, fake_client, tmp_path, monkeypatch):
+    from PySide6.QtGui import QWindow
+
+    from bellwether import appicon, tray
+    from bellwether.backend import Backend
+    from bellwether.state import Agent
+
+    monkeypatch.setattr(appicon, "load_app_icon", lambda *args: None)  # no icon of the app: the circle
+    monkeypatch.setattr(tray.QSystemTrayIcon, "show", lambda self: None)  # no item in a real tray
+    made = []
+    real = tray.make_icon
+    monkeypatch.setattr(tray, "make_icon", lambda color: made.append(color) or real(color))
+    backend = Backend(fake_client, settings_path=tmp_path / "state.json", families=[])
+    item = tray.Tray(backend, QWindow(), app)
+    try:
+        backend.apply([Agent("t1", "idle", "a", ""), Agent("t2", "working", "b", "")])  # the top state is idle
+        assert made == [STATE_COLORS["offline"], STATE_COLORS["idle"]]
+        assert backend.setColor("idle", "#12ab34") is True  # no restart, and no call of refresh() by the test
+        assert made[-1] == "#12ab34" and len(made) == 3
+        backend.setColor("working", "#0000ff"), backend.setColor("text", "#ffffff")  # not the colour that shows
+        assert len(made) == 3
+        backend.apply([Agent("t2", "working", "b", "")])
+        assert made[-1] == "#0000ff" and len(made) == 4
+        backend.resetLook()
+        assert made[-1] == STATE_COLORS["working"] and len(made) == 5
+        backend.apply(None)  # offline and "none" have no custom colour
+        backend.setColor("blocked", "#ff0000")
+        assert item._shown_color == STATE_COLORS["offline"] and len(made) == 5  # that icon was made at the start
+    finally:
+        backend.changed.disconnect(item.refresh)
+        backend.colorsChanged.disconnect(item.refresh)
+
+
+def test_the_tray_keeps_a_small_number_of_icons_while_the_user_tries_colours(app):
+    from bellwether import tray
+
+    icons = tray.TrayIcons(None)
+    first = icons.icon("#000000")
+    assert icons.icon("#000000") is first  # made one time
+    for n in range(200):
+        icons.icon(f"#{n:06x}")
+    assert len(icons._icons) <= tray.TrayIcons.KEEP == 16
+    assert not icons.icon("#0000c7").isNull() and not icons.icon("#000000").isNull()  # an icon that is gone is made again

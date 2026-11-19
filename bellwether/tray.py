@@ -36,6 +36,10 @@ def make_icon(color: str) -> QIcon:
 class TrayIcons:
     """The tray icon of each colour: the Herdr app icon in that colour, or the circle without it. Made once."""
 
+    # The icons that stay in the memory. The user can try many status colours: the icons of the colours that are
+    # not used any more must not stay for ever. An icon that is gone is made again.
+    KEEP = 16
+
     def __init__(self, source: QImage | None) -> None:
         self._shapes = None if source is None else appicon.shapes(source)
         self._icons: dict[str, QIcon] = {}
@@ -51,6 +55,8 @@ class TrayIcons:
 
     def icon(self, color: str) -> QIcon:
         if color not in self._icons:
+            if len(self._icons) >= self.KEEP:
+                self._icons.clear()
             self._icons[color] = self._tinted(color) if self._shapes is not None else make_icon(color)
         return self._icons[color]
 
@@ -73,7 +79,7 @@ class Tray(QObject):
         super().__init__()
         self._backend = backend
         self._window = window
-        self._shown_state: str | None = None
+        self._shown_color: str | None = None
         self._icons = TrayIcons.load()
 
         self._menu = QMenu()
@@ -96,6 +102,7 @@ class Tray(QObject):
         self._icon.activated.connect(self._on_activated)
 
         backend.changed.connect(self.refresh)
+        backend.colorsChanged.connect(self.refresh)  # the custom look: a status colour of the user
         window.visibleChanged.connect(self._sync_label)
         self.refresh()
         self._sync_label()
@@ -115,10 +122,11 @@ class Tray(QObject):
 
     def refresh(self) -> None:
         online, counters = self._backend.online, self._backend.counters
-        state = self._backend.topState  # The same state as the border of the panel.
-        if state != self._shown_state:
-            self._icon.setIcon(self._icons.icon(STATE_COLORS[state]))
-            self._shown_state = state
+        # The same state and the same colour as the border of the panel.
+        color = self._backend.stateColors[self._backend.topState]
+        if color != self._shown_color:
+            self._icon.setIcon(self._icons.icon(color))
+            self._shown_color = color
         self._icon.setToolTip(tooltip_text(online, counters))
 
     def _sync_label(self, *_args) -> None:

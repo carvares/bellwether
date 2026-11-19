@@ -12,6 +12,7 @@ from PySide6.QtGui import QFontDatabase
 
 from . import layouts
 from .client import HerdrError, HerdrOffline
+from .icons import TEXT_COLOR
 from .settings import (
     COLOR_ROLES, DEFAULT_LOOK, DEFAULT_PATH, FONT_SCALE_LIMITS, SCALE_LIMITS, clamped, load_layout, load_look,
     load_position, save_layout, save_look, save_position, save_screen, valid_color)
@@ -102,6 +103,7 @@ class Backend(QObject):
         self._look_timer.setSingleShot(True)
         self._look_timer.setInterval(LOOK_SAVE_DELAY)
         self._look_timer.timeout.connect(self._save_look)
+        self._tint_icons()
         self.layoutChanged.connect(self.colorsChanged)  # the default colours are those of the layout that shows
         self._snapshot.connect(self.apply)
         self._focusDone.connect(self._set_opening)
@@ -504,8 +506,19 @@ class Backend(QObject):
         if value == self._look[key]:
             return
         self._look[key] = value
+        self._tint_icons()
         signal.emit()
         self._look_timer.start()  # again from the start: the save comes after the last change of a burst
+
+    def _tint_icons(self) -> None:
+        """The glyph icons of the programs have the text colour of the user. Not the text colour of a layout: with
+        no custom colour they have one colour in every layout."""
+        if self._icons is None:
+            return
+        before = self._icons.color
+        self._icons.set_color(self._look["colors"].get("text", TEXT_COLOR))
+        if self._icons.color != before:
+            self.changed.emit()  # the rows have new icon files
 
     def _save_look(self) -> None:
         try:
