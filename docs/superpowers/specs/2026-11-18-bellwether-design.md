@@ -167,7 +167,7 @@ Request of the user: "we need a options menu for it. this option menu must be op
 | File | Owns |
 |---|---|
 | `bellwether/ui/Main.qml` | The window: layer-shell properties, place and screen (`posX`, `posY`, `screenName`, `rehome`, `settle`, `moveToNextScreen`, `recover`), `clampPosition`, the one pointer handler (click or drag, hover, wheel), the drag step `minMoveMs`. It shows the skin in a `Loader` and has the size of the skin. No drawing. |
-| `bellwether/ui/PanelModel.qml` | The controller: the state and the rules that every skin uses (the list below). The only QML file other than `Main.qml` and `Options.qml` that reads `backend`. |
+| `bellwether/ui/PanelModel.qml` | The controller: the state and the rules that every skin uses (the list below). The only QML file other than `Main.qml` and `Options.qml` that reads `backend` (since 2026-11-19 also `skins/ThemeBase.qml`: see "Change on 2026-11-19: custom look"). |
 | `bellwether/ui/AgentList.qml` | The agent rows of one group: at most 8 rows on the screen, scroll with the wheel, the scroll position stays when new data comes. The skin gives the look of a row and an optional decoration. |
 | `bellwether/ui/AgentRow.qml` | The base of one agent row: its size, its click target, its states (`failed`, `opening`, `hovered`, `last`) and its name for a screen reader. |
 | `bellwether/ui/skins/<letter>.qml` | One skin: only drawing. `A.qml`, `B.qml`, `C.qml`, `D.qml`, `E.qml`. |
@@ -190,10 +190,11 @@ A skin gets the controller as its property `panel`. All of these are read-only f
 - `total` (0 offline), `parts` (the number of states with an agent).
 - `topState` ("blocked", "done", "idle", "working", "none", "offline"), `quiet` (true for "none" and "offline": the skin then uses its own neutral colour), `topColor`, `topLabel` ("Blocked", "No agents", "Offline"), `topCount`, `topBadge` ("1 blocked", "No agents", "Offline").
 - `cells`: the states of the lit cells of a cell bar (one for each agent up to `cellLimit` = 60, then shares, and a state with an agent keeps one cell). Empty with no agents and offline.
-- `stateColors`: the colours by state name.
-- `openState` ("" or a state): one group is open at a time. `openGroup`, `openLabel`, `openColor`, `agents` (the rows of the open group), `maxAgentRows` (8, read-only also for a test: a test makes a second controller with a different cap through an initial property), `shown` (rows on the screen), `scrolls` (the open group has more rows). `rowsFor(count)` is the one place that applies the cap of 8 rows: the controller and `AgentList` both use it.
+- `stateColors`: the colours by state name (since 2026-11-19 from `backend.stateColors`: the user can change four of them).
+- `pixelScale` (since 2026-11-19): `max(1, scale of the custom look)`, for a part of a skin that is made of pixels (the `sourceSize` of an icon, a canvas).
+- `openState` ("" or a state): one group is open at a time. `openGroup`, `openLabel`, `openColor`, `agents` (the rows of the open group), `maxAgentRows` (8, read-only also for a test: a test makes a second controller with a different cap through an initial property; since 2026-11-19 it is `min(rowLimit, rowRoom)`: fewer than 8 when 8 rows make the panel taller than its screen), `shown` (rows on the screen), `scrolls` (the open group has more rows). `rowsFor(count)` is the one place that applies the cap of 8 rows: the controller and `AgentList` both use it.
 - `opening`: the key of the agent that a jump goes to now, or "".
-- `failedColor` (`#f28b82`) and `openingColor` (`#8ab4f8`): the colours of a failure message and of "opening…", the same in every layout.
+- `failedColor` (`#f28b82`) and `openingColor` (`#8ab4f8`): the colours of a failure message and of "opening…", the same in every layout (since 2026-11-19: the colour of the status blocked, and the accent of the custom look).
 - `failedKey`, `failedMessage`: the last failed jump, for 3 seconds. `failedAlone`: true when the failed agent has no row (it is gone, or Herdr is offline).
 - `hoverItem`: the status item or agent row under the pointer (the window gives it with `hover(item)`). It is null for a status item that cannot open, so a skin needs no check of its own: `panel.hoverItem === item` is the whole rule for the pointer look.
 - `canOpen(state)`: true when a click opens the group (Herdr answers and the state has an agent). For a skin that draws an affordance (a chevron, a cursor). A status item that cannot open is inert: no pointer look, no change on a click.
@@ -276,8 +277,8 @@ A long group fits a screen of 1080 px in every skin: the highest panel is B with
 
 Request of the user: "remember that this option windows should have the same window style as the main one".
 
-- Each skin has a file `skins/<letter>Theme.qml`, a `QtObject` with the tokens of the list `THEME_TOKENS` in `bellwether/layouts.py`: `panelColor`, `frameColor` (the neutral frame), `frameWidth`, `radius`, `itemRadius`, `lineColor`, `textColor`, `dimColor`, `faintColor`, `accentColor`, `selectedColor`, `hoverColor`, `fontFamily`, `titleSize`, `bodySize`, `smallSize`, `letterSpacing`, `uppercaseTitles`, and `decoration` (a `Component` for a frame ornament that fills its parent and has a colour property `tone`, or null; Layout C: the four corner brackets). A test fails when a theme file does not have a token.
-- The skin makes one instance (`CTheme { id: theme }`) and uses the tokens where a value is the same thing. A value that only that design has stays in the skin. A skin reads the token for its status title (`titleSize`), its agent label (`bodySize`), its small texts and the detail (`smallSize`), and its colours of panel, frame, text, dim and faint text, and of the plate under the pointer; a test with other token values in a copy of the theme (`tests/test_skins.py`) finds a text that keeps a literal. Exceptions, each a size of that design: the tab labels of D (11 px; the `titleSize` of D, 13, is used only by the options window) and the detail of C (11 px; the `smallSize` of C, 10, is its header). The rule that picks the font family is in `skins/fonts.js` (`first(wanted, fallback)`), one copy for the five theme files. Layout C also has `neutralColor` (`#6b747d`): its corner brackets and its header with no agents and offline, and the brackets of its options window. A new skin needs its theme file; a skin with no theme file gets the tokens of Layout C in the options window.
+- Each skin has a file `skins/<letter>Theme.qml`, a `QtObject` (since 2026-11-19 a `ThemeBase`) with the tokens of the list `THEME_TOKENS` in `bellwether/layouts.py`: `panelColor`, `frameColor` (the neutral frame), `frameWidth`, `radius`, `itemRadius`, `lineColor`, `textColor`, `dimColor`, `faintColor`, `accentColor`, `selectedColor`, `hoverColor`, `fontFamily`, `titleSize`, `bodySize`, `smallSize`, `letterSpacing`, `uppercaseTitles`, and `decoration` (a `Component` for a frame ornament that fills its parent and has a colour property `tone`, or null; Layout C: the four corner brackets). A test fails when a theme file does not have a token.
+- The skin makes one instance (`CTheme { id: theme }`) and uses the tokens where a value is the same thing. A value that only that design has stays in the skin. A skin reads the token for its status title (`titleSize`), its agent label (`bodySize`), its small texts and the detail (`smallSize`), and its colours of panel, frame, text, dim and faint text, and of the plate under the pointer; a test with other token values in a copy of the theme (`tests/test_skins.py`) finds a text that keeps a literal. Exceptions, each a size of that design: the tab labels of D (11 px; the `titleSize` of D, 13, is used only by the options window) and the detail of C (11 px; the `smallSize` of C, 10, is its header). (Since 2026-11-19 these two have tokens too, `labelSize` and `detailSize`, and no skin has a text size of its own.) The rule that picks the font family is in `skins/fonts.js` (`first(wanted, fallback)`), one copy for the five theme files. Layout C also has `neutralColor` (`#6b747d`): its corner brackets and its header with no agents and offline, and the brackets of its options window. A new skin needs its theme file; a skin with no theme file gets the tokens of Layout C in the options window.
 - `backend.themeSource` is the theme file of the layout that shows. `Options.qml` loads it and reads only tokens: frame, header, fonts, colours, the selected and the hover look of a card, the focus ring. The frame has `frameColor`, never the colour of a status: the options window does not show a status. In Layout C the window and the selected card have the corner brackets.
 - The window has no title bar of the system: `Qt.Window | Qt.FramelessWindowHint`, transparent background (round corners stay clean). It is still an `xdg_toplevel`; the trace has no decoration request for it, it gets the keyboard focus (`wl_keyboard.enter` on its surface), and the panel stays the one layer surface. Its header draws the title (capitals when `uppercaseTitles`) and a close control. A press in the header that moves 6 px or more sends `systemMoveRequested`, which calls `startSystemMove()`: the compositor moves the window, and the widget has no position code for it.
 - The size of the window (1076 × 344) and the places and sizes of the cards are the same in every theme, so a card stays under the pointer when a click changes the theme.
@@ -288,6 +289,135 @@ Request of the user: "remember that this option windows should have the same win
 - A person has not yet looked at the layouts A, B, D and E on the screen. The checks compared images of the real panel with the mock-ups.
 - The options windows of A, B, D and E look much alike (round frame, the same font and colours; the radius and the title size are different): these four designs share their colours and their font. Only Layout C has a different font, capitals and an ornament.
 - The options window has the application name of the Python program ("python") and no icon of its own in the task bar.
+
+## Change on 2026-11-19: custom look
+
+Request of the user: "now let's include more customization options in the settings. like changing the window size, font size, font family and colors". Decisions of the user: the window size is one scale from 75 % to 200 % for the whole panel; one set of values for all five layouts; the colours that can change are the four status colours, the background, the text, the frame and the accent; one "Reset to defaults".
+
+The work has two steps. Step 1 (Task 22, this section) is the engine: the saved values, the interface of the backend, and the panel, the tray icon and the options window that follow the values while the widget runs. Step 2 adds the controls to `Options.qml`. After step 1 a person changes the look in `state.json` (and restarts the widget), and a test changes it through the slots of the backend.
+
+### The saved values
+
+`~/.config/bellwether/state.json` has four more keys, beside `x`, `y`, `screen` and `layout`:
+
+| Key | Type | Default | Valid |
+|---|---|---|---|
+| `scale` | number | 1.0 | 0.75 to 2.0. A number out of the limits is clamped. |
+| `fontScale` | number | 1.0 | 0.8 to 1.4. A number out of the limits is clamped. |
+| `fontFamily` | text | "" (the font of each layout) | A family of the list `backend.fontFamilies`. |
+| `colors` | object | {} | Keys: `blocked`, `done`, `working`, `idle`, `background`, `text`, `frame`, `accent`. Values: `#rrggbb`; for `background` also `#aarrggbb`. A role with no key has the colour of the layout. |
+
+Rules (`bellwether/settings.py`: `load_look`, `save_look`, `valid_color`, `clamped`):
+
+- A file without these keys works as before this change.
+- The two numbers have two decimal places.
+- A value that is not valid is ignored, and its default applies: a value of the wrong type (a number as text, `true`, `null`, NaN), a colour that is not `#rrggbb` (or `#aarrggbb` for the background), a role that is not one of the eight, a font family that this system does not have. The valid values of the same file apply. The log gets ONE line for the file, with the keys only: "the saved custom look has values that cannot be used: scale, colors.text, colors, fontFamily". A colour is named `colors.<role>`; a role that is not one of the eight is named `colors` (its name is not written: a file that a person changed can hold anything). A start does not change the file.
+- A value at its default has no key in the file. So after "reset everything" the file has none of the four keys.
+- Saving the look keeps `x`, `y`, `screen`, `layout` and the keys of a later version, and the reverse.
+- The four keys are saved together. So a save of the look also drops a value of these four that was not valid at the start.
+
+### What each value does
+
+**scale.** The window shell applies it one time for every skin (`Main.qml`): the `Loader` of the skin has a `Scale` transform from its top-left corner, and the layer surface has the size `ceil(implicit size of the skin × scale)` (`scaled()`; 320 × 1.1 is 352, not 353). A skin does not know the scale: its sizes are the pixels of the design.
+
+- The pointer handler works in pixels of the screen: the press must move 6 px of the screen to be a drag, and the panel moves as far as the pointer. For the hit test the handler maps the point to the skin (`mapFromItem`), so the transform is in the map.
+- The saved place is the top-left corner. After a change of the scale `clampPosition` keeps the panel on its screen; a panel at the default corner stays at the corner. A change of the scale is one new size: the trace has one `zwlr_layer_surface_v1.set_size` and one commit.
+- Sharp at every scale: a text is drawn from its outlines at the scale (the default text rendering of Qt Quick; no skin sets `renderType`). A part that is made of pixels needs more pixels above the scale 1: `panel.pixelScale` is `max(1, scale)`; a program icon loads `16 × pixelScale` pixels (`sourceSize`), and the ring of Layout E draws on a canvas of `100 × pixelScale` pixels that is shown `1 / pixelScale` times smaller. Rectangles are drawn by the renderer at the scale.
+- The scale does not apply to the options window.
+- A panel is never taller than its screen. One rule, `fitRows()` in `Main.qml`: the lists show only the rows that fit: `panel.rowRoom` = (height of the screen ÷ scale − height of the skin without its rows) ÷ height of a row, from 1 to `panel.rowLimit` (8). `panel.maxAgentRows` is `min(rowLimit, rowRoom)`, and the group scrolls. `AgentList` gives the height of a row to the controller (`panel.rowHeight`). The rule runs before each frame (`onAfterAnimating`), when the items of the skin have their final places, so the height of the skin and the number of rows belong together; the same rule gives the rows back when they have room again. `takeSize()` does not give the window a size that is taller than the screen while a list can show fewer rows. On a screen of 1080 px, 8 rows fit at scale 2.0 in every layout with the font scale 1 (the highest panel is B with 920 px). With scale 2.0 and font scale 1.4 the lists show 7 (A), 5 (B), 6 (C), 7 (D) and 8 (E) rows.
+- One new size for each change. The size of a skin can change two times and more in one step: with one list in each group (A, C) the list of the new group opens before the list of the old group closes, and a new font changes many heights one after the other. Before this change the window took each of these sizes, and a size on the way that was taller than the room below the panel moved the panel up for good. Now a new size of the skin calls `takeSize()` after the step, one time (`sizeLater()`, `Qt.callLater`). The trace has one `set_size` for a change of the scale, of the open group and of the font scale. One case has two: when a list gets rows back (for example the font scale goes from 1.4 to 1.0 at scale 2.0), the window first takes the size with the fewer rows, and the size with all rows one frame later.
+
+**fontScale.** Every text size of every skin is a theme token, and a theme token is `size(pixels of the design)`: `round(pixels × fontScale)`. A test fails when a skin has a number after `pixelSize:` (`tests/test_look_qml.py`), and a second test checks every text on the screen against its size at the font scale 1.
+
+- New tokens for the sizes that only some designs have (in the theme file of the design): `numeralSize` (A 15, B 34, C 20, D 20, E 15), `labelSize` (B 12: the title of the card; D 11: the tab label), `detailSize` (B 11, C 11, D 11), `markSize` (B 14), `noticeSize` (C 13: "OFFLINE"; D 17: "Offline"; E 15: "off"), `headlineSize` (D 24; E 26, with `headlineMidSize` 21 above 99 agents and `headlineSmallSize` 16 above 999), `unitSize` (D 13, E 10: the word "agents"), `badgeSize` (D 12). This closes the two exceptions of Task 21 (the tab label of D and the detail of C).
+- Boxes grow with a larger font and stay with a smaller one: `fit(pixels)` is `round(pixels × max(1, fontScale))`. The skins use it for the heights that hold text: status rows, agent rows, tiles, badges, tabs, the headline, the footer, the line of a failed jump. The width of a panel never changes; a long text elides. In Layout E the ring grows half as much as the rows (`(100 + fit(100)) / 2`), and the name in a legend row elides before it touches a large count. In Layout C the header drops the word "BELLWETHER" when the three parts do not fit, and then the total elides.
+- The options window uses the same tokens, and `size()` and `fit()` for its own sizes: with a larger font its cards and the window get taller (344 px high at the font scale 1; the width stays 1076).
+
+**fontFamily.** `family(font of the design)` in each theme file: the family of the user when it is set, in every layout and in the options window. Layout C is made for a monospace font: with a proportional font its columns are less even. Nothing is cut or over a different text (the tests check each layout with a proportional and a monospace family, also at the font scale 1.4).
+
+**colors.**
+
+- `blocked`, `done`, `working`, `idle`: `backend.stateColors`, which `panel.stateColors` gives to the skins (`groups[n].color`, `topColor`, `openColor`), and the tray icon. `offline` and `none` (`#5f6368`) do not change. `panel.failedColor` is the colour of `blocked` (as before: the same value).
+- `background`: `panelColor`. `#rrggbb` keeps the opacity of the layout, `#aarrggbb` sets it. A plate inside the panel (the card of B, the footer of D: `insetColor`) is the custom background made darker (`Qt.darker`, 1.2).
+- `text`: `textColor`, and every grey of a design, by one rule: **with a custom text colour a grey is that colour at a fixed opacity**. `dimColor` 62 %, `faintColor` 45 %, `hoverColor` the opacity of the design (8 %), and the greys that only one design has through `tone(colour of the design, opacity)`: `ghostColor` 35 % (the outline of an empty mark, a count of 0), C `markColor` 35 %, `guideColor` 28 %, `dotColor` 22 %, `hatchColor` 10 %, B `separatorColor` 12 %, D `trackColor` 15 % and `mutedColor` 80 %. So the user sets one colour. The glyph icons of the programs (one colour, drawn in the text colour) follow it too (see "The program icons").
+- `frame`: `frameColor` and `lineColor` (and `neutralColor` of Layout C: its brackets with no agents).
+- `accent`: `accentColor`; `selectedColor` is the accent at the opacity of the theme; `panel.openingColor`.
+- Colour values in the skins that are not one of the roles, and stay: `#202124`, the dark text and the dark border on a solid plate of a status colour (A: the count in a filled badge; B: the label, the count, the mark and the border of a solid tile); `#24ffffff`, the white veil under the pointer on a solid tile of B. In `Options.qml`: `#05070a`, the backdrop of the pictures of the designs, and `#0b0e11`, the dark text of the tag on the accent. No other colour value is left in a skin.
+
+### One mechanism: `skins/ThemeBase.qml`
+
+Every theme file is a `ThemeBase` (before: a `QtObject`). A theme file states only the values of its design, each inside the helper of its kind; with no custom look a helper returns the value of the design, not changed:
+
+```qml
+ThemeBase {
+    readonly property color panelColor: background("#f21f2023")
+    readonly property color dimColor: dim("#9aa0a6")
+    readonly property string fontFamily: family(Fonts.first([...], fallback))
+    readonly property int titleSize: size(15)
+}
+```
+
+| Helper | Returns, with a custom look |
+|---|---|
+| `size(pixels)` | `round(pixels × backend.fontScale)` |
+| `fit(pixels)` | `round(pixels × max(1, backend.fontScale))` |
+| `family(design)` | `backend.fontFamily`, when it is not "" |
+| `background(design)` | the custom background; `#rrggbb` with the opacity of `design` |
+| `inset(design)` | the custom background, darker by 1.2 |
+| `text(design)`, `frame(design)`, `accent(design)` | the custom colour of the role, with the opacity of `design` |
+| `dim(design)`, `faint(design)` | the custom text colour at 62 % and at 45 % |
+| `tone(design, opacity)` | the custom text colour at `opacity` |
+
+New sentence of the skin contract: **`ThemeBase.qml` reads `backend` (the font scale, the font family, `colorOverrides`); a skin still reads only its `panel` and its theme.** A skin calls `theme.fit()` for a length that holds text. The files that read `backend` are now `Main.qml`, `Options.qml`, `PanelModel.qml` and `skins/ThemeBase.qml`. The context property `stateColors_` is gone: the controller reads `backend.stateColors`.
+
+`bellwether/layouts.py` `theme_colors(file)` reads the default colours of the roles background, text, frame and accent from the text of a theme file (the tokens `panelColor`, `textColor`, `frameColor`, `accentColor`), for `backend.defaultColors`. A test compares them with the values of the loaded QML theme for the five layouts. A file that cannot be read gives the colours of Layout C.
+
+### The interface of the backend (for the controls of step 2)
+
+Properties (`backend.<name>` in QML):
+
+| Member | Type | Signal | Meaning |
+|---|---|---|---|
+| `scale` | real | `scaleChanged` | The scale that applies now. |
+| `scaleMin`, `scaleMax`, `scaleDefault` | real | constant | 0.75, 2.0, 1.0. |
+| `fontScale` | real | `fontScaleChanged` | The font scale that applies now. |
+| `fontScaleMin`, `fontScaleMax`, `fontScaleDefault` | real | constant | 0.8, 1.4, 1.0. |
+| `fontFamily` | string | `fontFamilyChanged` | The family of the user. "": each layout has its own font. |
+| `fontFamilies` | list of strings | constant | The families that can be chosen: sorted with no regard to capitals, each one time. The fonts of the system that are not private, can have any size (no bitmap font) and have the Latin letters (so no symbol or emoji font). Read at the first use. |
+| `colorRoles` | list of strings | constant | `blocked`, `done`, `working`, `idle`, `background`, `text`, `frame`, `accent`, in this order. |
+| `colors` | map role → colour | `colorsChanged` | The colour of each of the eight roles as it applies now: the custom colour, or the default of the layout that shows. `#rrggbb`; the background of a layout is `#aarrggbb`. |
+| `colorOverrides` | map role → colour | `colorsChanged` | Only the roles that the user changed. A role is changed when it is a key of this map. |
+| `defaultColors` | map role → colour | `colorsChanged` | The colour of each of the eight roles with no custom look, for the layout that shows now (for a "reset" swatch). |
+| `stateColors` | map state → colour | `colorsChanged` | The six colours by state (`offline` and `none` too), for the controller and the tray. |
+
+`colorsChanged` also comes after a change of the layout: the default colours are those of the layout that shows.
+
+Slots:
+
+| Member | Returns | Meaning |
+|---|---|---|
+| `setScale(real)` | bool | A number out of the limits is clamped. Two decimal places. |
+| `setFontScale(real)` | bool | The same. |
+| `setFontFamily(string)` | bool | A family of `fontFamilies`, or "" for the font of each layout. |
+| `setColor(role, colour)` | bool | A role of `colorRoles` and `#rrggbb` (the background also `#aarrggbb`). Capitals are accepted and saved as small letters. |
+| `resetColor(role)` | bool | One colour back to the default of the layout. |
+| `resetLook()` | nothing | The scale, the font scale, the font family and every colour back to the defaults. |
+
+Each slot checks its value. A value that is not valid changes nothing, sends no signal, and the slot returns `false` (NaN and infinity; a family that is not in the list; a role that is not one of the eight; a colour of a different form). A valid value returns `true`, also when it is the value that applies already (then no signal and no save). A valid new value applies at once to the running panel, to the tray icon and to the options window, with its signal one time. A change of the layout keeps the custom look.
+
+The save: 0.4 s after the last change (`LOOK_SAVE_DELAY`, one `QTimer` that starts again with each change), so a slider that moves writes the file one time, with the last value. `backend.stop()` (the program calls it before it ends: `aboutToQuit`) saves a change that waits. A process that is killed (SIGTERM, SIGKILL) can lose the changes of the last 0.4 s. A look that cannot be saved still applies, and the log gets "the custom look was not saved".
+
+### The tray icon and the program icons
+
+- The tray icon has `backend.stateColors[topState]`, and it changes with `colorsChanged`. The tray keeps at most 16 icons in its memory (a new colour makes a new icon).
+- The program icons: the copy of a glyph icon in the cache (`~/.cache/bellwether/icons`) has the hash of its content in its name, and the colour is in the content. So a new text colour is a new file, never an old picture. `Icons.set_color()` forgets the file of each program, removes the copies that this run made in the old colour (the cache does not grow while the user tries colours), and the backend sends `changed`, so the rows get the new files. With no custom text colour the glyph icons are `#e8eaed` in every layout, as before.
+
+### Not verified, and limits
+
+- A person has not yet looked at the panel on the screen at a scale, with a different font or with custom colours. The checks used the window's own picture (off screen, and one picture from the real compositor at scale 2), the tests and the protocol trace.
+- The dark text on a solid plate of a status colour (`#202124`) does not change: a dark custom colour for `blocked` or `done` makes the count in the badge of A and the solid tile of B hard to read. The same for the tag on the accent in the options window.
+- Layout E, a long group: the fade over the last row is a rectangle, and its two bottom corners are outside the round corner of the frame. With the dark panel of the design this cannot be seen; with a light custom background it can. It is the same in the approved picture of the design, so it was not changed here.
+- A failure message in a row with a large font takes the room of the name of that row (the name elides to nothing in A for the 3 seconds of the message).
 
 ## Goal
 

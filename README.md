@@ -137,6 +137,38 @@ If the empty block stays in the window after that, remove it from your layout in
 - Keyboard: Tab and Shift+Tab move between the cards that you can choose. Enter or Space selects the card. Esc closes the window.
 - Close the window with Esc or with the close control (×) in its header. The widget continues to run.
 
+### Custom look
+
+You can change the size of the panel, the size of the text, the font and eight colours. One set of values applies to all five layouts and to the options window. The controls for this come in the options window. Until then you set the values in the state file `~/.config/bellwether/state.json`, beside `x`, `y`, `screen` and `layout`. Stop the widget (tray menu, "Quit"), change the file, and start the widget again.
+
+| Key | Value | What it does |
+|---|---|---|
+| `scale` | a number from 0.75 to 2.0 (1.0 when the key is not there) | The size of the whole panel: frame, rows, icons and text grow or shrink together. The top-left corner of the panel stays at its place, and the panel stays on its monitor. The options window does not change its size. |
+| `fontScale` | a number from 0.8 to 1.4 (1.0 when the key is not there) | The size of every text, against the size that the layout gives it. With a larger text the rows get higher. The panel keeps its width, and a long text is cut with "…". |
+| `fontFamily` | the name of a font of this system, for example `"DejaVu Sans"` (the font of the layout when the key is not there or is `""`) | The font of every text. Layout C is made for a monospace font: with a different font its columns are less even. |
+| `colors` | an object with one or more of the keys below | Each value is a colour as `"#rrggbb"`. A key that is not there keeps the colour of the layout. |
+
+The keys of `colors`:
+
+- `blocked`, `done`, `working`, `idle`: the colour of that status, in the panel and in the tray icon. The frame of the panel (in Layout C: the corner brackets) has the colour of the most important status.
+- `background`: the colour of the panel. `"#rrggbb"` keeps the opacity of the layout. `"#aarrggbb"` also sets the opacity (`aa` from `00`, clear, to `ff`, solid).
+- `text`: the colour of the text. The dim texts, the thin guide lines and the one-colour program icons use the same colour, lighter.
+- `frame`: the colour of the frame when no agent exists, and of the thin lines.
+- `accent`: the colour of the selected card in the options window, and of "opening…" in an agent line.
+
+Example:
+
+```json
+{"x": 1500, "y": 40, "screen": "DP-1", "layout": "A", "scale": 1.25, "fontScale": 1.1,
+ "fontFamily": "DejaVu Sans", "colors": {"blocked": "#ff5c5c", "background": "#cc101418"}}
+```
+
+- A number out of its limits is set to the nearest limit.
+- A value that the widget cannot use (a number as text, a colour in a different form, a font that this system does not have) is ignored: the default applies, and the log gets one line with the names of the keys. The other values of the file apply.
+- To go back to the look of the layouts, delete the four keys.
+- At a large scale a long list can be higher than the monitor. The list then shows fewer than 8 agents at a time, and you turn the mouse wheel for the others.
+- The dark text on a filled badge (Layout A) and on a filled tile (Layout B) does not change. So a dark colour for `blocked` or `done` is hard to read there.
+
 ### When the Herdr app window is closed
 
 Your agents continue to run in herdr-core. The widget then reads herdr-core:
@@ -164,10 +196,10 @@ The widget follows the changes of herdr-core with one child process, `herdr-core
 
 ## Files
 
-- Position and layout: `~/.config/bellwether/state.json`. The keys are `x` and `y` (from the top-left corner of a monitor), `screen` (the name of that monitor) and `layout` (the letter of the layout, `"C"` when the key is not there). A panel that is at its default corner (top right) has no `x` and `y`. A layout that the widget does not have gives Layout C and one line in the log.
+- Position, layout and custom look: `~/.config/bellwether/state.json`. The keys are `x` and `y` (from the top-left corner of a monitor), `screen` (the name of that monitor), `layout` (the letter of the layout, `"C"` when the key is not there), and `scale`, `fontScale`, `fontFamily` and `colors` (see "Custom look" above; a file without them has the look of the layouts). A panel that is at its default corner (top right) has no `x` and `y`. A layout that the widget does not have gives Layout C and one line in the log.
 - Log: `~/.local/state/bellwether/bellwether.log`
 - Start log (output of `scripts/start.sh` starts): `~/.local/state/bellwether/start.log`
-- Icon copies: `~/.cache/bellwether/icons/`. The widget reads the icons from the folder of the app (`~/.config/herdr-app/icons/`, or `$HERDR_APP_HOME/icons/`) and does not change them. A one-colour icon is black, so the widget writes a light copy of it here. You can delete this folder.
+- Icon copies: `~/.cache/bellwether/icons/`. The widget reads the icons from the folder of the app (`~/.config/herdr-app/icons/`, or `$HERDR_APP_HOME/icons/`) and does not change them. A one-colour icon is black, so the widget writes a copy of it here, in a light colour or in your text colour (`colors.text`). You can delete this folder.
 
 The widget uses `$XDG_CONFIG_HOME`, `$XDG_STATE_HOME` and `$XDG_CACHE_HOME` in place of `~/.config`, `~/.local/state` and `~/.cache` when you set them.
 
