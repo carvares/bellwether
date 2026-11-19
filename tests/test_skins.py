@@ -425,6 +425,39 @@ def test_a_press_that_moves_less_than_6_screen_pixels_is_a_click_at_scale_2_and_
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
+@pytest.mark.parametrize("scale", [1.0, 2.0])
+@pytest.mark.parametrize("letter", LETTERS)
+def test_each_change_gives_the_window_one_new_size_and_a_size_on_the_way_does_not_move_the_panel(app, window, letter, scale):
+    """The size of a skin can change two times in one step: with one list in each group (A, C), the list of the new
+    group opens before the list of the old group closes, and a new font changes many heights one after the other.
+    The window takes only the last size. A size on the way must not push the panel up from the bottom of its screen."""
+    root, backend, messages = window
+    backend.setLayout(letter)
+    backend.setScale(scale)
+    backend.apply(many(blocked=1, working=8, idle=12))
+    use_screens(root, OFFSET, "B", 300, 0)
+    root.setProperty("openState", "idle")
+    settle(app)
+    y = 1080 - root.height() - 2  # the panel with its longest group is 2 px above the bottom edge of the screen
+    root.setProperty("posY", y)
+    sizes = []
+    root.heightChanged.connect(lambda *_: sizes.append(root.height()))
+    root.widthChanged.connect(lambda *_: sizes.append(root.width()))
+    for state in ("working", "idle", "blocked", "idle", "", "idle"):
+        sizes.clear()
+        root.setProperty("openState", state)
+        settle(app)
+        assert len(sizes) <= 1, (state, sizes)
+        assert place(root) == ("B", 300, y), state
+        assert (root.width(), root.height()) == surface(root, scale)
+    for change in (lambda: backend.setFontScale(0.8), lambda: backend.setFontScale(1.0)):
+        sizes.clear()
+        change()
+        settle(app)
+        assert len(sizes) <= 1 and place(root) == ("B", 300, y) and (root.width(), root.height()) == surface(root, scale)
+    assert backend.saves == [] and [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
 GLYPH = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M2 2h20v20H2z"/></svg>'
 
 

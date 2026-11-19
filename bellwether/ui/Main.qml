@@ -248,44 +248,41 @@ Window {
     // The window has the size of the skin at the scale. Without a skin, and while a skin reports no size, it
     // keeps its size: a layer surface must never get the size 0. The width and the height change together: one
     // new size for the layer surface.
-    // A panel that would be taller than its screen does not get that size here: fitRows() first takes rows away
-    // from its list. That runs later, when the skin has its final size (the size of a skin can change two times
-    // in one step, for example when one list closes and a different list opens).
+    // A panel that would be taller than its screen does not get that size while its list can show fewer rows:
+    // fitRows() takes rows away before the next frame, and the skin then has a size that fits.
     function takeSize() {
         if (!skin || skin.implicitWidth <= 0 || skin.implicitHeight <= 0)
             return
-        var tall = scaled(skin.implicitHeight) > home.height
-        if (tall || panelModel.rowRoom < panelModel.rowLimit)
-            Qt.callLater(fitRows)
-        if (!tall)
-            resize()
-    }
-
-    function resize() {
         var w = scaled(skin.implicitWidth)
         var h = scaled(skin.implicitHeight)
+        if (h > home.height && panelModel.shown > 1 && panelModel.rowHeight > 0) {
+            requestUpdate()  // a frame, so that fitRows() runs
+            return
+        }
         if (width !== w || height !== h)
             setGeometry(x, y, w, h)
     }
 
-    // The one rule for a panel that is taller than its screen (a long group at a large scale): the lists show
-    // only the rows that fit (panel.rowRoom, from 1 to panel.rowLimit), and the group scrolls. The rows that fit
-    // are the height of the screen less the height of the skin without its rows, divided by the height of a row.
-    // With no open group the lists get all their room again.
+    // The size of a skin can change two times and more in one step (one list closes and a different list opens;
+    // a new font changes many heights). So a new size of the skin calls takeSize() after the step, one time, and
+    // a size on the way never reaches the window.
+    function sizeLater() {
+        Qt.callLater(takeSize)
+    }
+
+    // The one rule for a panel that would be taller than its screen (a long group at a large scale): the lists
+    // show only the rows that fit (panel.rowRoom, from 1 to panel.rowLimit), and the group scrolls. The rows that
+    // fit are the height of the screen less the height of the skin without its rows, divided by the height of a
+    // row. It runs before each frame (onAfterAnimating): the items of the skin then have their final places, so
+    // the height of the skin and the number of rows belong together. The same rule gives the rows back when
+    // they have room again (a smaller scale, a taller screen).
     function fitRows() {
-        if (!skin || skin.implicitWidth <= 0 || skin.implicitHeight <= 0)
-            return
         var rows = panelModel.shown
-        if (rows === 0 || panelModel.rowHeight <= 0) {
-            panelModel.rowRoom = panelModel.rowLimit
-        } else {
-            var rest = skin.implicitHeight - rows * panelModel.rowHeight
-            var fit = Math.floor((home.height / panelScale - rest) / panelModel.rowHeight + 0.000001)
-            panelModel.rowRoom = Math.max(1, Math.min(panelModel.rowLimit, fit))
-            if (panelModel.shown !== rows)
-                return  // the skin gets a new size, and takeSize() runs again
-        }
-        resize()
+        if (!skin || rows === 0 || panelModel.rowHeight <= 0)
+            return
+        var rest = skin.implicitHeight - rows * panelModel.rowHeight
+        var fit = Math.floor((home.height / panelScale - rest) / panelModel.rowHeight + 0.000001)
+        panelModel.rowRoom = Math.max(1, Math.min(panelModel.rowLimit, fit))
     }
 
     // The place at the start, when the size of the panel is known.
@@ -319,6 +316,7 @@ Window {
         takeSize()
     }
     onPanelScaleChanged: takeSize()
+    onAfterAnimating: fitRows()
     onScreenSourceChanged: recoverTimer.restart()
     // Only the compositor closes the window (the tray hides it): the monitor of the surface went away.
     onClosing: {
@@ -353,8 +351,8 @@ Window {
 
     Connections {
         target: root.skin
-        function onImplicitWidthChanged() { root.takeSize() }
-        function onImplicitHeightChanged() { root.takeSize() }
+        function onImplicitWidthChanged() { root.sizeLater() }
+        function onImplicitHeightChanged() { root.sizeLater() }
     }
 
     Connections {
