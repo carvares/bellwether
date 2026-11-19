@@ -98,6 +98,7 @@ If the empty block stays in the window after that, remove it from your layout in
 - The top line shows the name "BELLWETHER", the number of all agents ("AGENTS 10") and, at the right, the most important state that has agents (for example "BLOCKED").
 - The bar below it has one cell for each agent, in the colour of the state of the agent. The cells fill the width of the bar: 2 agents give 2 wide cells. With no agents, and offline, the bar is one empty outline. With more than 60 agents, the 60 cells show the share of each state, and a state with an agent keeps one cell or more.
 - The panel shows four rows: Blocked, Done, Working, Idle. Each row shows the number of agents in that state with two digits ("03"). They are the states that the Herdr app shows. A row with 0 agents is dim.
+- A blocked agent has an "Answer" control in its row. It opens a small window with the question of the agent and its options (see "Answer a blocked agent").
 - "Done" means that an agent finished while you did not look at it. It becomes "Idle" after you look at it in the app.
 - A terminal that runs no agent (a plain shell) is not counted.
 - Click a row to show its agents below it. Click the row again to hide them. Only one row is open at a time. A row with 0 agents does not open.
@@ -229,9 +230,51 @@ An open row closes when the widget goes offline.
 
 The widget follows the changes of herdr-core with one child process, `herdr-core events --json`. The widget reads `herdr-app ls` when herdr-core reports a change: usually a few milliseconds after the event, at most 0.25 s after it. A stream of changes gives about four to five reads each second at the most. The Herdr app itself sometimes shows a change 0.3 to 1.5 s after herdr-core reports it. So the widget reads again five times in the first 1.6 s after a change. While the stream works, the widget also reads one time each 2 seconds: a change that gives no event, or that the app shows later than 1.6 s, shows after at most 2 s. If herdr-core does not run, or the stream ends, the widget reads one time each second, as before, and tries to start the stream again after 1, 2, 5 and then each 10 seconds. The widget does not keep or log the text of a change. The child process ends with the widget, also when the widget is killed.
 
-### Answer a blocked agent (the engine; no control in the panel yet)
+### Answer a blocked agent
 
-The widget has the engine to answer the question of a blocked agent. It reads the screen of that one agent with `herdr-core read`, finds the dialog of Claude Code or Codex, and presses the key of the option that you choose with `herdr-core keys` (a free text goes with `herdr-core send`). It reads the screen again before each key, and it presses nothing when the question is different. When the dialog does not show all that it approves (a dialog taller than the screen, or an edit of Codex), it can only decline: you approve in Herdr. The text of a screen is in memory only while the question shows: the widget does not log it and does not write it to a file. The panel has no control for this yet: the "Answer" control and the answer window come with the next step. The details are in `docs/superpowers/specs/2026-11-19-bellwether-unblock-agents-design.md`.
+A blocked agent waits for your answer in its terminal. You can give that answer from the panel, without the Herdr window.
+
+1. Click the status "Blocked". Each blocked agent has an "Answer" control at the right end of its row.
+2. Click "Answer". The answer window opens with the question of that agent. A click on the rest of the row still shows the agent in Herdr.
+3. Click an option, or press its number (1 to 9). The window sends that one key to that one terminal.
+
+What the window shows:
+
+- The agent (its icon, name and terminal address), the title of the dialog, and the detail: the command, the diff or the plan, line for line as on the screen of the agent. A long line goes on in the next row with no new mark at its left; nothing is hidden at the side.
+- One button for each option, in the order of the dialog, with its number.
+  - An option that approves only this one thing ("Yes") has a full number in the accent colour.
+  - An option that approves more than this one thing ("always allow …", "don't ask again …", "auto mode", "accept edits for this session") has an empty number and a bar in the colour of the status "blocked". It never looks like the plain "Yes".
+  - An option that declines ("No") is grey.
+- A text field with "Send" when the question takes a free text. Type the text and press Enter. A text is one line of 1 to 2000 visible characters.
+- "Open in Herdr" is always there. It shows the agent in the Herdr app and closes the answer window.
+
+Keys: a number presses the option with that number (not while you type in the text field). Tab goes through the options, the text field, "Send", "Open in Herdr" and the close control. Enter presses only the control that has the keyboard: no option is selected at the start. Esc closes the window.
+
+The programs: Claude Code (permission dialogs for a command, an edit, a new file and a fetch; a question with one choice, also with tabs and its review page; the plan approval) and Codex (the approval of a command and of an edit). For any other program, and for a screen that Bellwether does not know, the window shows the screen as text and "Open in Herdr".
+
+Safety rules:
+
+- Bellwether shows buttons only when it knows the whole dialog. Before each key it reads the screen again, and it sends nothing when the question is different ("The question changed. Nothing was sent.").
+- One click or one key of yours is one answer. The window never sends anything by itself, and there is no "answer all".
+- For 0.4 seconds after a question shows, clicks and numbers do nothing. So a double click cannot answer the next question.
+- "Partly visible": Bellwether cannot see all that the dialog approves (a dialog that is taller than the screen of the agent, and every edit of Codex: its patch is not in the dialog). You can only decline from the window. To approve, use "Open in Herdr".
+- The text of a screen stays in memory only while the window shows it. It is never in the log and never in a file.
+
+When Herdr does not confirm an answer:
+
+- If you typed in that terminal in Herdr in the last 3 seconds, herdr-core holds the key of Bellwether until you stop. The window then says "Not confirmed … It may still arrive. Check in Herdr."
+- While that key may still arrive, Bellwether sends nothing more to that terminal. You can close and open the window: it shows the question with its buttons off.
+- This ends when herdr-core says that the key went (the window then shows what the agent shows now), or that it did not go.
+- If the late key arrives and the agent then shows the identical question again, the buttons stay off until you answer that question in Herdr. Bellwether cannot tell the second question from the first.
+- After you stop and start Bellwether, it does not know of a key that may still arrive. A key that herdr-core holds at the stop is not cancelled: it can still arrive.
+
+Limits:
+
+- The readers depend on how each program draws its dialogs. After an update of Claude Code or Codex, the window can show "Not readable" until Bellwether is updated.
+- The "trust this folder" dialogs are not a blocked state in Herdr: the panel does not show them.
+- The check-box question of Claude Code (many answers) is not answered from the window.
+- The dialogs were measured on terminals of 200, 80 and 50 columns. On a narrow terminal a label that wraps can differ from the screen by one space.
+- The answer window is a normal window: the compositor chooses its place (KWin puts it near the middle of the screen or under the pointer, by its own rule). You can move it by its header.
 
 ## Files
 
