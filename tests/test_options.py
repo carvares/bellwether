@@ -155,9 +155,9 @@ def test_the_keyboard_moves_between_the_built_cards_selects_and_closes(app, open
         return sum(1 for i in walk(window.contentItem()) if i.property("isFocusRing") and i.isVisible())
 
     assert focused() == ["C"] and rings() == 1  # the selected card has the focus at the open
-    QTest.keyClick(window, Qt.Key.Key_Tab)
+    QTest.keyClick(window, Qt.Key.Key_Backtab, Qt.KeyboardModifier.ShiftModifier)
     settle(app)
-    assert focused() == ["B"]  # the cards to come are not in the tab order: after C the first built card
+    assert focused() == ["B"]  # the cards to come are not in the tab order: before C the built card B
     QTest.keyClick(window, Qt.Key.Key_Space)
     settle(app)
     assert backend.layout == "B"
@@ -350,7 +350,7 @@ def test_the_window_has_the_style_of_each_layout_and_all_five_cards_can_be_chose
     assert all(c.property("built") and c.property("activeFocusOnTab") for c in cards(window))
     pictures = [i for i in walk(window.contentItem()) if i.property("isPreview")]
     assert len(pictures) == 5 and all(p.property("implicitWidth") == 360 for p in pictures)
-    assert window.width() == 1076 and 300 <= window.height() <= 400
+    assert window.width() == 1076 and 600 <= window.height() <= 700  # the sections fit the screen of the test
     assert sum(1 for i in walk(window.contentItem()) if i.property("isFocusRing") and i.isVisible()) == 1
 
 
@@ -391,9 +391,16 @@ def test_the_keyboard_reaches_all_five_cards_and_selects(app, real_options):
     focused = lambda: [c.property("layoutId") for c in cards(window) if c.property("activeFocus")]
     assert focused() == ["C"]
     seen = []
-    for key in (Qt.Key.Key_Return, Qt.Key.Key_Space, Qt.Key.Key_Enter, Qt.Key.Key_Return, Qt.Key.Key_Space):
-        QTest.keyClick(window, Qt.Key.Key_Tab)
-        settle(app)
+    # Tab goes to D and to E (after E come the controls of the custom look); Shift+Tab goes back to A.
+    moves = ((1, Qt.Key.Key_Return), (1, Qt.Key.Key_Space), (-4, Qt.Key.Key_Enter), (1, Qt.Key.Key_Return),
+             (1, Qt.Key.Key_Space))
+    for steps, key in moves:
+        for _ in range(abs(steps)):
+            if steps > 0:
+                QTest.keyClick(window, Qt.Key.Key_Tab)
+            else:
+                QTest.keyClick(window, Qt.Key.Key_Backtab, Qt.KeyboardModifier.ShiftModifier)
+            settle(app)
         QTest.keyClick(window, key)
         settle(app)
         seen.append((focused(), backend.layout))

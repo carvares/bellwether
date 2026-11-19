@@ -48,7 +48,8 @@ def text_findings(window):
     inside = QRectF(0, 0, window.width(), window.height()).adjusted(-0.5, -0.5, 0.5, 0.5)
     boxes = []
     for text in walk(window.contentItem()):
-        if not (text.isVisible() and text.metaObject().className().startswith("QQuickText") and text.property("text")):
+        # A Text, also a component that is one (controls/SectionTitle.qml). Not a TextInput: it scrolls its text.
+        if not (text.isVisible() and text.inherits("QQuickText") and text.property("text")):
             continue
         box = ink_box(text)
         clips = []  # the boxes around the text that cut their content

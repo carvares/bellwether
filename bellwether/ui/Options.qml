@@ -1,11 +1,14 @@
 // The options window: a normal window (an xdg toplevel, not a layer surface) that the tray entry "Options…"
 // opens. It has no title bar of the system: it draws its own frame and header in the style of the layout that
 // shows (the theme tokens of that skin, skins/<letter>Theme.qml), and it changes when the layout changes.
-// One column of sections. Now one section: the layout of the panel, as five cards. The places and the sizes of
-// the cards are the same in every theme: only the styling changes.
+// A header with the close control, a column of sections that scrolls when the screen is lower than the content,
+// and a footer with "Reset to defaults". The sections: the layout of the panel as five cards (their places and
+// sizes are the same in every theme), and the custom look: Size, Text and Colours. The controls are the
+// components of controls/; they read the values and the limits from the backend and only call its slots.
 import QtQuick
 import QtQuick.Window
 import "skins" as Skins
+import "controls" as Controls
 
 Window {
     id: options
@@ -24,6 +27,36 @@ Window {
     readonly property int cardGap: 12
     // The dark text of the tag on the accent.
     readonly property color tagInk: "#0b0e11"
+    // The custom look: two columns (Size at the left, Text at the right), each a label, a control, a value and
+    // a reset mark; then the eight colours in one row of two groups.
+    readonly property int innerWidth: fixedWidth - 2 * pad
+    readonly property int columnGap: 24
+    readonly property int columnWidth: (innerWidth - columnGap) / 2
+    // The widths of the label, the value and the reset mark of a row: they hold text, so they grow with it.
+    readonly property int labelWidth: theme.fit(104)
+    readonly property int valueWidth: theme.fit(56)
+    readonly property int resetWidth: theme.fit(58)
+    readonly property int controlHeight: theme.fit(28)
+    readonly property int sectionGap: 22
+    readonly property int swatchWidth: 120
+    readonly property int swatchGap: 8
+    readonly property int groupGap: 20
+    readonly property var roleNames: ({
+        "blocked": "Blocked", "done": "Done", "working": "Working", "idle": "Idle",
+        "background": "Background", "text": "Text", "frame": "Frame", "accent": "Accent"})
+    // The roles of the two groups of colours: the first four of the backend are the statuses.
+    readonly property var colourGroups: [
+        { "title": "Status", "roles": backend.colorRoles.slice(0, 4) },
+        { "title": "Panel", "roles": backend.colorRoles.slice(4) }]
+    // The role of the colour that the editor shows. "": the editor is closed.
+    property string editingRole: ""
+    // "Reset to defaults" waits for its second click.
+    property bool resetArmed: false
+    // Two controls must stay usable whatever colours the user chose (also a text in the colour of the panel): the
+    // close control and "Reset to defaults". They have a plate of the panel colour without its opacity, and an
+    // ink that a person can tell from that plate (ThemeBase.readable).
+    readonly property color safePlate: theme.solid(theme.panelColor)
+    readonly property color safeInk: theme.readable(theme.textColor, safePlate)
     // The header asks for a move of the window: the compositor moves it (no position code here).
     signal systemMoveRequested()
 
@@ -31,9 +64,15 @@ Window {
     flags: Qt.Window | Qt.FramelessWindowHint
     // The frame can have round corners: the window itself has no background.
     color: "transparent"
-    // The size is fixed, and the same in every theme: the content has one size (1076 × 344 with the font scale 1).
+    // The height of the screen of the window. A test gives its own.
+    property int roomHeight: Screen.height
+    // The size is fixed, and the width is the same in every theme and at every text size (1076). The height is
+    // the height of the content, or less on a low screen (80 px stay free for a task bar): the sections then
+    // scroll between the header and the footer.
     readonly property int fixedWidth: 5 * cardWidth + 4 * cardGap + 2 * pad
-    readonly property int fixedHeight: headerHeight + 20 + sectionTitle.height + 14 + cardHeight + pad
+    readonly property int footerHeight: controlHeight + 24
+    readonly property int wantedHeight: headerHeight + sections.height + footerHeight
+    readonly property int fixedHeight: Math.max(headerHeight + footerHeight + 120, Math.min(wantedHeight, roomHeight - 80))
     width: fixedWidth
     height: fixedHeight
     minimumWidth: fixedWidth
@@ -41,9 +80,20 @@ Window {
     minimumHeight: fixedHeight
     maximumHeight: fixedHeight
 
-    // At each open the keyboard starts on the card of the layout that shows.
-    onVisibleChanged: if (visible) focusSelected()
+    // At each open the keyboard starts on the card of the layout that shows, the sections start at their top,
+    // and nothing is open.
+    onVisibleChanged: {
+        editingRole = ""
+        resetArmed = false
+        fontChooser.open = false
+        if (visible) {
+            scroller.contentY = 0
+            focusSelected()
+        }
+    }
     onSystemMoveRequested: options.startSystemMove()
+    // The keyboard moved: the control that has it is on the screen.
+    onActiveFocusItemChanged: scroller.reveal(activeFocusItem)
 
     function focusSelected() {
         for (var i = 0; i < cards.count; i++)
@@ -51,9 +101,46 @@ Window {
                 cards.itemAt(i).forceActiveFocus()
     }
 
+    function swatchOf(role) {
+        for (var g = 0; g < groups.count; g++) {
+            var found = groups.itemAt(g).swatchOf(role)
+            if (found)
+                return found
+        }
+        return null
+    }
+
+    // Open the editor for a colour; for the colour that it shows already, close it.
+    function edit(role) {
+        if (editingRole === role) {
+            closeEditor()
+            return
+        }
+        fontChooser.open = false
+        editingRole = role
+        editor.start()
+        Qt.callLater(scroller.reveal, editor)
+    }
+
+    // Close the editor. The keyboard goes back to the swatch of its colour.
+    function closeEditor() {
+        var swatch = swatchOf(editingRole)
+        editingRole = ""
+        if (swatch)
+            swatch.forceActiveFocus()
+    }
+
+    // Esc closes what is open inside the window first (the colour editor, the list of fonts), then the window.
     Shortcut {
         sequences: [StandardKey.Cancel]
-        onActivated: options.close()
+        onActivated: {
+            if (options.editingRole !== "")
+                options.closeEditor()
+            else if (fontChooser.open)
+                fontChooser.hide()
+            else
+                options.close()
+        }
     }
 
     Skins.CTheme { id: fallbackTheme }
@@ -79,8 +166,8 @@ Window {
             sourceComponent: options.theme.decoration
         }
 
-        // The header: the title, and the close control at the right. A press that moves 6 px or more moves
-        // the window.
+        // The header: the title. (The close control at its right is the last item of the frame, so that the
+        // Tab key reaches it last.) A press that moves 6 px or more moves the window.
         Item {
             id: header
             readonly property bool isHeader: true
@@ -104,45 +191,15 @@ Window {
             Text {
                 readonly property bool isTitle: true
                 x: options.pad
+                width: parent.width - options.pad - 48
                 anchors.verticalCenter: parent.verticalCenter
+                elide: Text.ElideRight
                 text: "Bellwether — Options"
                 color: options.theme.dimColor
                 font {
                     family: options.theme.fontFamily; pixelSize: options.theme.titleSize; weight: Font.DemiBold
                     letterSpacing: options.theme.letterSpacing
                     capitalization: options.theme.uppercaseTitles ? Font.AllUppercase : Font.MixedCase
-                }
-            }
-            Rectangle {
-                id: closeControl
-                readonly property bool isClose: true
-                anchors.right: parent.right
-                anchors.rightMargin: 10
-                anchors.verticalCenter: parent.verticalCenter
-                width: 28
-                height: 28
-                radius: options.theme.itemRadius
-                color: closeArea.containsMouse ? options.theme.hoverColor : "transparent"
-                Accessible.role: Accessible.Button
-                Accessible.name: "Close"
-                Accessible.onPressAction: options.close()
-                Repeater {
-                    model: [45, -45]
-                    Rectangle {
-                        required property int modelData
-                        anchors.centerIn: parent
-                        width: 13
-                        height: 1.5
-                        rotation: modelData
-                        antialiasing: true
-                        color: closeArea.containsMouse ? options.theme.textColor : options.theme.dimColor
-                    }
-                }
-                MouseArea {
-                    id: closeArea
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    onClicked: options.close()
                 }
             }
             Rectangle {
@@ -154,177 +211,591 @@ Window {
             }
         }
 
-        // The section "Layout": its title and the five cards.
-        Text {
-            id: sectionTitle
-            x: options.pad
-            y: options.headerHeight + 20
-            height: options.theme.fit(16)
-            verticalAlignment: Text.AlignVCenter
-            text: "Layout"
-            color: options.theme.dimColor
-            font {
-                family: options.theme.fontFamily; pixelSize: options.theme.smallSize; weight: Font.DemiBold
-                letterSpacing: options.theme.letterSpacing
-                capitalization: options.theme.uppercaseTitles ? Font.AllUppercase : Font.MixedCase
+        // The sections. They scroll when the window is lower than its content: with the wheel, and with the
+        // keyboard (the control that gets the keyboard comes on the screen).
+        Flickable {
+            id: scroller
+            readonly property bool isScroller: true
+            readonly property bool scrolls: contentHeight > height + 0.5
+            y: options.headerHeight
+            width: parent.width
+            height: parent.height - options.headerHeight - options.footerHeight
+            contentWidth: width
+            contentHeight: sections.height
+            clip: true
+            interactive: false
+            onContentHeightChanged: contentY = Math.max(0, Math.min(contentY, contentHeight - height))
+            onHeightChanged: contentY = Math.max(0, Math.min(contentY, contentHeight - height))
+
+            function scrollBy(pixels) {
+                contentY = Math.max(0, Math.min(contentY + pixels, contentHeight - height))
             }
-        }
 
-        Row {
-            x: options.pad
-            y: sectionTitle.y + sectionTitle.height + 14
-            spacing: options.cardGap
+            // Bring an item of the sections on the screen, with 12 px of room around it.
+            function reveal(item) {
+                if (!item || !scrolls)
+                    return
+                for (var parent = item; parent && parent !== sections; parent = parent.parent) {}
+                if (!parent)
+                    return
+                var top = item.mapToItem(sections, 0, 0).y
+                if (top - 12 < contentY)
+                    contentY = Math.max(0, top - 12)
+                else if (top + item.height + 12 > contentY + height)
+                    contentY = Math.min(contentHeight - height, top + item.height + 12 - height)
+            }
 
-            Repeater {
-                id: cards
-                model: backend.layouts
+            WheelHandler {
+                // A touchpad gives pixels; one step of a mouse wheel (120) is 60 px.
+                onWheel: (event) => scroller.scrollBy(event.pixelDelta.y !== 0 ? -event.pixelDelta.y
+                                                                               : -event.angleDelta.y / 2)
+            }
 
-                // One layout. A layout that is not built yet is dim and cannot be chosen.
-                Rectangle {
-                    id: card
-                    required property var modelData
-                    readonly property string layoutId: modelData.id
-                    readonly property bool built: modelData.built
-                    readonly property bool selected: backend.layout === modelData.id
-                    readonly property bool hovered: built && pointer.containsMouse
+            Item {
+                id: sections
+                width: scroller.width
+                height: colours.y + colours.height + 20
 
-                    function choose() {
-                        if (built)
-                            backend.setLayout(modelData.id)
-                    }
+                // The section "Layout": its title and the five cards.
+                Controls.SectionTitle {
+                    id: layoutTitle
+                    theme: options.theme
+                    x: options.pad
+                    y: 20
+                    text: "Layout"
+                }
 
-                    width: options.cardWidth
-                    height: options.cardHeight
-                    radius: options.theme.itemRadius
-                    color: selected ? options.theme.selectedColor : hovered ? options.theme.hoverColor : "transparent"
-                    border.width: selected ? options.theme.frameWidth : 1
-                    border.color: selected ? options.theme.accentColor
-                        : hovered ? options.theme.faintColor : options.theme.lineColor
-                    activeFocusOnTab: built
-                    Accessible.role: Accessible.RadioButton
-                    Accessible.name: "Layout " + modelData.id + ", " + modelData.name
-                        + (selected ? ", selected" : built ? "" : ", coming next")
-                    Accessible.checkable: true
-                    Accessible.checked: selected
-                    Accessible.focusable: built
-                    Accessible.onPressAction: choose()
-                    Keys.onReturnPressed: choose()
-                    Keys.onEnterPressed: choose()
-                    Keys.onSpacePressed: choose()
+                Row {
+                    id: cardsRow
+                    x: options.pad
+                    y: layoutTitle.y + layoutTitle.height + 14
+                    spacing: options.cardGap
 
-                    // The ornament of the layout on the selected card (Layout C: the corner brackets).
-                    Loader {
-                        id: cardOrnament
-                        anchors.fill: parent
-                        sourceComponent: card.selected ? options.theme.decoration : null
-                        Binding { target: cardOrnament.item; property: "tone"; value: options.theme.accentColor }
-                    }
+                    Repeater {
+                        id: cards
+                        model: backend.layouts
 
-                    // The keyboard focus: a ring outside the card.
-                    Rectangle {
-                        readonly property bool isFocusRing: true
-                        visible: card.activeFocus
-                        anchors.fill: parent
-                        anchors.margins: -4
-                        radius: card.radius > 0 ? card.radius + 4 : 0
-                        color: "transparent"
-                        border.width: 2
-                        border.color: options.theme.textColor
-                    }
-
-                    Item {
-                        id: content
-                        x: 8
-                        y: 8
-                        width: parent.width - 16
-                        height: parent.height - 16
-                        opacity: card.built ? 1 : 0.4
-
+                        // One layout. A layout that is not built yet is dim and cannot be chosen.
                         Rectangle {
-                            width: parent.width
-                            height: 116
-                            radius: Math.min(3, options.theme.itemRadius)
-                            color: "#05070a"
-                            Image {
-                                readonly property bool isPreview: true
-                                anchors.centerIn: parent
-                                width: parent.width
-                                height: parent.height - 8
-                                fillMode: Image.PreserveAspectFit
-                                smooth: true
-                                mipmap: true
-                                source: card.modelData.preview
+                            id: card
+                            required property var modelData
+                            readonly property string layoutId: modelData.id
+                            readonly property bool built: modelData.built
+                            readonly property bool selected: backend.layout === modelData.id
+                            readonly property bool hovered: built && pointer.containsMouse
+
+                            function choose() {
+                                if (built)
+                                    backend.setLayout(modelData.id)
                             }
-                        }
-                        Text {
-                            id: cardName
-                            y: 124
-                            width: parent.width
-                            height: options.nameHeight
-                            verticalAlignment: Text.AlignVCenter
-                            text: card.modelData.id + " — " + card.modelData.name
-                            color: options.theme.textColor
-                            elide: Text.ElideRight
-                            font {
-                                family: options.theme.fontFamily; pixelSize: options.theme.bodySize + 1
-                                weight: Font.DemiBold
-                                capitalization: options.theme.uppercaseTitles ? Font.AllUppercase : Font.MixedCase
+
+                            width: options.cardWidth
+                            height: options.cardHeight
+                            radius: options.theme.itemRadius
+                            color: selected ? options.theme.selectedColor : hovered ? options.theme.hoverColor : "transparent"
+                            border.width: selected ? options.theme.frameWidth : 1
+                            border.color: selected ? options.theme.accentColor
+                                : hovered ? options.theme.faintColor : options.theme.lineColor
+                            activeFocusOnTab: built
+                            Accessible.role: Accessible.RadioButton
+                            Accessible.name: "Layout " + modelData.id + ", " + modelData.name
+                                + (selected ? ", selected" : built ? "" : ", coming next")
+                            Accessible.checkable: true
+                            Accessible.checked: selected
+                            Accessible.focusable: built
+                            Accessible.onPressAction: choose()
+                            Keys.onReturnPressed: choose()
+                            Keys.onEnterPressed: choose()
+                            Keys.onSpacePressed: choose()
+
+                            // The ornament of the layout on the selected card (Layout C: the corner brackets).
+                            Loader {
+                                id: cardOrnament
+                                anchors.fill: parent
+                                sourceComponent: card.selected ? options.theme.decoration : null
+                                Binding { target: cardOrnament.item; property: "tone"; value: options.theme.accentColor }
                             }
-                        }
-                        Text {
-                            id: cardDescription
-                            y: cardName.y + cardName.height + 6
-                            width: parent.width
-                            // Two lines for every card in every theme.
-                            height: options.descriptionHeight
-                            clip: true
-                            text: card.modelData.description
-                            color: options.theme.dimColor
-                            wrapMode: Text.WordWrap
-                            maximumLineCount: 2
-                            elide: Text.ElideRight
-                            font {
-                                family: options.theme.fontFamily
-                                pixelSize: Math.min(options.theme.size(12), options.theme.smallSize + 1)
+
+                            // The keyboard focus: a ring outside the card.
+                            Rectangle {
+                                readonly property bool isFocusRing: true
+                                visible: card.activeFocus
+                                anchors.fill: parent
+                                anchors.margins: -4
+                                radius: card.radius > 0 ? card.radius + 4 : 0
+                                color: "transparent"
+                                border.width: 2
+                                border.color: options.theme.textColor
                             }
-                        }
-                        // The state of the card, in words.
-                        Rectangle {
-                            readonly property bool isTag: true
-                            visible: card.selected || !card.built
-                            y: cardDescription.y + cardDescription.height + 8
-                            width: tagText.implicitWidth + 12
-                            height: options.tagHeight
-                            radius: Math.min(9, options.theme.itemRadius)
-                            color: card.selected ? options.theme.accentColor : options.theme.lineColor
-                            Text {
-                                id: tagText
-                                anchors.centerIn: parent
-                                text: card.selected ? "SELECTED" : "COMING NEXT"
-                                // On the accent: the dark ink of this window, or the light ink on a dark accent.
-                                color: card.selected ? options.theme.inkOn(options.theme.accentColor, options.tagInk)
-                                    : options.theme.textColor
-                                font {
-                                    family: options.theme.fontFamily; pixelSize: options.theme.size(9)
-                                    letterSpacing: 1; weight: Font.Bold
+
+                            Item {
+                                id: content
+                                x: 8
+                                y: 8
+                                width: parent.width - 16
+                                height: parent.height - 16
+                                opacity: card.built ? 1 : 0.4
+
+                                Rectangle {
+                                    width: parent.width
+                                    height: 116
+                                    radius: Math.min(3, options.theme.itemRadius)
+                                    color: "#05070a"
+                                    Image {
+                                        readonly property bool isPreview: true
+                                        anchors.centerIn: parent
+                                        width: parent.width
+                                        height: parent.height - 8
+                                        fillMode: Image.PreserveAspectFit
+                                        smooth: true
+                                        mipmap: true
+                                        source: card.modelData.preview
+                                    }
+                                }
+                                Text {
+                                    id: cardName
+                                    y: 124
+                                    width: parent.width
+                                    height: options.nameHeight
+                                    verticalAlignment: Text.AlignVCenter
+                                    text: card.modelData.id + " — " + card.modelData.name
+                                    color: options.theme.textColor
+                                    elide: Text.ElideRight
+                                    font {
+                                        family: options.theme.fontFamily; pixelSize: options.theme.bodySize + 1
+                                        weight: Font.DemiBold
+                                        capitalization: options.theme.uppercaseTitles ? Font.AllUppercase : Font.MixedCase
+                                    }
+                                }
+                                Text {
+                                    id: cardDescription
+                                    y: cardName.y + cardName.height + 6
+                                    width: parent.width
+                                    // Two lines for every card in every theme.
+                                    height: options.descriptionHeight
+                                    clip: true
+                                    text: card.modelData.description
+                                    color: options.theme.dimColor
+                                    wrapMode: Text.WordWrap
+                                    maximumLineCount: 2
+                                    elide: Text.ElideRight
+                                    font {
+                                        family: options.theme.fontFamily
+                                        pixelSize: Math.min(options.theme.size(12), options.theme.smallSize + 1)
+                                    }
+                                }
+                                // The state of the card, in words.
+                                Rectangle {
+                                    readonly property bool isTag: true
+                                    visible: card.selected || !card.built
+                                    y: cardDescription.y + cardDescription.height + 8
+                                    width: tagText.implicitWidth + 12
+                                    height: options.tagHeight
+                                    radius: Math.min(9, options.theme.itemRadius)
+                                    color: card.selected ? options.theme.accentColor : options.theme.lineColor
+                                    Text {
+                                        id: tagText
+                                        anchors.centerIn: parent
+                                        text: card.selected ? "SELECTED" : "COMING NEXT"
+                                        // On the accent: the dark ink of this window, or the light ink on a dark accent.
+                                        color: card.selected ? options.theme.inkOn(options.theme.accentColor, options.tagInk)
+                                            : options.theme.textColor
+                                        font {
+                                            family: options.theme.fontFamily; pixelSize: options.theme.size(9)
+                                            letterSpacing: 1; weight: Font.Bold
+                                        }
+                                    }
+                                }
+                            }
+
+                            MouseArea {
+                                id: pointer
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: card.built ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                onClicked: {
+                                    if (card.built)
+                                        card.forceActiveFocus()
+                                    card.choose()
                                 }
                             }
                         }
                     }
+                }
 
-                    MouseArea {
-                        id: pointer
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: card.built ? Qt.PointingHandCursor : Qt.ArrowCursor
-                        onClicked: {
-                            if (card.built)
-                                card.forceActiveFocus()
-                            card.choose()
+                // The section "Size": the scale of the whole panel. It does not apply to this window.
+                Item {
+                    id: sizeSection
+                    x: options.pad
+                    y: cardsRow.y + options.cardHeight + options.sectionGap
+                    width: options.columnWidth
+                    height: sizeTitle.height + 10 + options.controlHeight
+
+                    Controls.SectionTitle { id: sizeTitle; theme: options.theme; text: "Size" }
+                    Item {
+                        id: sizeRow
+                        y: sizeTitle.height + 10
+                        width: parent.width
+                        height: options.controlHeight
+
+                        Text {
+                            width: options.labelWidth - 8
+                            height: parent.height
+                            verticalAlignment: Text.AlignVCenter
+                            elide: Text.ElideRight
+                            text: "Panel size"
+                            color: options.theme.textColor
+                            font { family: options.theme.fontFamily; pixelSize: options.theme.bodySize }
+                        }
+                        Controls.LookSlider {
+                            id: sizeSlider
+                            readonly property string sliderFor: "scale"
+                            theme: options.theme
+                            x: options.labelWidth
+                            width: parent.width - x - options.valueWidth - options.resetWidth - 16
+                            height: parent.height
+                            label: "Panel size"
+                            from: backend.scaleMin
+                            to: backend.scaleMax
+                            step: backend.scaleStep
+                            defaultValue: backend.scaleDefault
+                            value: backend.scale
+                            onMoved: (value) => backend.setScale(value)
+                            onResetRequested: backend.setScale(backend.scaleDefault)
+                        }
+                        Text {
+                            readonly property string valueFor: "scale"
+                            x: sizeSlider.x + sizeSlider.width + 8
+                            width: options.valueWidth
+                            height: parent.height
+                            verticalAlignment: Text.AlignVCenter
+                            horizontalAlignment: Text.AlignRight
+                            elide: Text.ElideRight
+                            text: sizeSlider.percent + " %"
+                            color: options.theme.textColor
+                            font { family: options.theme.fontFamily; pixelSize: options.theme.bodySize; features: { "tnum": 1 } }
+                        }
+                        Controls.LookButton {
+                            readonly property string resetFor: "scale"
+                            theme: options.theme
+                            small: true
+                            visible: backend.scale !== backend.scaleDefault
+                            enabled: visible
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "Reset"
+                            spoken: "Reset the panel size to " + Math.round(backend.scaleDefault * 100) + " percent"
+                            onActivated: {
+                                sizeSlider.forceActiveFocus()
+                                backend.setScale(backend.scaleDefault)
+                            }
                         }
                     }
                 }
+
+                // The section "Text": the size of every text, and the font family.
+                Item {
+                    id: textSection
+                    x: options.pad + options.columnWidth + options.columnGap
+                    y: sizeSection.y
+                    width: options.columnWidth
+                    height: textTitle.height + 10 + options.controlHeight + 8 + fontChooser.height
+
+                    Controls.SectionTitle { id: textTitle; theme: options.theme; text: "Text" }
+                    Item {
+                        id: textRow
+                        y: textTitle.height + 10
+                        width: parent.width
+                        height: options.controlHeight
+
+                        Text {
+                            width: options.labelWidth - 8
+                            height: parent.height
+                            verticalAlignment: Text.AlignVCenter
+                            elide: Text.ElideRight
+                            text: "Text size"
+                            color: options.theme.textColor
+                            font { family: options.theme.fontFamily; pixelSize: options.theme.bodySize }
+                        }
+                        Controls.LookSlider {
+                            id: textSlider
+                            readonly property string sliderFor: "fontScale"
+                            theme: options.theme
+                            x: options.labelWidth
+                            width: parent.width - x - options.valueWidth - options.resetWidth - 16
+                            height: parent.height
+                            label: "Text size"
+                            from: backend.fontScaleMin
+                            to: backend.fontScaleMax
+                            step: backend.fontScaleStep
+                            defaultValue: backend.fontScaleDefault
+                            value: backend.fontScale
+                            onMoved: (value) => backend.setFontScale(value)
+                            onResetRequested: backend.setFontScale(backend.fontScaleDefault)
+                        }
+                        Text {
+                            readonly property string valueFor: "fontScale"
+                            x: textSlider.x + textSlider.width + 8
+                            width: options.valueWidth
+                            height: parent.height
+                            verticalAlignment: Text.AlignVCenter
+                            horizontalAlignment: Text.AlignRight
+                            elide: Text.ElideRight
+                            text: textSlider.percent + " %"
+                            color: options.theme.textColor
+                            font { family: options.theme.fontFamily; pixelSize: options.theme.bodySize; features: { "tnum": 1 } }
+                        }
+                        Controls.LookButton {
+                            readonly property string resetFor: "fontScale"
+                            theme: options.theme
+                            small: true
+                            visible: backend.fontScale !== backend.fontScaleDefault
+                            enabled: visible
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "Reset"
+                            spoken: "Reset the text size to " + Math.round(backend.fontScaleDefault * 100) + " percent"
+                            onActivated: {
+                                textSlider.forceActiveFocus()
+                                backend.setFontScale(backend.fontScaleDefault)
+                            }
+                        }
+                    }
+                    Text {
+                        y: fontChooser.y
+                        width: options.labelWidth - 8
+                        height: options.controlHeight
+                        verticalAlignment: Text.AlignVCenter
+                        elide: Text.ElideRight
+                        text: "Font"
+                        color: options.theme.textColor
+                        font { family: options.theme.fontFamily; pixelSize: options.theme.bodySize }
+                    }
+                    Controls.FontChooser {
+                        id: fontChooser
+                        theme: options.theme
+                        x: options.labelWidth
+                        y: textRow.y + textRow.height + 8
+                        width: parent.width - x
+                        families: backend.fontFamilies
+                        current: backend.fontFamily
+                        onChosen: (family) => backend.setFontFamily(family)
+                        onOpenChanged: {
+                            if (open) {
+                                options.editingRole = ""
+                                Qt.callLater(scroller.reveal, fontChooser)
+                            }
+                        }
+                    }
+                }
+
+                // The section "Colours": the four status colours and the four colours of the panel. A swatch opens
+                // the editor below the row, inside the window.
+                Item {
+                    id: colours
+                    x: options.pad
+                    y: Math.max(sizeSection.y + sizeSection.height, textSection.y + textSection.height) + options.sectionGap
+                    width: options.innerWidth
+                    height: editor.visible ? editor.y + editor.height : swatchRow.y + swatchRow.height
+
+                    Controls.SectionTitle { id: coloursTitle; theme: options.theme; text: "Colours" }
+                    Item {
+                        id: swatchRow
+                        y: coloursTitle.height + 8
+                        width: parent.width
+                        height: groups.count > 0 ? groups.itemAt(0).height : 0
+
+                        Repeater {
+                            id: groups
+                            model: options.colourGroups
+
+                            Item {
+                                id: group
+                                required property var modelData
+                                required property int index
+                                readonly property int span: options.swatchWidth + options.swatchGap
+
+                                function swatchOf(role) {
+                                    for (var i = 0; i < swatches.count; i++)
+                                        if (swatches.itemAt(i).role === role)
+                                            return swatches.itemAt(i)
+                                    return null
+                                }
+
+                                x: index * (4 * span - options.swatchGap + options.groupGap)
+                                width: 4 * span - options.swatchGap
+                                height: groupTitle.height + 6 + (swatches.count > 0 ? swatches.itemAt(0).height : 0)
+
+                                Controls.SectionTitle {
+                                    id: groupTitle
+                                    theme: options.theme
+                                    minor: true
+                                    width: parent.width
+                                    text: group.modelData.title
+                                }
+                                Repeater {
+                                    id: swatches
+                                    model: group.modelData.roles
+
+                                    Controls.ColorSwatch {
+                                        required property string modelData
+                                        required property int index
+                                        theme: options.theme
+                                        x: index * group.span
+                                        y: groupTitle.height + 6
+                                        width: options.swatchWidth
+                                        role: modelData
+                                        name: options.roleNames[modelData] || modelData
+                                        colour: backend.colors[modelData] || "#000000"
+                                        custom: backend.colorOverrides[modelData] !== undefined
+                                        editing: options.editingRole === modelData
+                                        onActivated: options.edit(modelData)
+                                        onResetRequested: {
+                                            forceActiveFocus()
+                                            backend.resetColor(modelData)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Controls.ColorEditor {
+                        id: editor
+                        theme: options.theme
+                        visible: options.editingRole !== ""
+                        enabled: visible
+                        y: swatchRow.y + swatchRow.height + 10
+                        width: parent.width
+                        name: options.roleNames[options.editingRole] || options.editingRole
+                        colour: backend.colors[options.editingRole] || "#000000"
+                        withOpacity: options.editingRole === "background"
+                        ownOpacity: (backend.colorOverrides.background || "").length === 9
+                        onChosen: (colour) => backend.setColor(options.editingRole, colour)
+                        onCloseRequested: options.closeEditor()
+                    }
+                }
             }
+        }
+
+        // Where the sections are, while they scroll.
+        Rectangle {
+            readonly property bool isScrollThumb: true
+            visible: scroller.scrolls
+            x: parent.width - options.theme.frameWidth - 6
+            y: scroller.y + 3 + (scroller.height - 6 - height) * scroller.contentY
+                / Math.max(1, scroller.contentHeight - scroller.height)
+            width: 3
+            height: Math.max(24, (scroller.height - 6) * scroller.height / Math.max(1, scroller.contentHeight))
+            radius: Math.min(1.5, options.theme.itemRadius)
+            color: options.theme.faintColor
+        }
+
+        // The footer: "Reset to defaults" for the whole custom look. A wrong click does nothing: the first
+        // click arms the control for 3 seconds, the second resets.
+        Item {
+            id: footer
+            readonly property bool isFooter: true
+            y: parent.height - height
+            width: parent.width
+            height: options.footerHeight
+
+            Rectangle {
+                x: options.theme.frameWidth
+                width: parent.width - 2 * x
+                height: 1
+                color: options.theme.lineColor
+            }
+            Text {
+                readonly property bool isFooterNote: true
+                x: options.pad
+                width: resetAll.x - x - 16
+                height: parent.height
+                verticalAlignment: Text.AlignVCenter
+                elide: Text.ElideRight
+                text: "The size, the text and the colours apply to all five layouts."
+                color: options.theme.dimColor
+                font { family: options.theme.fontFamily; pixelSize: options.theme.smallSize + 1 }
+            }
+            Controls.LookButton {
+                id: resetAll
+                readonly property bool isResetAll: true
+                theme: options.theme
+                enabled: backend.lookIsCustom
+                anchors.right: parent.right
+                anchors.rightMargin: options.pad
+                anchors.verticalCenter: parent.verticalCenter
+                plate: options.safePlate
+                ink: options.safeInk
+                text: options.resetArmed ? "Click again to reset" : "Reset to defaults"
+                spoken: options.resetArmed ? "Reset to defaults, press again to reset" : "Reset to defaults"
+                onActivated: {
+                    if (!options.resetArmed) {
+                        options.resetArmed = true
+                        return
+                    }
+                    options.resetArmed = false
+                    options.editingRole = ""
+                    backend.resetLook()
+                }
+                onEnabledChanged: if (!enabled) options.resetArmed = false
+                onActiveFocusChanged: if (!activeFocus) options.resetArmed = false
+            }
+            Timer {
+                id: resetTimer
+                interval: 3000
+                running: options.resetArmed
+                onTriggered: options.resetArmed = false
+            }
+        }
+
+        // The close control, at the right of the header.
+        Rectangle {
+            id: closeControl
+            readonly property bool isClose: true
+            readonly property bool lit: closeArea.containsMouse || activeFocus
+            anchors.right: parent.right
+            anchors.rightMargin: 10
+            y: (options.headerHeight - height) / 2
+            width: 28
+            height: 28
+            radius: options.theme.itemRadius
+            color: options.safePlate
+            activeFocusOnTab: true
+            Accessible.role: Accessible.Button
+            Accessible.name: "Close"
+            Accessible.focusable: true
+            Accessible.onPressAction: options.close()
+            Keys.onReturnPressed: options.close()
+            Keys.onEnterPressed: options.close()
+            Keys.onSpacePressed: options.close()
+
+            Rectangle {
+                visible: closeArea.containsMouse
+                anchors.fill: parent
+                radius: parent.radius
+                color: Qt.rgba(options.safeInk.r, options.safeInk.g, options.safeInk.b, 0.10)
+            }
+            Repeater {
+                model: [45, -45]
+                Rectangle {
+                    required property int modelData
+                    readonly property bool isCloseMark: true
+                    anchors.centerIn: parent
+                    width: 13
+                    height: 1.5
+                    rotation: modelData
+                    antialiasing: true
+                    color: options.theme.readable(closeControl.lit ? options.theme.textColor : options.theme.dimColor,
+                                                  options.safePlate)
+                }
+            }
+            MouseArea {
+                id: closeArea
+                anchors.fill: parent
+                hoverEnabled: true
+                onClicked: options.close()
+            }
+            Controls.FocusRing { target: closeControl; corner: closeControl.radius; border.color: options.safeInk }
         }
     }
 }

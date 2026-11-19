@@ -240,27 +240,29 @@ def test_a_group_opens_with_one_new_size_after_a_change_of_the_look_while_it_was
 @pytest.mark.parametrize("letter", LETTERS)
 def test_the_texts_of_the_options_window_follow_the_font_scale_and_keep_their_room(app, real_options, letter):
     window, backend, messages = real_options
+    window.setProperty("roomHeight", 1080)  # the screen of the test is lower than the window at the largest text
     backend.setLayout(letter)
     settle(app)
     design = pixel_sizes(window)
-    assert (window.width(), window.height()) == (1076, 344) and len(design) >= 13 and text_findings(window) == []
+    high = window.height()
+    assert window.width() == 1076 and 600 <= high <= 700 and len(design) >= 13 and text_findings(window) == []
+    # The values of the sliders ("100 %") and the "Reset" mark of a slider change with the font scale itself.
+    fixed = lambda sizes: [(text, size) for text, size in sizes if not text.endswith(" %") and text != "Reset"]
     for scale in (0.8, 1.4):
         backend.setFontScale(scale)
         settle(app)
-        sizes = pixel_sizes(window)
-        assert [text for text, _ in sizes] == [text for text, _ in design]
-        for (text, size), (_, base) in zip(sizes, design):
+        sizes = fixed(pixel_sizes(window))
+        assert [text for text, _ in sizes] == [text for text, _ in fixed(design)]
+        for (text, size), (_, base) in zip(sizes, fixed(design)):
             assert abs(size - base * scale) <= 1.5 and (size < base if scale < 1 else size > base), (scale, text)
         assert text_findings(window) == [], scale
         # The window has one size in every theme: it grows only with a larger font.
-        assert window.width() == 1076 and (window.height() == 344 if scale < 1 else 344 < window.height() < 344 * 1.4)
+        assert window.width() == 1076 and (window.height() == high if scale < 1 else high < window.height() < high * 1.4)
         assert (window.minimumHeight(), window.maximumHeight()) == (window.height(), window.height())
     backend.resetLook()
     settle(app)
-    assert pixel_sizes(window) == design and (window.width(), window.height()) == (1076, 344)
+    assert pixel_sizes(window) == design and (window.width(), window.height()) == (1076, high)
 
-
-# ----- the font family -----
 
 def families(backend):
     """A proportional and a monospace family of this system that the user can choose, both not the font of a theme."""
