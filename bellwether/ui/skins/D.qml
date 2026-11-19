@@ -249,12 +249,22 @@ Item {
                             color: theme.faintColor
                             font { family: skin.sans; pixelSize: theme.smallSize; features: { "tnum": 1 } }
                         }
-                        Text {
-                            id: detail
+                        // The "Answer" control of a blocked agent, at the right end of the row. The detail is at its left.
+                        AnswerControl {
+                            id: answer
+                            row: agentRow
+                            tokens: theme
+                            corner: 6
                             anchors.right: parent.right
                             anchors.rightMargin: skin.pad + 2
                             anchors.verticalCenter: parent.verticalCenter
-                            width: Math.min(implicitWidth, agentRow.failed ? 190 : 124)
+                        }
+                        Text {
+                            id: detail
+                            anchors.right: parent.right
+                            anchors.rightMargin: (skin.pad + 2) + answer.reserve
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: Math.min(implicitWidth, answer.detailRoom(190, 124))
                             elide: Text.ElideRight
                             text: agentRow.noteText
                             color: agentRow.note === "failed" ? skin.panel.failedColor

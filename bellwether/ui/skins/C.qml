@@ -316,12 +316,22 @@ Item {
                                     color: theme.faintColor
                                     font { family: skin.mono; pixelSize: theme.detailSize }
                                 }
-                                Text {
-                                    id: detail
+                                // The "Answer" control of a blocked agent, at the right end of the row. The detail is at its left.
+                                AnswerControl {
+                                    id: answer
+                                    row: agentRow
+                                    tokens: theme
+                                    corner: 0; capitals: true
                                     anchors.right: parent.right
                                     anchors.rightMargin: agentList.longer ? 10 : 0
                                     anchors.verticalCenter: parent.verticalCenter
-                                    width: Math.min(implicitWidth, agentRow.failed ? 200 : 120)
+                                }
+                                Text {
+                                    id: detail
+                                    anchors.right: parent.right
+                                    anchors.rightMargin: (agentList.longer ? 10 : 0) + answer.reserve
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: Math.min(implicitWidth, answer.detailRoom(200, 120))
                                     elide: Text.ElideRight
                                     text: (agentRow.note === "failed" ? "! " : agentRow.note === "opening" ? "> " : "")
                                         + agentRow.noteText
