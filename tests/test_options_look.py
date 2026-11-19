@@ -714,6 +714,73 @@ def test_on_a_screen_of_768_pixels_the_sections_scroll_and_the_header_and_the_fo
     assert [m for m in messages + warnings if SIZE_HINTS_NOTE not in m] == []
 
 
+def drag(app, window, start, end, steps=10, release=True):
+    """A pointer with its button down from `start` to `end`, in small steps."""
+    QTest.mousePress(window, LEFT, NONE, start)
+    settle(app)
+    for n in range(1, steps + 1):
+        QTest.mouseMove(window, start + (end - start) * n / steps)
+        settle(app)
+    if release:
+        QTest.mouseRelease(window, LEFT, NONE, end)
+        settle(app)
+
+
+def test_on_a_low_screen_a_pointer_or_a_finger_scrolls_the_sections_and_a_slider_does_not(
+        app, fake_client, state_path):
+    messages = []
+    previous = qInstallMessageHandler(lambda mode, context, text: messages.append(text))
+    window, backend, warnings, engine = make(app, fake_client, state_path, room=768)
+    try:
+        backend.setFontScale(1.4)
+        settle(app)
+        click(app, window, swatch(window, "background"))  # the editor with its opacity slider: a long column
+        scroller, thumb, grip = find(window, "isScroller"), find(window, "isScrollThumb"), find(window, "isScrollGrip")
+        scroller.setProperty("contentY", 0)
+        settle(app)
+        lowest = scroller.property("contentHeight") - scroller.height()
+        assert scroller.property("scrolls") and thumb.isVisible() and lowest > 150
+        contentY = lambda: scroller.property("contentY")
+        # The thumb stays thin; the place that takes the pointer is wider.
+        assert thumb.width() == 3 and grip.width() >= 16 and grip.height() >= thumb.height()
+        # A drag on the thumb, a little at the left of its line: the sections follow the thumb.
+        top = thumb.y()
+        start = thumb.mapToScene(QPointF(-5, thumb.height() / 2)).toPoint()
+        drag(app, window, start, start + QPoint(0, 40))
+        assert abs(thumb.y() - (top + 40)) <= 1 and contentY() > 0
+        drag(app, window, start + QPoint(0, 40), QPoint(start.x(), window.height() - 2))  # past the end: no further
+        assert contentY() == lowest
+        # A drag of the sections themselves (the empty room at their left), as a pen or a mouse with no wheel.
+        place = scroller.mapToScene(QPointF(window.property("pad") / 2, scroller.height() / 2)).toPoint()
+        drag(app, window, place, place + QPoint(0, 120))
+        assert contentY() <= lowest - 100
+        # A finger that moves up: the sections move with it.
+        scroller.setProperty("contentY", 0)
+        settle(app)
+        finger = QTest.createTouchDevice()
+        QTest.touchEvent(window, finger).press(0, place, window).commit()
+        settle(app)
+        for n in range(1, 13):
+            QTest.touchEvent(window, finger).move(0, place - QPoint(0, 10 * n), window).commit()
+            settle(app)
+        QTest.touchEvent(window, finger).release(0, place - QPoint(0, 120), window).commit()
+        settle(app)
+        assert contentY() >= 80  # 120 px less the distance before a touch becomes a drag
+        # A slider drag that goes a little down too moves the slider and does not scroll.
+        scroller.setProperty("contentY", 40)
+        settle(app)
+        slider = find(window, "sliderFor", "scale")
+        drag(app, window, point_for(slider, 1.0), point_for(slider, 1.5) + QPoint(0, 30))
+        assert backend.scale == 1.5 and contentY() == 40
+        assert text_findings(window) == []
+        backend._look_timer.stop()
+    finally:
+        shiboken6.delete(engine)
+        app.processEvents()
+        qInstallMessageHandler(previous)
+    assert [m for m in messages + warnings if SIZE_HINTS_NOTE not in m] == []
+
+
 def parents(item):
     while item is not None:
         yield item

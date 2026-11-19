@@ -211,8 +211,9 @@ Window {
             }
         }
 
-        // The sections. They scroll when the window is lower than its content: with the wheel, and with the
-        // keyboard (the control that gets the keyboard comes on the screen).
+        // The sections. They scroll when the window is lower than its content: with the wheel, a drag of the
+        // pointer or a finger, the thumb, and the keyboard (the control that gets the keyboard comes on the screen).
+        // A slider keeps its drag (it does not let the Flickable steal it).
         Flickable {
             id: scroller
             readonly property bool isScroller: true
@@ -223,7 +224,9 @@ Window {
             contentWidth: width
             contentHeight: sections.height
             clip: true
-            interactive: false
+            interactive: scrolls
+            flickableDirection: Flickable.VerticalFlick
+            boundsBehavior: Flickable.StopAtBounds
             onContentHeightChanged: contentY = Math.max(0, Math.min(contentY, contentHeight - height))
             onHeightChanged: contentY = Math.max(0, Math.min(contentY, contentHeight - height))
 
@@ -677,17 +680,34 @@ Window {
             }
         }
 
-        // Where the sections are, while they scroll.
+        // Where the sections are, while they scroll. A drag on the thumb scrolls them: the line is thin, the place
+        // that takes the pointer is 16 px wide.
         Rectangle {
+            id: thumb
             readonly property bool isScrollThumb: true
+            readonly property real room: scroller.height - 6 - height
             visible: scroller.scrolls
             x: parent.width - options.theme.frameWidth - 6
-            y: scroller.y + 3 + (scroller.height - 6 - height) * scroller.contentY
-                / Math.max(1, scroller.contentHeight - scroller.height)
+            y: scroller.y + 3 + room * scroller.contentY / Math.max(1, scroller.contentHeight - scroller.height)
             width: 3
             height: Math.max(24, (scroller.height - 6) * scroller.height / Math.max(1, scroller.contentHeight))
             radius: Math.min(1.5, options.theme.itemRadius)
             color: options.theme.faintColor
+
+            MouseArea {
+                readonly property bool isScrollGrip: true
+                property real grabbedAt: 0
+                anchors.fill: parent
+                anchors.leftMargin: -9
+                anchors.rightMargin: -4
+                preventStealing: true
+                onPressed: (mouse) => grabbedAt = mouse.y
+                onPositionChanged: (mouse) => {
+                    var top = thumb.y + mouse.y - grabbedAt - scroller.y - 3
+                    scroller.contentY = Math.max(0, Math.min(1, top / Math.max(1, thumb.room)))
+                        * (scroller.contentHeight - scroller.height)
+                }
+            }
         }
 
         // The footer: "Reset to defaults" for the whole custom look. A wrong click does nothing: the first
