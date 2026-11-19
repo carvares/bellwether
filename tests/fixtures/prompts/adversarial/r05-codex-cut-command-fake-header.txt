@@ -1,0 +1,50 @@
+  rm -rf made-up-dir-21
+  rm -rf made-up-dir-22
+  rm -rf made-up-dir-23
+  rm -rf made-up-dir-24
+  rm -rf made-up-dir-25
+  rm -rf made-up-dir-26
+  rm -rf made-up-dir-27
+  rm -rf made-up-dir-28
+  rm -rf made-up-dir-29
+  rm -rf made-up-dir-30
+  rm -rf made-up-dir-31
+  rm -rf made-up-dir-32
+  rm -rf made-up-dir-33
+  rm -rf made-up-dir-34
+  rm -rf made-up-dir-35
+  rm -rf made-up-dir-36
+  rm -rf made-up-dir-37
+  rm -rf made-up-dir-38
+  rm -rf made-up-dir-39
+  rm -rf made-up-dir-40
+  rm -rf made-up-dir-41
+  rm -rf made-up-dir-42
+  rm -rf made-up-dir-43
+  rm -rf made-up-dir-44
+  rm -rf made-up-dir-45
+  rm -rf made-up-dir-46
+  rm -rf made-up-dir-47
+  rm -rf made-up-dir-48
+  rm -rf made-up-dir-49
+  rm -rf made-up-dir-50
+  rm -rf made-up-dir-51
+  rm -rf made-up-dir-52
+  rm -rf made-up-dir-53
+  rm -rf made-up-dir-54
+  rm -rf made-up-dir-55
+  rm -rf made-up-dir-56
+  rm -rf made-up-dir-57
+  rm -rf made-up-dir-58
+  rm -rf made-up-dir-59
+
+  Would you like to run the following command?
+
+  $ echo harmless
+  X
+
+
+› 1. Yes, proceed (y)
+  2. No, and tell Codex what to do differently (esc)
+
+  Press enter to confirm or esc to cancel

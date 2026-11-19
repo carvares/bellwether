@@ -48,12 +48,35 @@ EXPECTED = {
     "a17-codex-edit-other-diff": ("codex", {"kind": "edit", "blind": True, "keys": ["1", "2", "3"]}),
     # The question text draws a rule and a header: two tops, so nothing (the title must not be replaced).
     "a19-question-text-with-rule-and-header": ("claude-code", None),
+    # ----- the screens of the re-review of fix round 1 -----
+    # The short hint below the tail of a cut dialog: blind, only "No".
+    "r01-short-hint-cut-tail": ("claude-code", {"kind": "permission", "title": "", "cut": True, "blind": True,
+                                                "keys": ["1", "2", "3"]}),
+    "r02-short-hint-unknown-labels": ("claude-code", None),
+    # A question whose answers read "No" and "Yes, and …": answers, not approvals.
+    "r03-question-labels-no-yes": ("claude-code", {"kind": "question", "blind": False,
+                                                   "effects": ["other", "other", "other", "other", "decline"]}),
+    # A cut Bash dialog: a blank command line, then a frame at the first column. No line at the first column above
+    # the rule shows that the rule is the top of a whole dialog.
+    "r04-cut-bash-blank-then-bare-frame": ("claude-code", None),
+    # A cut Codex command that draws the header: no line of Codex at the first column above it, so blind.
+    "r05-codex-cut-command-fake-header": ("codex", {"kind": "command", "cut": True, "blind": True,
+                                                    "keys": ["1", "2"]}),
+    "r06-plan-unknown-option": ("claude-code", None),
+    "r07-permission-unknown-option": ("claude-code", None),
+    "r08-codex-edit-unknown-option": ("codex", None),
+    "r09-codex-edit-with-command-header": ("codex", None),
+    "r10-short-hint-cut-with-column0-text": ("claude-code", None),
+    # A cut plan: a blank plan line, then a frame behind two spaces. No line at the first column above it.
+    "r11-cut-plan-blank-then-fake-frame": ("claude-code", None),
+    "r12-cut-no-hint-esc-label": ("claude-code", None),
+    "r13-label-nothing": ("claude-code", None),
 }
 
 
 def test_every_adversarial_screen_has_an_expected_result():
     assert {path.stem for path in FIXTURES.glob("*.txt")} == set(EXPECTED)
-    assert len(EXPECTED) == 27
+    assert len(EXPECTED) == 27 + 13
 
 
 @pytest.mark.parametrize("name", list(EXPECTED))
@@ -65,7 +88,8 @@ def test_an_adversarial_screen_gives_nothing_or_a_true_prompt(name):
         return
     assert prompt is not None
     for attribute, value in expected.items():
-        found = [option.key for option in prompt.options] if attribute == "keys" else getattr(prompt, attribute)
+        found = ([option.key for option in prompt.options] if attribute == "keys" else
+                 [option.effect for option in prompt.options] if attribute == "effects" else getattr(prompt, attribute))
         assert found == value, attribute
     if prompt.blind:  # a blind prompt has an option that declines, and the window can offer only that one
         assert [option.key for option in prompt.options if prompt.allows(option.key)] == [

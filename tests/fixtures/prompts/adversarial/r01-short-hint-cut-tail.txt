@@ -1,0 +1,50 @@
+ rm -rf made-up-17
+ rm -rf made-up-18
+ rm -rf made-up-19
+ rm -rf made-up-20
+ rm -rf made-up-21
+ rm -rf made-up-22
+ rm -rf made-up-23
+ rm -rf made-up-24
+ rm -rf made-up-25
+ rm -rf made-up-26
+ rm -rf made-up-27
+ rm -rf made-up-28
+ rm -rf made-up-29
+ rm -rf made-up-30
+ rm -rf made-up-31
+ rm -rf made-up-32
+ rm -rf made-up-33
+ rm -rf made-up-34
+ rm -rf made-up-35
+ rm -rf made-up-36
+ rm -rf made-up-37
+ rm -rf made-up-38
+ rm -rf made-up-39
+ rm -rf made-up-40
+ rm -rf made-up-41
+ rm -rf made-up-42
+ rm -rf made-up-43
+ rm -rf made-up-44
+ rm -rf made-up-45
+ rm -rf made-up-46
+ rm -rf made-up-47
+ rm -rf made-up-48
+ rm -rf made-up-49
+ rm -rf made-up-50
+ rm -rf made-up-51
+ rm -rf made-up-52
+ rm -rf made-up-53
+ rm -rf made-up-54
+ rm -rf made-up-55
+ rm -rf made-up-56
+ rm -rf made-up-57
+ rm -rf made-up-58
+ rm -rf made-up-59
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and always allow access to /home/dev/projects/sample-app from this project
+   3. No
+
+ Esc to cancel

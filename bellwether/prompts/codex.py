@@ -2,8 +2,9 @@
 
 Codex draws no frame, and it draws the lines of a command with the same two spaces as its own lines. So a command
 can hold a line that looks like the first line of the dialog. The reader therefore wants that first line exactly one
-time on the whole screen: with two, it reads nothing. The options are the last block of the screen, after two empty
-lines that a command cannot be below.
+time on the whole screen: with two, it reads nothing. A command taller than the screen hides the real first line:
+the reader wants a line of Codex at the first column above it, or the prompt is cut and blind. The options are the
+last block of the screen, after two empty lines that a command cannot be below.
 """
 from __future__ import annotations
 
@@ -21,6 +22,7 @@ HEADERS = {
 _OPTION = re.compile(r"(?P<cursor>›| ) (?P<key>\d+)\. (?P<label>\S.*)$")
 _MORE = re.compile(r" {5}\S")
 _YES, _NO = re.compile(r"Yes\b"), re.compile(r"No\b")
+_OWN = re.compile(r"[•›] \S")  # a line of Codex at the first column: its work ("•") or the message of the person ("›")
 
 
 def _effect(label: str) -> str:
@@ -60,7 +62,11 @@ def read(text: str) -> Prompt | None:
         return None
     kind, title = HEADERS[lines[header]]
     options = [Option(option.key, option.label, effect=_effect(option.label)) for option in options]
+    # A command taller than the screen hides the real header, and its lines (behind two spaces, with empty lines)
+    # can draw one. A line of Codex at the first column above the header ("• Running …", "› the message") shows that
+    # the header is the real one: a command cannot draw it. With none, the dialog is cut and blind.
+    cut = not any(_OWN.match(line) for line in lines[:header])
     # The edit dialog shows only where the edit goes. The patch is in the text above it, which Codex can show in
     # part ("+ Show details") and which the reader cannot tie to the dialog: the prompt is blind.
     return Prompt(APP, kind, title, lines[header].strip(), tuple(options), cursors[0], detail=tuple(detail),
-                  blind=kind == "edit")
+                  cut=cut, blind=cut or kind == "edit")

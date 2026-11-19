@@ -83,9 +83,12 @@ def _above(lines: list[str], place: int, char: str, indent: int = 0) -> int:
 
 
 def _top_rule(lines: list[str], place: int) -> bool:
-    """The rule at `place` can be the first line of a whole dialog: Claude Code draws an empty line above it. A text
-    line right above it (the detail of a cut dialog that draws a rule) or no line at all: it cannot."""
-    return place >= 1 and lines[place - 1] == ""
+    """The rule at `place` can be the first line of a whole dialog: Claude Code draws an empty line above it, and
+    above that a line of its own at the first column ("●", "❯", "✻", …) shows. The detail of a cut dialog is behind a
+    space and can have empty lines, so a text line right above the rule, no line at all, or no line at the first
+    column above it: it cannot."""
+    return (place >= 2 and lines[place - 1] == ""
+            and any(line and not line.startswith(" ") for line in lines[:place - 1]))
 
 
 def _headers(lines: list[str], end: int) -> int:

@@ -231,6 +231,25 @@ def test_a_dialog_that_is_only_in_the_history_gives_nothing():
     assert parse("codex", screen("codex-command") + "\n\n" + screen("codex-no-dialog")) is None
 
 
+WHOLE = [key for key, prompt in VALID.items() if not prompt.blind and prompt.kind in ("permission", "plan", "command")]
+
+
+@pytest.mark.parametrize("app,name", WHOLE, ids=[name for _, name in WHOLE])
+def test_a_whole_dialog_needs_a_line_of_the_program_at_the_first_column_above_it(app, name):
+    """The detail of a cut dialog is behind spaces and can have empty lines: it can draw the top of a dialog, but no
+    line at the first column. With the lines above the dialog behind a space, the screen is not a whole dialog."""
+    lines = screen(name).split("\n")
+    prompt = parse(app, "\n".join(lines))
+    own = "• made-up work" if app == "codex" else "● made-up work"
+    top = max(place for place in range(len(lines)) if parse(app, "\n".join([own, *lines[place:]])) == prompt)
+    hidden = [f" {line}" if line and not line.startswith(" ") else line for line in lines[:top]]
+    found = parse(app, "\n".join(hidden + lines[top:]))
+    if app == "codex":
+        assert found is not None and found.cut and found.blind and found.fingerprint != prompt.fingerprint
+    else:
+        assert found is None
+
+
 # ----- strictness: no line of the frame can be missing or different -----
 
 OPTION_LINE = re.compile(r"(?P<before>\s*(?:[❯›] )?)(?P<key>\d)\. ")
@@ -241,9 +260,11 @@ def frame_lines(app: str, name: str) -> tuple[list[str], list[int]]:
     title, the question, the options and the hint."""
     lines = screen(name).split("\n")
     prompt = VALID[(app, name)]
-    # The dialog starts at the lowest line that the reader needs for the same result.
+    # The dialog starts at the lowest line that the reader needs for the same result. A whole dialog needs a line of
+    # the program at the first column somewhere above it: a made-up one stands for it here.
+    own = "• made-up work" if app == "codex" else "● made-up work"
     start = 0 if prompt.cut else max(
-        place for place in range(len(lines)) if parse(app, "\n".join(lines[place:])) == prompt)
+        place for place in range(len(lines)) if parse(app, "\n".join([own, *lines[place:]])) == prompt)
     if prompt.cut:
         start = max(place for place, line in enumerate(lines) if line in prompt.detail) + 1
     # A "Tip:" line below the title is an advertisement of the program: it is not in the prompt.
