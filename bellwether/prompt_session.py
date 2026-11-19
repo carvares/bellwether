@@ -77,8 +77,8 @@ MESSAGES = {
                    "was not sent. Check in Herdr."),
     "check_timeout": "Herdr did not answer the check of the terminal. Nothing was sent.",
     "check_failed": "Herdr could not check the terminal. Nothing was sent.",
-    "earlier": ("An earlier answer to this agent may still arrive. Nothing more can be sent until the agent goes on "
-                "or shows a different question. Check in Herdr."),
+    "earlier": ("An earlier answer to this agent may still arrive. Nothing more can be sent until it has arrived or "
+                "can no longer arrive. Check in Herdr."),
     "sent": "Sent.",
     "error": "Bellwether had an error. Open the agent in Herdr.",
     "read": "The screen of the agent could not be read.",
@@ -185,6 +185,9 @@ class PromptSession(QObject):
         self._unconfirmed = ""  # the reason code of a key or a text that Herdr did not confirm, or ""
         self._marks: dict[str, Mark] = {}  # the terminals that an earlier answer may still reach
         self._shown = 0  # the number of the question that shows: one more for each different question
+        # The fingerprint of the question whose detail the window showed to its last line (`detail_seen`), or "".
+        # An option that approves a question with a detail can be answered only after that (`seen`).
+        self._seen = ""
         self._follow_timer = QTimer(self)
         self._follow_timer.setSingleShot(True)
         self._follow_timer.timeout.connect(self._follow_read)
@@ -213,8 +216,9 @@ class PromptSession(QObject):
         else:
             message = MESSAGES["blind"] if state == "ready" and prompt is not None and prompt.blind else ""
         # An option can be clicked only while the prompt is ready: never while an answer is on its way or may still
-        # arrive, whatever the window does.
+        # arrive, whatever the window does. An option that approves needs the end of the detail seen.
         ready = state == "ready"
+        seen = self.seen
         return {
             "state": state,
             "key": agent.key if agent else "",
@@ -230,7 +234,8 @@ class PromptSession(QObject):
             "cut": prompt.cut if prompt else False,
             "blind": prompt.blind if prompt else False,
             "options": [{"key": o.key, "label": o.label, "description": o.description, "kind": o.kind,
-                         "effect": o.effect, "wide": wide(o), "allowed": ready and prompt.allows(o.key)}
+                         "effect": o.effect, "wide": wide(o),
+                         "allowed": ready and prompt.allows(o.key) and (seen or o.effect != prompts.ACCEPT)}
                         for o in prompt.options]
             if prompt else [],
             "cursor": prompt.cursor if prompt else "",
@@ -242,7 +247,24 @@ class PromptSession(QObject):
             # A number that is different for each question that shows (0: none shows). The window uses it for its
             # short guard after a new question; the fingerprint itself stays in the engine.
             "shown": self._shown if prompt else 0,
+            # The window showed the last line of the detail of this question (or it has no detail): the options that
+            # approve can be answered. False until then; a new question starts again at False.
+            "seen": bool(prompt) and seen,
         }
+
+    @property
+    def seen(self) -> bool:
+        """The question that shows has no detail, or the window showed its detail to the last line."""
+        return self.prompt is not None and (not self.prompt.detail or self._seen == self.prompt.fingerprint)
+
+    def detail_seen(self, shown: int) -> None:
+        """The window showed the last line of the detail of the question with the number `shown` (the person
+        scrolled to it, or the whole detail was in view after the guard of the window). For an older number, or
+        with no question, nothing changes."""
+        if self.prompt is None or shown != self._shown or self.seen:
+            return
+        self._seen = self.prompt.fingerprint
+        self.changed.emit()
 
     @property
     def answering(self) -> bool:
@@ -256,6 +278,7 @@ class PromptSession(QObject):
         self._note = reason if reason in NOTES else ""
         if prompt is not None and (self.prompt is None or self.prompt.fingerprint != prompt.fingerprint):
             self._shown += 1
+            self._seen = ""  # a new question: its detail has not been seen
         self.prompt = prompt
         self._screen_text = screen_text if state == "unreadable" else ""
         if not keep_agent:
@@ -323,10 +346,15 @@ class PromptSession(QObject):
     def answer(self, key: str) -> bool:
         """Press the key of one option of the shown prompt. True: the answer started. False: refused (no prompt is
         ready, the prompt has no such option, it is the text option, or the prompt is blind and the option does not
-        decline)."""
+        decline, or it approves and the end of the detail was not seen)."""
         prompt = self.prompt
         option = prompt.option(key) if prompt and self.state == "ready" else None
-        if option is None or option.kind == prompts.TEXT or not prompt.allows(key) or self._refused_by_mark():
+        if option is None or option.kind == prompts.TEXT or not prompt.allows(key):
+            return False
+        if option.effect == prompts.ACCEPT and not self.seen:
+            log.info("answer terminal=%s app=%s result=refused reason=unseen", self.agent.key, self.agent.app)
+            return False
+        if self._refused_by_mark():
             return False
         self._start_answer(self._job_answer, prompt, key)
         return True

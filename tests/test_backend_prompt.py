@@ -31,6 +31,7 @@ def shown(name: str) -> Screen:
 
 
 BASH, ASK, ASK_CURSOR, CREATE = shown("claude-bash"), shown("claude-ask-2"), shown("claude-ask-text-cursor"), shown("claude-create")
+EDIT_DIFF = shown("claude-edit-diff")
 NO_DIALOG, CODEX = shown("claude-no-dialog"), shown("codex-command")
 BLOCKED = [Agent("t1", "blocked", "rev", "Main", "claude-code"), Agent("t2", "working", "dev", "Main", "codex")]
 WORKING = [Agent("t1", "working", "rev", "Main", "claude-code"), Agent("t2", "working", "dev", "Main", "codex")]
@@ -92,9 +93,11 @@ def wait_for(app, condition, timeout=3.0):
 
 
 class Bench:
-    """One backend with its fake client, its clock, and the states that the prompt went through."""
+    """One backend with its fake client, its clock, and the states that the prompt went through. `sees`: like an
+    answer window that shows the whole detail of each question, the bench reports it seen (`detailSeen`) as soon as
+    a question shows; with False, a test reports it itself."""
 
-    def __init__(self, app, tmp_path, agents=BLOCKED, **more):
+    def __init__(self, app, tmp_path, agents=BLOCKED, sees=True, **more):
         self.app = app
         self.client = ScreenClient()
         self.now = [100.0]
@@ -103,8 +106,20 @@ class Bench:
             wait=lambda event, seconds: event.is_set(), follow=more.pop("follow", FOLLOW),
             sent_seconds=more.pop("sent_seconds", 0.0), **more)
         self.states: list[str] = []
-        self.backend.promptChanged.connect(lambda: self.states.append(self.backend.prompt["state"]))
+        self._last: dict = {}
+        self.backend.promptChanged.connect(self._record)
+        if sees:
+            self.backend.promptChanged.connect(lambda: self.backend.detailSeen(self.backend.prompt["shown"]))
         self.backend.apply(list(agents))
+
+    def _record(self) -> None:
+        """The state at each change of the prompt. A change of only `seen` and of the options it allows (the report
+        of the bench) is not one."""
+        value = {**self.backend.prompt, "seen": None}
+        value["options"] = [{**option, "allowed": None} for option in value["options"]]
+        if value != self._last:
+            self.states.append(value["state"])
+        self._last = value
 
     @property
     def prompt(self) -> dict:
@@ -144,7 +159,7 @@ def labels(prompt: dict) -> list[str]:
 CLOSED = {
     "state": "closed", "key": "", "label": "", "program": "", "icon": "", "address": "", "kind": "", "title": "",
     "subtitle": "", "question": "", "detail": [], "cut": False, "options": [], "cursor": "", "freeText": False,
-    "screen": "", "reason": "", "message": "", "changed": False, "blind": False, "shown": 0,
+    "screen": "", "reason": "", "message": "", "changed": False, "blind": False, "shown": 0, "seen": False,
 }
 
 
@@ -165,7 +180,7 @@ def test_open_reads_the_screen_off_the_ui_thread_and_shows_the_prompt(bench):
     assert b.until("ready")
     assert b.states == ["loading", "ready"] and b.client.reads == ["t1"]
     assert b.prompt == {
-        **CLOSED, "state": "ready", "shown": 1, "key": "t1", "label": "rev", "program": "claude-code", "address": "t1",
+        **CLOSED, "state": "ready", "shown": 1, "seen": True, "key": "t1", "label": "rev", "program": "claude-code", "address": "t1",
         "kind": "permission", "title": "Bash command", "subtitle": TIP + "\nCreate an empty test file",
         "question": "Do you want to proceed?", "detail": [" touch made-by-test.txt"], "cursor": "1",
         "options": [
@@ -1024,8 +1039,9 @@ def test_no_text_of_a_screen_is_in_a_log_record_or_in_a_file(app, tmp_path, capl
 
 # ----- the mark: an earlier answer to a terminal may still arrive, also after a close -----
 
-EARLIER = ("An earlier answer to this agent may still arrive. Nothing more can be sent until the agent goes on or "
-           "shows a different question. Check in Herdr.")
+# The mark ends when the `keys` command ends (it is watched), or by the settle rule: true for both.
+EARLIER = ("An earlier answer to this agent may still arrive. Nothing more can be sent until it has arrived or can no "
+           "longer arrive. Check in Herdr.")
 BOTH_BLOCKED = [Agent("t1", "blocked", "rev", "Main", "claude-code"), Agent("t2", "blocked", "dev", "Main", "codex")]
 
 
@@ -1522,3 +1538,73 @@ def test_each_different_question_has_its_own_number_and_the_same_question_keeps_
     assert b.prompt["shown"] == 0
     b.open()
     assert b.prompt["shown"] == first + 2
+
+
+# ----- the end of the detail must have been seen before an option that approves -----
+
+LONG = Screen(text_of("claude-bash").replace(" touch made-by-test.txt",
+                                             "\n".join(f" made-up line {n}" for n in range(40))), True)
+
+
+def test_an_option_that_approves_needs_the_end_of_the_detail_seen_and_the_others_do_not(bench):
+    b = bench(sees=False)
+    b.client.screens = [LONG]
+    b.open()
+    assert len(b.prompt["detail"]) == 40 and b.prompt["seen"] is False
+    assert {o["key"]: o["allowed"] for o in b.prompt["options"]} == {"1": False, "2": False, "3": False, "4": True}
+    for accept in ("1", "2", "3"):
+        assert b.backend.answer(accept) is False
+    assert b.state() == "ready" and b.client.pressed == [] and b.prompt["reason"] == ""
+    b.backend.detailSeen(b.prompt["shown"] + 1)  # a number of no question that shows: nothing changes
+    b.backend.detailSeen(0)
+    assert b.prompt["seen"] is False and b.backend.answer("1") is False
+    b.backend.detailSeen(b.prompt["shown"])
+    assert b.prompt["seen"] is True and all(o["allowed"] for o in b.prompt["options"])
+    assert b.backend.answer("1") is True
+    assert b.until("sent", "ready", "failed") and b.client.pressed == [("t1", ["1"])]
+
+
+def test_a_decline_needs_nothing_seen(bench):
+    b = bench(sees=False)
+    b.client.screens = [LONG]
+    b.open()
+    assert b.backend.answer("4") is True
+    assert b.until("sent", "ready", "failed") and b.client.pressed == [("t1", ["4"])]
+
+
+def test_a_new_question_must_be_seen_again_and_an_old_number_does_not_count(bench):
+    b = bench(sees=False)
+    b.client.screens = [LONG]
+    b.open()
+    first = b.prompt["shown"]
+    b.backend.detailSeen(first)
+    assert b.prompt["seen"] is True
+    b.client.screens[:] = [EDIT_DIFF]
+    b.now[0] += 1
+    b.backend.apply(list(BLOCKED))  # a tick reads a different question
+    assert wait_for(b.app, lambda: b.prompt["title"] == "Edit file" and not b.backend._session.busy)
+    assert b.prompt["shown"] == first + 1 and b.prompt["seen"] is False and b.backend.answer("1") is False
+    b.backend.detailSeen(first)  # a late report for the question before: it does not count for this one
+    assert b.prompt["seen"] is False
+    b.client.screens[:] = [LONG]  # the first question comes back: a new number, and it must be seen again
+    b.now[0] += 1
+    b.backend.apply(list(BLOCKED))
+    assert wait_for(b.app, lambda: b.prompt["title"] == "Bash command" and not b.backend._session.busy)
+    assert b.prompt["shown"] == first + 2 and b.prompt["seen"] is False and b.backend.answer("1") is False
+    assert b.client.pressed == []
+
+
+def test_a_question_with_no_detail_needs_nothing_seen(bench):
+    b = bench(sees=False)
+    b.client.screens = [ASK]
+    b.open()
+    assert b.prompt["detail"] == [] and b.prompt["seen"] is True and all(o["allowed"] for o in b.prompt["options"])
+
+
+def test_the_refusal_of_an_unseen_approval_is_logged_with_no_screen_text(bench, caplog):
+    b = bench(sees=False)
+    b.client.screens = [LONG]
+    b.open()
+    with caplog.at_level(logging.INFO, logger="bellwether"):
+        assert b.backend.answer("2") is False
+    assert "result=refused reason=unseen" in caplog.text and "made-up line" not in caplog.text

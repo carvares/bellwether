@@ -470,7 +470,7 @@ class Backend(QObject):
 
     # ----- the prompt: the answer to one blocked agent (bellwether/prompt_session.py) -----
     # The names for QML stay on the backend: the property `prompt`, the flag `answering`, the signal `promptChanged`,
-    # and the slots openPrompt, answer, answerText and closePrompt.
+    # and the slots openPrompt, answer, answerText, detailSeen and closePrompt.
 
     @Property("QVariantMap", notify=promptChanged)
     def prompt(self) -> dict:
@@ -512,6 +512,11 @@ class Backend(QObject):
     def answer(self, key: str) -> bool:
         """Press the key of one option of the shown prompt. True: the answer started. False: it is refused."""
         return self._session.answer(key)
+
+    @Slot(int)
+    def detailSeen(self, shown: int) -> None:
+        """The answer window showed the last line of the detail of the question with this number."""
+        self._session.detail_seen(shown)
 
     @Slot(str, result=bool)
     def answerText(self, text: str) -> bool:
