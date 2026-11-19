@@ -60,6 +60,7 @@ As built, an answer does not go through `loading` again: after the key the state
 - `ui/Answer.qml`: a frameless window in the style of the active theme (the tokens and controls of the options window), an xdg toplevel that takes the keyboard. Content: the agent (icon, name, address); the title and question; the detail in the monospace font, scrollable, with a "cut" note; one button for each option with its number (keys 1–9 press them); a text field when there is a free-text option; "Open in Herdr" always; Esc closes.
 - `unreadable`: the screen text (monospace, scrollable) and only "Open in Herdr". `gone`: "This agent is not blocked now."
 - A blind prompt (fix round 1): every option shows, the buttons of the options that are not `allowed` are off, and the `message` says to open Herdr to approve. `pending`: the question with its buttons off, the `message`, and "Open in Herdr". A `message` shows in every state that has one.
+- A button is on only when its option is `allowed`, and the text field is there only when `freeText` is true. The engine sets `allowed` false on every option and `freeText` false in every state other than `ready` (also `answering` and `pending`), so a mistake of the window cannot send; the engine also refuses the slots then. The window should still use `answering` to show that an answer is on its way.
 
 ## Safety rules
 
@@ -74,6 +75,8 @@ As built, an answer does not go through `loading` again: after the key the state
 - The readers depend on how each program draws its dialogs. After an update of a program the window may show "unreadable" until the reader is updated.
 - A dialog larger than the screen shows only its visible part, and is blind (see Safety rule 2).
 - The time from the check to the key. With no person typing in that terminal, the last read and the key are about 0.1 s apart (one `read`, one `get`, one `keys`). After a person typed in that terminal in the last 3 s, herdr-core holds the key until 3 s after their last key, with no limit while they go on typing, and a killed `keys` still delivers. In that time a person can answer the dialog in Herdr, and the held key then goes to whatever shows next. Bellwether cannot see the person's typing before the key. It sees it after: a key that took more than 1 s is "held", and the window says so ("check in Herdr"). A key that is not confirmed in 10 s is "pending": it may still arrive.
+- A key that is not confirmed can arrive late: after the 25 s of reads, after a close of the window, and after Bellwether stops. Bellwether sends no second key or text to that terminal while its mark is there (see "The mark"). The mark ends 4 s after Bellwether sees the agent leave the answered question (not blocked, or a different question). If a person goes on typing in that terminal for longer than that, herdr-core still holds the first key, and it lands on whatever shows when they stop: Bellwether cannot see that. Only a person who types in Herdr in that terminal can cause it, and Herdr shows the result there.
+- The mark is in memory only. After Bellwether stops and starts again, it does not know of a key that may still arrive. At the stop it kills a text that herdr-core holds and waits up to 1 s for it; a `keys` command that runs is not waited for (a kill would not stop its key).
 - The "trust this folder" dialog is not a blocked state in Herdr.
 
 ## Tasks
@@ -115,6 +118,11 @@ What a reader wants before it gives a `Prompt`: the frame (Claude Code: the rule
 Checks added in fix round 1 (the adversarial screens of the review, `tests/fixtures/prompts/adversarial/`, 27 screens, each with its expected result in `tests/test_prompts_adversarial.py`):
 
 - The top rule of a whole Claude Code permission or plan dialog has an empty line right above it (as Claude Code draws it). A text line there (a cut dialog whose detail draws a frame), or a rule on the first line of the screen: not read.
+
+Checks added in fix round 2 (13 more screens of the re-review, `r01`–`r13`, 40 in all):
+
+- Above that empty line, a line at the first column must be somewhere on the screen ("●", "❯", "✻", … of Claude Code). The detail of a cut dialog is behind a space and can have empty lines, so it can draw an empty line and a frame, but no line at the first column. None: not read (`r04`, `r11`).
+- A Codex dialog is whole only when a line of Codex at the first column ("• …" its work, "› …" the message of the person) is above its first line. A command taller than the screen hides the real first line, and its lines (behind two spaces, with empty lines) can draw one. None: the prompt is `cut` and blind, so only "No" can be answered (`r05`).
 - A cut plan: each line of its visible part is behind the three spaces of the plan; else not read.
 - A question or review dialog: exactly one "rule, then a header" pair above the options. A question text that draws a second one: not read (the title and the question shown could be the agent's).
 - Only the Fetch dialog may have no hint line (its last label ends with "(esc)"). The permission hint is " Esc to cancel · Tab to amend", or " Esc to cancel" alone while the cursor is on an option that cannot be amended (measured: options 2 and 3 of a Bash dialog).
@@ -142,19 +150,19 @@ To make Codex ask on this machine: `codex -a on-request -s read-only -c 'approva
 
 - `read_screen(terminal) -> Screen(text, complete) | Failure(code)`: `herdr-core read <t> --json`, 2 s.
 - `press(terminal, keys) -> None | Failure(code)`: `herdr-core keys <t> <key>…`, 10 s (above the 3 s hold of herdr-core; see "Facts"). Keys: one to four digits "1"–"9", nothing else. A `timeout` does not mean that the key did not go: a killed `keys` still delivers.
-- `send_text(terminal, text) -> None | Failure(code)`: `herdr-core send --force -- <t> <text>`, 65 s (above the 60 s draft hold). `--` ends the options: a text that starts with "-" is text.
-- `text_problem(text) -> str`: "" for a text that can be sent, else `text_empty`, `text_long` (more than 2000 characters), `text_lines` (a line break of any kind) or `text_control` (a control character, an escape sequence, or a bidirectional control). Emoji sequences (zero-width joiner, variation selectors, tag characters) are fine. `valid_text(text)` is `text_problem(text) == ""`.
-- A terminal must have the form of an address (`t7`, `t1c`, `machine/t7`) and be in the last list of agents. A NAME can have that form too, so each screen call first runs `herdr-core get <t> --json` (2 s) and goes on only when the `address` of the answer is the same text; else the code is `not_this_terminal` and no other command runs. Codes: `bad_address`, `unknown_terminal`, `not_this_terminal`, `bad_key`, `bad_text`, `no_core`, `timeout`, `no_run`, `bad_reply`, `herdr_<kind>` (the error kind of herdr-core, for example `herdr_not_found`), `exit_<n>`.
+- `send_text(terminal, text, cancel=None) -> None | Failure(code)`: `herdr-core send --force -- <t> <text>`, 65 s (above the 60 s draft hold). `--` ends the options: a text that starts with "-" is text. With `cancel` (a `threading.Event`, the session always gives one), the command runs as a watched process: when `cancel` is set it is killed (herdr-core then does not type a held text, measured), and the call returns `cancelled` only after the process has ended. A `cancel` that is set before the start runs nothing.
+- `text_problem(text) -> str`: "" for a text that can be sent, else `text_empty`, `text_long` (more than 2000 characters), `text_lines` (a line break of any kind) or `text_control` (a control character, an escape sequence, a bidirectional control, or any other invisible character: zero-width space, word joiner, soft hyphen, byte order mark, the language tag, tag characters, variation selectors). Inside emoji only: a zero-width joiner between two emoji, U+FE0E / U+FE0F after an emoji or a keycap base, and the tag characters of a region flag (U+1F3F4, then 2 to 6 tags of small letters or digits, then the cancel tag; for example the flag of Scotland). The text goes to a model: invisible characters could carry words that the person does not see. `valid_text(text)` is `text_problem(text) == ""`.
+- A terminal must have the form of an address (`t7`, `t1c`, `machine/t7`) and be in the last list of agents. A NAME can have that form too, so each screen call first runs `herdr-core get <t> --json` (2 s) and goes on only when the `address` of the answer is the same text; else the code is `not_this_terminal` and no other command runs. When the `get` itself fails, nothing else runs either: `check_timeout` (its 2 s ended) or `check_failed` (any other failure), except `herdr_not_found` and `herdr_finished`, which say that the terminal is gone. So a press can take up to 12 s (2 s `get` + 10 s `keys`). Codes: `bad_address`, `unknown_terminal`, `not_this_terminal`, `check_timeout`, `check_failed`, `bad_key`, `bad_text`, `no_core`, `timeout`, `cancelled`, `no_run`, `bad_reply`, `herdr_<kind>` (the error kind of herdr-core, for example `herdr_not_found`), `exit_<n>`.
 - The address of a row of `herdr-app ls` (`terminal`) is the address of `herdr-core` (`address`): the same text. `machine/t7` is from the help of herdr-core; no such row was there to test.
 
 ### The backend: slots, signal, values
 
 | Name | Kind | Meaning |
 |---|---|---|
-| `openPrompt(key)` | slot | Open the prompt of the agent row `key`. An agent that is not blocked gives `gone`. It does NOTHING (no state change, no signal) for a key that is not in the list, after the program stopped, and while `answering` is true (states `answering` and `pending`): the window then keeps what it shows; it should not offer the action in those states |
-| `answer(optionKey) -> bool` | slot | Press the key of an option of the kind `choice` or `other`. `true`: started. `false`: refused, nothing changes (the state is not `ready`, the prompt has no such option, it is the text option, or the prompt is blind and the option is not `allowed`) |
-| `answerText(text) -> bool` | slot | Answer with a text. `false`: refused. When the state is `ready` and the text option is allowed but the text cannot be sent, the state stays `ready` and `reason` / `message` say why (`text_empty`, `text_long`, `text_lines`, `text_control`): this is the one way the window learns the reason. In the other cases (not `ready`, no text option, blind) nothing changes |
-| `closePrompt()` | slot | Close, and drop the question and the screen text. A key that herdr-core has taken is NOT stopped: it can still arrive (a held key, or a worker that was past its last check). A text that herdr-core holds for a draft is cancelled only when the worker's `send` ends; a close does not end it |
+| `openPrompt(key)` | slot | Open the prompt of the agent row `key`. An agent that is not blocked gives `gone`. A terminal with a mark (see "The mark") shows `pending` with `reason` `earlier`. It does NOTHING (no state change, no signal) for a key that is not in the list, after the program stopped, and while an answer of the open prompt is on its way (states `answering`, and `pending` with `press_timeout` / `send_timeout`): the window then keeps what it shows; it should not offer the action in those states. In `pending` with `earlier` it opens the row asked for |
+| `answer(optionKey) -> bool` | slot | Press the key of an option of the kind `choice` or `other`. `true`: started. `false`: refused, nothing changes (the state is not `ready`, the prompt has no such option, it is the text option, or the prompt is blind and the option is not `allowed`). A terminal with a mark: refused, and the state becomes `pending` with `reason` `earlier` |
+| `answerText(text) -> bool` | slot | Answer with a text. `false`: refused. When the state is `ready` and the text option is allowed but the text cannot be sent, the state stays `ready` and `reason` / `message` say why (`text_empty`, `text_long`, `text_lines`, `text_control`): this is the one way the window learns the reason. A terminal with a mark: `pending` with `earlier`, as for `answer`. In the other cases (not `ready`, no text option, blind) nothing changes |
+| `closePrompt()` | slot | Close, and drop the question and the screen text. A key that herdr-core has taken is NOT stopped: it can still arrive (a held key, or a worker that was past its last check). The `send` of a text that runs is killed (herdr-core then does not type it). The mark of the terminal stays: a reopen shows `pending` / `earlier` until it ends |
 | `prompt` | property (map), notify `promptChanged` | See below. Every key is always there |
 | `answering` | property (yes/no), notify `promptChanged` | The state is `answering` or `pending` |
 | `promptChanged()` | signal | `prompt` or `answering` is different |
@@ -167,8 +175,8 @@ The `prompt` map:
 | `state` | `closed`, `loading`, `ready`, `unreadable`, `gone`, `answering`, `pending`, `sent`, `failed` |
 | `key`, `address` | the terminal address of the agent (the same text) |
 | `label`, `icon`, `program` | the label and the icon of the agent row, and the program word |
-| `kind`, `title`, `subtitle`, `question`, `detail`, `cut`, `blind`, `options`, `cursor` | the fields of the `Prompt`; empty (or false) when no question shows. `options`: a list of `{key, label, description, kind, effect, allowed}`; `allowed` false: the window shows the option but its button is off (an option that approves on a blind prompt) |
-| `freeText` | the question has a text option and it is allowed: show the text field |
+| `kind`, `title`, `subtitle`, `question`, `detail`, `cut`, `blind`, `options`, `cursor` | the fields of the `Prompt`; empty (or false) when no question shows. `options`: a list of `{key, label, description, kind, effect, allowed}`; `allowed` false: the window shows the option but its button is off (an option that approves on a blind prompt, and every option in a state other than `ready`) |
+| `freeText` | the state is `ready`, the question has a text option and it is allowed: show the text field |
 | `screen` | the text of the screen, only in the state `unreadable`; else empty |
 | `reason` | a reason code, or empty |
 | `message` | a short fixed text for the person, or empty. In `ready` with no reason and a blind prompt: "The full content is not visible here. Open it in Herdr to approve." |
@@ -183,8 +191,11 @@ The reason codes and their messages (fixed text, `bellwether/prompt_session.py: 
 | `changed` | `ready`, `unreadable` | "The question changed. Nothing was sent." |
 | `text_key_only` | `ready`, `unreadable` | "The text option was selected but the text was not sent. Check in Herdr." (the digit of the text option went, then the screen was different) |
 | `held` | `ready` (the next question), `sent` | "Herdr held the key while someone typed in this terminal. Check in Herdr that it answered the question you saw." |
-| `text_empty` / `text_long` / `text_lines` / `text_control` | `ready` | "Type a text first." / "The text is too long: at most 2000 characters." / "The text must be one line." / "The text has characters that cannot be sent (control or direction characters)." |
+| `text_empty` / `text_long` / `text_lines` / `text_control` | `ready` | "Type a text first." / "The text is too long: at most 2000 characters." / "The text must be one line." / "The text has characters that cannot be sent (control, direction or invisible characters)." |
 | `press_timeout`, `send_timeout` | `pending`, then `failed` | "Herdr did not confirm the answer. It may still arrive. Check in Herdr." |
+| `earlier` | `pending` | "An earlier answer to this agent may still arrive. Nothing more can be sent until the agent goes on or shows a different question. Check in Herdr." |
+| `check_timeout` / `check_failed` | `failed` | "Herdr did not answer the check of the terminal. Nothing was sent." / "Herdr could not check the terminal. Nothing was sent." (the `get` before the key failed: `keys` did not run) |
+| `text_check` | `failed` | "The text option was selected, but Herdr could not check the terminal before the text. The text was not sent. Check in Herdr." |
 | `unconfirmed` | `sent` | "The agent went on, but Herdr did not confirm the answer. Check in Herdr that it got yours." |
 | `no_effect` | `failed` | "The answer was sent, but the question did not change." |
 | `text_not_ready` | `failed` | "The text option was selected but its entry did not open. The text was not sent. Check in Herdr." |
@@ -201,11 +212,12 @@ What each state has:
 | `loading` | the agent (`key`, `label`, `icon`, `program`) | `ready`, `unreadable`, `gone`, `failed` |
 | `ready` | the question and its options; a `reason` of a note (`changed`, `text_key_only`, `held`, `text_…`) with its `message` while the same question shows; for a blind prompt with no note, the blind `message` | `answer`, `answerText`, a tick (the same or a new question, `unreadable`, `gone`) |
 | `answering` | the question stays, for buttons that are off | `sent`, `ready`, `unreadable`, `gone`, `failed`, `pending` |
-| `pending` | the question stays, buttons off; `reason` `press_timeout` or `send_timeout`; `message` "… It may still arrive. Check in Herdr." The window should show "Open in Herdr" | `sent` (`unconfirmed`), `failed` (the same reason): see the transitions |
+| `pending` | the question stays, buttons off; `reason` `press_timeout` or `send_timeout`; `message` "… It may still arrive. Check in Herdr." The window should show "Open in Herdr" | `sent` (`unconfirmed`), `failed` (the same reason), `gone` (Herdr does not have the terminal): see the transitions |
+| `pending` (`earlier`) | the question that shows now (it can be a new one), buttons off, no text field; `message` of `earlier` | `ready` / `unreadable` when the mark ends, `gone` (the agent is not blocked), `openPrompt`, `closePrompt` |
 | `sent` | the agent; `message` "Sent." and `closed` after 1 s; with `reason` `held` or `unconfirmed` the `message` of that reason, and it stays until `closePrompt` | `closed` |
 | `unreadable` | `screen`; `reason` and `message` set: `no_reader`, `not_recognised`, `incomplete`, or a note (`changed`, `text_key_only`) | a tick can give `ready` or `gone` |
 | `gone` | the agent; `reason` `not_blocked`, `unknown_terminal` or a `herdr_…` code; `message` "This agent is not blocked now." | `closePrompt`, `openPrompt` |
-| `failed` | the agent, no question; `reason`: `read_<code>`, `press_<code>`, `send_<code>`, `no_effect`, `text_not_ready`, `error`; `message` | `closePrompt`, `openPrompt` |
+| `failed` | the agent, no question; `reason`: `read_<code>`, `press_<code>`, `send_<code>`, `check_timeout`, `check_failed`, `text_check`, `no_effect`, `text_not_ready`, `error`; `message` | `closePrompt`, `openPrompt` |
 
 The transitions:
 
@@ -213,10 +225,22 @@ The transitions:
 - After a key: the list of agents is read at once, and the screen after 0.2, 0.3, 0.5, 0.5, 0.75, 0.75, 1 and 1 s (5 s in all). The agent is not blocked: `sent`. A question with a different fingerprint: `ready`. At the end, the same question: `failed` / `no_effect`; a screen that no reader knows: `unreadable`. A key that took more than 1 s to go (herdr-core held it): the result has the note `held`, and a `sent` with that note stays open.
 - A `press` or `send` that ends with `timeout`: `pending`. The reads go on for 25 s (the 5 s above, then each 2 s). The agent is not blocked: `sent` with `unconfirmed`. The same question: the reads go on; at the end `failed` with the timeout reason. Any other screen (a new question, a screen that no reader knows): `failed` with the timeout reason at once, with no buttons, because the held key can still arrive on that new question.
 - A text answer: the digit of the text option, then the cursor check. A different screen after the digit: `ready` or `unreadable` with `text_key_only`, and the ticks go on.
-- While `ready` or `unreadable`: each read of the list (the existing ticks and the changes of Herdr) reads the screen again, with at least 0.5 s from one read to the next. A read that fails changes nothing. No reads in the other states.
+- While `ready`, `unreadable` or `pending` (`earlier`): each read of the list (the existing ticks and the changes of Herdr) reads the screen again, with at least 0.5 s from one read to the next (at once when a mark just ended). A read that fails changes nothing. No reads in the other states.
 - Offline, the agent not in the list, the agent not blocked: `gone`, and the question is dropped.
 - The result of one worker thread at a time counts: a new job, a close and a stop raise the serial number, and the result of an older worker is ignored. An older worker can still run to its end: one that is past its last check presses its key. The state is of the UI thread.
 - Memory: the question and the screen text are dropped at `closePrompt`, when the program stops, and when the state changes to one that does not show them.
+
+### The mark (fix round 2)
+
+Bellwether sends no second key or text to a terminal while a first one may still be in the hold of herdr-core. The window state cannot hold that rule: a close (Esc) ends the state, and after `pending` comes `failed`. So the session keeps a **mark** per terminal address (`bellwether/prompt_session.py: Mark`), apart from the open prompt. A close does not end it.
+
+- It is set when an answer starts (the read before the key, the key, the text).
+- While it is there: `openPrompt` on that terminal shows `pending` with `reason` `earlier` (the question that shows now, no option `allowed`, no text field), `answer` and `answerText` are refused, for every look and after any close and reopen. Each terminal has its own mark.
+- When the call of the answer returns, the mark ends at once when nothing of it can still arrive: the key or the text was confirmed; nothing was sent (a different screen, a failed read, a failed check, any error code of `keys` or `send` other than `timeout`); the key of the text option went but the text did not (`text_key_only`, `text_not_ready`, `text_check`); or a close killed the `send` (the kill is confirmed: the process ended; herdr-core does not type a killed held text, measured).
+- A `send` killed at its 65 s deadline (`send_timeout`): the mark ends 4 s later, in case herdr-core was typing it at the kill.
+- A `keys` killed at its deadline (`press_timeout`): a killed `keys` still delivers, and herdr-core holds it with no limit while a person types in that terminal. The mark never ends by time alone while the answered question (the same fingerprint) shows. It ends 4 s (`SETTLE_SECONDS`: the measured 3.0 s hold after a person's last key, plus 1 s) after Bellwether first sees the agent leave that question: a read of the list shows the agent not blocked (offline is not a proof), or a read of its screen shows a question with a different fingerprint. A read that shows the answered question again starts it over. A screen that no reader knows proves nothing.
+- At the stop of the program, a `send` that runs is killed, and the stop waits up to 1 s for the calls that run. The marks are in memory only (see Limits).
+- Log lines: `mark terminal=<t> set`, `kept reason=<code>`, `cleared reason=<code>`; never screen text.
 - Log lines have the terminal address, the program word, the state, the key and reason codes. Never a part of a screen.
 
 ### Not obtained, and limits
