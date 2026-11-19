@@ -240,15 +240,16 @@ A blocked agent waits for your answer in its terminal. You can give that answer 
 
 What the window shows:
 
-- The agent (its icon, name and terminal address), the title of the dialog, and the detail: the command, the diff or the plan, line for line as on the screen of the agent. A long line goes on in the next row with no new mark at its left; nothing is hidden at the side.
+- The agent (its icon, name and terminal address), the title of the dialog with every line below it as the dialog shows it (the purpose of a command, a file name, a tip of the program), and the detail: the command, the diff or the plan, line for line as on the screen of the agent. A long line goes on in the next row with no new mark at its left; nothing is hidden at the side.
+- A long detail takes all the free height of the window. When it is still taller, a bar at its foot says how many lines are out of view ("12 more lines below").
 - One button for each option, in the order of the dialog, with its number.
   - An option that approves only this one thing ("Yes") has a full number in the accent colour.
-  - An option that approves more than this one thing ("always allow …", "don't ask again …", "auto mode", "accept edits for this session") has an empty number and a bar in the colour of the status "blocked". It never looks like the plain "Yes".
+  - An option that approves more than this one thing ("always allow …", "don't ask again …", "auto mode", "accept edits for this session") has an empty number, a bar in the colour of the status "blocked", and the words "Standing permission". It never looks like the plain "Yes".
   - An option that declines ("No") is grey.
 - A text field with "Send" when the question takes a free text. Type the text and press Enter. A text is one line of 1 to 2000 visible characters.
 - "Open in Herdr" is always there. It shows the agent in the Herdr app and closes the answer window.
 
-Keys: a number presses the option with that number (not while you type in the text field). Tab goes through the options, the text field, "Send", "Open in Herdr" and the close control. Enter presses only the control that has the keyboard: no option is selected at the start. Esc closes the window.
+Keys: a number presses the option with that number (not while you type in the text field). Tab goes through the detail (when it scrolls), the options, the text field, "Send", "Open in Herdr" and the close control. Enter presses only the control that has the keyboard: no option is selected at the start. Page Down, Page Up, Home and End scroll the detail. Esc closes the window.
 
 The programs: Claude Code (permission dialogs for a command, an edit, a new file and a fetch; a question with one choice, also with tabs and its review page; the plan approval) and Codex (the approval of a command and of an edit). For any other program, and for a screen that Bellwether does not know, the window shows the screen as text and "Open in Herdr".
 
@@ -256,7 +257,9 @@ Safety rules:
 
 - Bellwether shows buttons only when it knows the whole dialog. Before each key it reads the screen again, and it sends nothing when the question is different ("The question changed. Nothing was sent.").
 - One click or one key of yours is one answer. The window never sends anything by itself, and there is no "answer all".
-- For 0.4 seconds after a question shows, clicks and numbers do nothing. So a double click cannot answer the next question.
+- After a question shows (or can be answered again), a click does nothing until 0.4 seconds passed with no click and no key, and a number does nothing until 1 second passed with no key. Each press in that time starts the wait again. So a double click, or the next keys of your typing, cannot answer the next question.
+- If a new question comes while you type in the text field, or less than 2 seconds after you pressed a key, the numbers stay off for it until you click in the window or press Tab. The window says so: "New question — click or press Tab to use the number keys". A new question has the mark "New question" with its number, and the window lights up for a moment.
+- The options that approve stay off until the last line of the detail was on the screen: "Scroll to the end of the text above to approve." Bellwether itself checks this, not only the window. "No" and "Open in Herdr" work at any time.
 - "Partly visible": Bellwether cannot see all that the dialog approves (a dialog that is taller than the screen of the agent, and every edit of Codex: its patch is not in the dialog). You can only decline from the window. To approve, use "Open in Herdr".
 - The text of a screen stays in memory only while the window shows it. It is never in the log and never in a file.
 
@@ -273,7 +276,8 @@ Limits:
 - The readers depend on how each program draws its dialogs. After an update of Claude Code or Codex, the window can show "Not readable" until Bellwether is updated.
 - The "trust this folder" dialogs are not a blocked state in Herdr: the panel does not show them.
 - The check-box question of Claude Code (many answers) is not answered from the window.
-- The dialogs were measured on terminals of 200, 80 and 50 columns. On a narrow terminal a label that wraps can differ from the screen by one space.
+- The dialogs were measured on terminals of 200, 95, 90, 84, 80 and 50 columns. On a narrow terminal a label that wraps can differ from the screen by one space.
+- On a blocked row the name of the agent has the room first: with a large text or a long name, the workspace text at its right is cut or goes away.
 - The answer window is a normal window: the compositor chooses its place (KWin puts it near the middle of the screen or under the pointer, by its own rule). You can move it by its header.
 
 ## Files
