@@ -36,6 +36,7 @@ def test_groups_hold_the_four_states_in_order_with_their_agents(backend):
     ]
     assert backend.groups[0]["agents"] == [{
         "key": "t1", "icon": "", "label": "rev", "detail": "Main", "address": "", "spoken": "Go to rev in Main",
+        "canAnswer": True,
     }]
     assert [a["key"] for a in backend.groups[2]["agents"]] == ["t3", "t2"]
 
