@@ -1,11 +1,17 @@
 // The theme tokens of Layout C: the values that its skin and the options window share.
 // The list of tokens is in the spec ("options window and layout skins", "Theme tokens").
 import QtQuick
+import "fonts.js" as Fonts
 
 QtObject {
+    id: tokens
+
     readonly property color panelColor: "#f00b0e11"
     // The thin line of the frame. The corner brackets (decoration) carry the colour of the top status.
     readonly property color frameColor: "#2b333b"
+    // The colour of the corner brackets and of the top status in the header with no agents and offline, and of
+    // the brackets of the options window. Only this design has it (not one of the shared tokens).
+    readonly property color neutralColor: "#6b747d"
     readonly property int frameWidth: 1
     readonly property int radius: 0
     readonly property int itemRadius: 0
@@ -17,25 +23,19 @@ QtObject {
     readonly property color selectedColor: "#1a8ab4f8"
     readonly property color hoverColor: "#14e3e9ee"
     // Hack, or the first monospace font that this system has.
-    readonly property string fontFamily: {
-        var have = Qt.fontFamilies()
-        var wanted = ["Hack", "JetBrains Mono", "DejaVu Sans Mono", "Liberation Mono", "Noto Sans Mono"]
-        for (var i = 0; i < wanted.length; i++)
-            if (have.indexOf(wanted[i]) >= 0)
-                return wanted[i]
-        return "monospace"
-    }
+    readonly property string fontFamily: Fonts.first(
+        ["Hack", "JetBrains Mono", "DejaVu Sans Mono", "Liberation Mono", "Noto Sans Mono"], "monospace")
     readonly property int titleSize: 12
     readonly property int bodySize: 12
     readonly property int smallSize: 10
     readonly property real letterSpacing: 1.5
     readonly property bool uppercaseTitles: true
     // The frame ornament: four corner brackets, 14 px long and 2 px thick, in `tone`. The user of the
-    // component gives it the size of the frame, and sets `tone` (the default is the neutral colour).
+    // component gives it the size of the frame, and sets `tone` (the default is neutralColor).
     readonly property Component decoration: Component {
         Item {
             id: brackets
-            property color tone: "#6b747d"
+            property color tone: tokens.neutralColor
             Repeater {
                 model: 4
                 Item {

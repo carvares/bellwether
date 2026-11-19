@@ -138,7 +138,7 @@ Item {
                         readonly property string hitRole: "status"
                         readonly property string stateName: group.state
                         readonly property bool open: skin.panel.openState === group.state
-                        readonly property bool empty: group.count === 0 || !skin.panel.online
+                        readonly property bool empty: group.count === 0
                         readonly property bool hovered: skin.panel.hoverItem === tab
                         width: tabs.width / 4
                         height: 50
@@ -169,7 +169,7 @@ Item {
                         // An attention status with agents has a small lamp next to its number.
                         Rectangle {
                             readonly property bool isLamp: true
-                            visible: tab.group.alert && skin.panel.online
+                            visible: tab.group.alert
                             anchors.left: number.right
                             anchors.leftMargin: 4
                             y: 9
@@ -231,7 +231,7 @@ Item {
                             text: agentRow.modelData.label
                             color: theme.textColor
                             elide: Text.ElideRight
-                            font { family: skin.sans; pixelSize: 13 }
+                            font { family: skin.sans; pixelSize: theme.bodySize }
                         }
                         // The terminal address, only for rows that look the same without it.
                         Text {
@@ -242,7 +242,7 @@ Item {
                             anchors.baseline: label.baseline
                             text: agentRow.modelData.address
                             color: theme.faintColor
-                            font { family: skin.sans; pixelSize: 12; features: { "tnum": 1 } }
+                            font { family: skin.sans; pixelSize: theme.smallSize; features: { "tnum": 1 } }
                         }
                         Text {
                             id: detail
@@ -255,7 +255,7 @@ Item {
                             color: agentRow.note === "failed" ? skin.panel.failedColor
                                 : agentRow.note === "opening" ? skin.panel.openingColor : theme.dimColor
                             font {
-                                family: skin.sans; pixelSize: 12
+                                family: skin.sans; pixelSize: theme.smallSize
                                 weight: agentRow.note !== "" ? Font.Medium : Font.Normal
                             }
                         }
@@ -293,7 +293,7 @@ Item {
                 elide: Text.ElideRight
                 text: skin.panel.failedMessage
                 color: skin.panel.failedColor
-                font { family: skin.sans; pixelSize: 12; weight: Font.Medium }
+                font { family: skin.sans; pixelSize: theme.smallSize; weight: Font.Medium }
             }
         }
     }

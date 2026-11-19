@@ -14,7 +14,7 @@ Item {
     readonly property int inset: 14
     // The colour of the top status: the corner brackets and the tag in the header. Neutral with no agents
     // and when Herdr is offline.
-    readonly property color signalColor: panel.quiet ? "#6b747d" : panel.topColor
+    readonly property color signalColor: panel.quiet ? theme.neutralColor : panel.topColor
     readonly property string mono: theme.fontFamily
     readonly property color line: theme.lineColor
     readonly property color dim: theme.dimColor
@@ -56,7 +56,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     text: "BELLWETHER"
                     color: skin.dim
-                    font { family: skin.mono; pixelSize: 10; letterSpacing: 2; weight: Font.Bold }
+                    font { family: skin.mono; pixelSize: theme.smallSize; letterSpacing: 2; weight: Font.Bold }
                 }
                 Text {
                     readonly property bool isTotal: true
@@ -65,7 +65,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     text: skin.panel.online ? "AGENTS " + skin.panel.pad2(skin.panel.total) : "NO LINK"
                     color: skin.dim
-                    font { family: skin.mono; pixelSize: 10; letterSpacing: 1 }
+                    font { family: skin.mono; pixelSize: theme.smallSize; letterSpacing: 1 }
                 }
                 Text {
                     id: lampWord
@@ -74,7 +74,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     text: skin.panel.topLabel.toUpperCase()
                     color: skin.signalColor
-                    font { family: skin.mono; pixelSize: 10; letterSpacing: 1.5; weight: Font.Bold }
+                    font { family: skin.mono; pixelSize: theme.smallSize; letterSpacing: 1.5; weight: Font.Bold }
                 }
                 Rectangle {
                     anchors.right: lampWord.left
@@ -199,8 +199,8 @@ Item {
                             x: 20
                             anchors.verticalCenter: parent.verticalCenter
                             text: groupItem.group.label.toUpperCase()
-                            color: groupItem.empty ? "#68727c" : skin.ink
-                            font { family: skin.mono; pixelSize: 12; letterSpacing: 1.5 }
+                            color: groupItem.empty ? theme.faintColor : skin.ink
+                            font { family: skin.mono; pixelSize: theme.titleSize; letterSpacing: 1.5 }
                         }
                         // Dotted leader between the name and the numeral.
                         Row {
@@ -260,7 +260,7 @@ Item {
                                     x: 14; y: 2
                                     width: parent.width - 14 + 6
                                     height: parent.height - 4
-                                    color: "#14e3e9ee"
+                                    color: theme.hoverColor
                                 }
                                 // Tree lines from the status marker to each agent.
                                 Rectangle {
@@ -291,7 +291,7 @@ Item {
                                     text: agentRow.modelData.label
                                     color: skin.ink
                                     elide: Text.ElideRight
-                                    font { family: skin.mono; pixelSize: 12 }
+                                    font { family: skin.mono; pixelSize: theme.bodySize }
                                 }
                                 // The terminal address, only for rows that look the same without it.
                                 Text {
@@ -302,7 +302,7 @@ Item {
                                     anchors.leftMargin: 6
                                     anchors.baseline: label.baseline
                                     text: "[" + agentRow.modelData.address + "]"
-                                    color: "#68727c"
+                                    color: theme.faintColor
                                     font { family: skin.mono; pixelSize: 11 }
                                 }
                                 Text {
@@ -367,8 +367,8 @@ Item {
                             y: agentList.height + 2
                             text: "ROWS " + skin.panel.pad2(agentList.first + 1) + "–" + skin.panel.pad2(agentList.first + agentList.shown)
                                 + " / " + skin.panel.pad2(agentList.count) + (agentList.atEnd ? "  ▲ SCROLL" : "  ▼ SCROLL")
-                            color: "#68727c"
-                            font { family: skin.mono; pixelSize: 10; letterSpacing: 1 }
+                            color: theme.faintColor
+                            font { family: skin.mono; pixelSize: theme.smallSize; letterSpacing: 1 }
                         }
                     }
                 }

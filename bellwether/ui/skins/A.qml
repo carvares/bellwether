@@ -51,7 +51,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     text: "Herdr is offline"
                     color: theme.dimColor
-                    font { family: skin.sans; pixelSize: 15; weight: Font.Medium }
+                    font { family: skin.sans; pixelSize: theme.titleSize; weight: Font.Medium }
                 }
             }
 
@@ -95,7 +95,7 @@ Item {
                             anchors.verticalCenter: parent.verticalCenter
                             text: groupItem.group.label
                             color: groupItem.empty ? theme.faintColor : theme.textColor
-                            font { family: skin.sans; pixelSize: 15; weight: Font.Medium }
+                            font { family: skin.sans; pixelSize: theme.titleSize; weight: Font.Medium }
                         }
                         // Count. An attention status (blocked, done) with agents gets a filled badge.
                         Rectangle {
@@ -171,7 +171,7 @@ Item {
                                     text: agentRow.modelData.label
                                     color: theme.textColor
                                     elide: Text.ElideRight
-                                    font { family: skin.sans; pixelSize: 13 }
+                                    font { family: skin.sans; pixelSize: theme.bodySize }
                                 }
                                 // The terminal address, only for rows that look the same without it.
                                 Text {
@@ -182,7 +182,7 @@ Item {
                                     anchors.baseline: label.baseline
                                     text: agentRow.modelData.address
                                     color: theme.faintColor
-                                    font { family: skin.sans; pixelSize: 12; features: { "tnum": 1 } }
+                                    font { family: skin.sans; pixelSize: theme.smallSize; features: { "tnum": 1 } }
                                 }
                                 Text {
                                     id: detail
@@ -195,7 +195,7 @@ Item {
                                     color: agentRow.note === "failed" ? skin.panel.failedColor
                                         : agentRow.note === "opening" ? skin.panel.openingColor : theme.dimColor
                                     font {
-                                        family: skin.sans; pixelSize: 12
+                                        family: skin.sans; pixelSize: theme.smallSize
                                         weight: agentRow.note !== "" ? Font.Medium : Font.Normal
                                     }
                                 }
@@ -210,9 +210,10 @@ Item {
                                     visible: !agentList.atEnd
                                     y: agentList.height + 3 - height
                                     width: agentList.width; height: 26
+                                    // From clear to the colour of the panel.
                                     gradient: Gradient {
-                                        GradientStop { position: 0; color: "#001f2023" }
-                                        GradientStop { position: 1; color: "#f21f2023" }
+                                        GradientStop { position: 0; color: skin.panel.faded(theme.panelColor, 0) }
+                                        GradientStop { position: 1; color: theme.panelColor }
                                     }
                                 }
                                 Rectangle {
@@ -243,7 +244,7 @@ Item {
                 elide: Text.ElideRight
                 text: skin.panel.failedMessage
                 color: skin.panel.failedColor
-                font { family: skin.sans; pixelSize: 12; weight: Font.Medium }
+                font { family: skin.sans; pixelSize: theme.smallSize; weight: Font.Medium }
             }
         }
     }

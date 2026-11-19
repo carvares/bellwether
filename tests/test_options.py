@@ -217,9 +217,11 @@ def test_every_skin_has_a_theme_file_with_all_the_tokens(app, letter):
 
 
 def test_a_theme_file_that_forgets_a_token_is_found(app, tmp_path):
-    text = layouts.theme_file(layouts.built_skins()["A"]).read_text()
+    theme_a = layouts.theme_file(layouts.built_skins()["A"])
+    text = theme_a.read_text()
     lines = [line for line in text.splitlines() if "hoverColor" not in line and "readonly property int radius" not in line]
     (tmp_path / "ZTheme.qml").write_text("\n".join(lines))
+    (tmp_path / "fonts.js").write_text((theme_a.parent / "fonts.js").read_text())  # the font helper of the themes
     theme, engine, errors = load_theme(tmp_path / "ZTheme.qml")
     assert errors == [] and missing_tokens(theme) == ["radius", "hoverColor"]
 

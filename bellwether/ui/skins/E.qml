@@ -62,7 +62,7 @@ Item {
                         ctx.lineCap = "butt"
                         if (!online || skin.panel.parts === 0) {
                             // No agents: a full grey ring. Offline: a ring of dashes.
-                            ctx.strokeStyle = "#3c4043"
+                            ctx.strokeStyle = theme.lineColor
                             ctx.lineWidth = 9
                             var dashes = online ? 1 : 24
                             for (var k = 0; k < dashes; k++) {
@@ -128,7 +128,7 @@ Item {
                             readonly property string hitRole: "status"
                             readonly property string stateName: group.state
                             readonly property bool open: skin.panel.openState === group.state
-                            readonly property bool empty: group.count === 0 || !skin.panel.online
+                            readonly property bool empty: group.count === 0
                             readonly property bool hovered: skin.panel.hoverItem === item
                             width: legend.width
                             height: skin.legendRowHeight
@@ -153,7 +153,7 @@ Item {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: item.group.label
                                 color: item.empty ? theme.faintColor : theme.textColor
-                                font { family: skin.sans; pixelSize: 13; weight: Font.Medium }
+                                font { family: skin.sans; pixelSize: theme.titleSize; weight: Font.Medium }
                             }
                             Text {
                                 readonly property string countFor: item.stateName
@@ -164,7 +164,7 @@ Item {
                                 color: item.empty ? theme.faintColor : item.group.alert ? item.group.color : theme.textColor
                                 font {
                                     family: skin.sans; pixelSize: 15; features: { "tnum": 1 }
-                                    weight: item.group.alert && skin.panel.online ? Font.Bold : Font.DemiBold
+                                    weight: item.group.alert ? Font.Bold : Font.DemiBold
                                 }
                             }
                         }
@@ -223,7 +223,7 @@ Item {
                             text: agentRow.modelData.label
                             color: theme.textColor
                             elide: Text.ElideRight
-                            font { family: skin.sans; pixelSize: 13 }
+                            font { family: skin.sans; pixelSize: theme.bodySize }
                         }
                         // The terminal address, only for rows that look the same without it.
                         Text {
@@ -234,7 +234,7 @@ Item {
                             anchors.baseline: label.baseline
                             text: agentRow.modelData.address
                             color: theme.faintColor
-                            font { family: skin.sans; pixelSize: 12; features: { "tnum": 1 } }
+                            font { family: skin.sans; pixelSize: theme.smallSize; features: { "tnum": 1 } }
                         }
                         Text {
                             id: detail
@@ -247,7 +247,7 @@ Item {
                             color: agentRow.note === "failed" ? skin.panel.failedColor
                                 : agentRow.note === "opening" ? skin.panel.openingColor : theme.dimColor
                             font {
-                                family: skin.sans; pixelSize: 12
+                                family: skin.sans; pixelSize: theme.smallSize
                                 weight: agentRow.note !== "" ? Font.Medium : Font.Normal
                             }
                         }
@@ -263,9 +263,10 @@ Item {
                             x: 2
                             y: agentList.height + 8 - height
                             width: agentList.width - 4; height: 30
+                            // From clear to the colour of the panel.
                             gradient: Gradient {
-                                GradientStop { position: 0; color: "#001f2023" }
-                                GradientStop { position: 1; color: "#f21f2023" }
+                                GradientStop { position: 0; color: skin.panel.faded(theme.panelColor, 0) }
+                                GradientStop { position: 1; color: theme.panelColor }
                             }
                         }
                         Rectangle {
@@ -294,7 +295,7 @@ Item {
                 elide: Text.ElideRight
                 text: skin.panel.failedMessage
                 color: skin.panel.failedColor
-                font { family: skin.sans; pixelSize: 12; weight: Font.Medium }
+                font { family: skin.sans; pixelSize: theme.smallSize; weight: Font.Medium }
             }
         }
     }

@@ -1,13 +1,19 @@
 """Every layout (skin) through the real Main.qml, the real controller and a fake client, with real pointer events:
 the same information and the same behaviour in each of them. Then what is special in each skin."""
+import json
+import re
+import shutil
 import threading
 
 import pytest
 from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QWheelEvent
+from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtTest import QTest
 
 from bellwether import layouts
+from bellwether.__main__ import IMPORT_PATH, UI_PATH
+from bellwether.backend import Backend
 from bellwether.state import Agent
 from bellwether.tray import STATE_COLORS
 from tests.test_qml import (  # noqa: F401  (window is a fixture)
@@ -646,3 +652,60 @@ def test_layout_e_with_no_agents_and_offline(app, layout):
 
 def test_the_five_designs_are_built():
     assert sorted(layouts.built_skins()) == LETTERS
+
+
+# ----- the theme tokens and the skins do not drift apart -----
+
+# Test values for the tokens, each different from every real value, so that a text that has a literal in the place of
+# its token keeps the old value and is found.
+DRIFT = {"titleSize": 31, "bodySize": 27, "smallSize": 23, "textColor": "#123456", "dimColor": "#654321"}
+
+
+def font_of(item):
+    return item.property("font").pixelSize(), item.property("color").name()
+
+
+@pytest.mark.parametrize("letter", LETTERS)
+def test_the_texts_of_each_layout_take_their_size_and_colour_from_its_theme_tokens(app, fake_client, tmp_path, letter):
+    """A copy of the interface with other token values in the theme of the layout: the status title, the agent label
+    and the small text follow them. Not by a static search for literals: a text can read the wrong token, and a value
+    can be equal to a token by chance (a numeral of 13 px with a body size of 13 px)."""
+    ui = tmp_path / "ui"
+    shutil.copytree(UI_PATH, ui)
+    theme = ui / "skins" / f"{letter}Theme.qml"
+    text = theme.read_text()
+    for token, value in DRIFT.items():
+        text, n = re.subn(rf"(property \w+ {token}: )[^\n]+", lambda m: m.group(1) + json.dumps(value), text)
+        assert n == 1, token
+    theme.write_text(text)
+    backend = Backend(fake_client, settings_path=tmp_path / "state.json",
+                      skins={l: ui / "skins" / f"{l}.qml" for l in layouts.built_skins()})
+    backend.setLayout(letter)
+    messages = []
+    engine = QQmlApplicationEngine()
+    engine.warnings.connect(lambda errors: messages.extend(e.toString() for e in errors))
+    engine.rootContext().setContextProperty("backend", backend)
+    engine.rootContext().setContextProperty("stateColors_", STATE_COLORS)
+    engine.addImportPath(str(IMPORT_PATH))
+    engine.load(ui / "Main.qml")
+    try:
+        root = engine.rootObjects()[0]
+        backend.apply(MIXED)
+        settle(app)
+        working = status_items(root)[2]
+        click(app, root, working)
+        texts = [i for i in walk(root.contentItem()) if i.isVisible() and i.property("text")]
+        title = next(i for i in walk(working) if (i.property("text") or "").lower() == "working")
+        (row,) = [r for r in rows(root, "agent") if r.property("key") == "t2"]
+        label = next(i for i in walk(row) if i.property("text") == "ana")
+        detail = next(i for i in walk(row) if i.property("text") == "api / 1")
+        small = next(i for i in texts if i.property("isTotal")) if letter == "C" else detail
+        if letter != "D":  # D's tabs have 11 px labels, a size of that design; its titleSize is for the options window
+            assert font_of(title)[0] == DRIFT["titleSize"]
+        assert font_of(label) == (DRIFT["bodySize"], DRIFT["textColor"])
+        assert font_of(small)[0] == DRIFT["smallSize"]  # C: the header (its detail has 11 px, a size of that design)
+        assert font_of(detail)[1] == DRIFT["dimColor"]
+    finally:
+        del engine
+        app.processEvents()
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []

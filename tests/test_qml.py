@@ -5,9 +5,10 @@ import time
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QObject, QPoint, QPointF, Qt, Signal, Slot, qInstallMessageHandler
+import shiboken6
+from PySide6.QtCore import QObject, QPoint, QPointF, Qt, QUrl, Signal, Slot, qInstallMessageHandler
 from PySide6.QtGui import QWheelEvent
-from PySide6.QtQml import QQmlApplicationEngine, QQmlExpression, qmlContext
+from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent, QQmlExpression, qmlContext, qmlEngine
 from PySide6.QtQuick import QQuickWindow
 from PySide6.QtTest import QTest
 
@@ -1199,9 +1200,21 @@ def test_the_cap_of_8_rows_has_one_source(app, window):
     open_list = next(l for l in lists if l.property("open"))
     assert (open_list.property("shown"), open_list.property("longer")) == (8, True)
     assert (root.property("panel").property("shown"), root.property("panel").property("scrolls")) == (8, True)
-    root.property("panel").setProperty("maxAgentRows", 5)  # the one number: the list and the controller follow it
-    settle(app)
-    assert (open_list.property("shown"), root.property("panel").property("shown")) == (5, 5)
+    panel = root.property("panel")
+    assert panel.setProperty("maxAgentRows", 5) is False and panel.property("maxAgentRows") == 8  # a skin cannot
+    # A second controller that a test makes with a different cap (an initial property): a list and the controller
+    # both follow that one number.
+    engine = qmlEngine(root)
+    types = [QQmlComponent(engine, QUrl.fromLocalFile(str(UI_PATH / name))) 
+             for name in ("PanelModel.qml", "AgentList.qml")]
+    other = types[0].createWithInitialProperties({"maxAgentRows": 5, "openState": "idle"})
+    agent_list = types[1].createWithInitialProperties({"panel": other})
+    try:
+        settle(app)
+        assert (agent_list.property("shown"), agent_list.property("longer"), other.property("shown")) == (5, True, 5)
+    finally:
+        shiboken6.delete(agent_list)
+        shiboken6.delete(other)
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 

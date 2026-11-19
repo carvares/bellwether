@@ -81,8 +81,9 @@ QtObject {
     // The rows of the open group. Empty with no open group.
     readonly property var agents: openGroup ? openGroup.agents : []
     // A list shows this many rows at the most. A longer group scrolls. rowsFor() is the one place that
-    // applies it. (Not readonly: a test changes it.)
-    property int maxAgentRows: 8
+    // applies it. Read-only: a skin cannot change it (a test makes a controller with a different cap through an
+    // initial property).
+    readonly property int maxAgentRows: 8
     // The rows of the open group that are on the screen, and true when the group has more.
     readonly property int shown: rowsFor(agents.length)
     readonly property bool scrolls: agents.length > shown

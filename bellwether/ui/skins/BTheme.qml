@@ -1,6 +1,7 @@
 // The theme tokens of Layout B: the values that its skin and the options window share.
 // The list of tokens is in the spec ("options window and layout skins", "Theme tokens").
 import QtQuick
+import "fonts.js" as Fonts
 
 QtObject {
     readonly property color panelColor: "#f21b1c1f"
@@ -17,14 +18,8 @@ QtObject {
     readonly property color selectedColor: "#218ab4f8"
     readonly property color hoverColor: "#14e8eaed"
     // Adwaita Sans, or the first of these that this system has.
-    readonly property string fontFamily: {
-        var have = Qt.fontFamilies()
-        var wanted = ["Adwaita Sans", "Inter", "Noto Sans", "DejaVu Sans"]
-        for (var i = 0; i < wanted.length; i++)
-            if (have.indexOf(wanted[i]) >= 0)
-                return wanted[i]
-        return Qt.application.font.family
-    }
+    readonly property string fontFamily: Fonts.first(
+        ["Adwaita Sans", "Inter", "Noto Sans", "DejaVu Sans"], Qt.application.font.family)
     readonly property int titleSize: 13
     readonly property int bodySize: 13
     readonly property int smallSize: 12

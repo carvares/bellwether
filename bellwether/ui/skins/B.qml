@@ -53,9 +53,9 @@ Item {
                         readonly property string hitRole: "status"
                         readonly property string stateName: group.state
                         readonly property bool open: skin.panel.openState === group.state
-                        readonly property bool empty: group.count === 0 || !skin.panel.online
+                        readonly property bool empty: group.count === 0
                         // A status that needs attention is a solid tile. The others are tinted.
-                        readonly property bool solid: group.alert && skin.panel.online
+                        readonly property bool solid: group.alert
                         readonly property bool hovered: skin.panel.hoverItem === tile
                         width: (column.width - skin.gap) / 2
                         height: 74
@@ -79,7 +79,10 @@ Item {
                             y: 9
                             text: tile.group.label
                             color: tile.solid ? "#202124" : tile.empty ? theme.faintColor : theme.textColor
-                            font { family: skin.sans; pixelSize: 13; weight: tile.solid ? Font.DemiBold : Font.Medium }
+                            font {
+                                family: skin.sans; pixelSize: theme.titleSize
+                                weight: tile.solid ? Font.DemiBold : Font.Medium
+                            }
                         }
                         Text {
                             readonly property string countFor: tile.stateName
@@ -116,7 +119,7 @@ Item {
                 verticalAlignment: Text.AlignVCenter
                 text: "Herdr is offline"
                 color: theme.dimColor
-                font { family: skin.sans; pixelSize: 13; weight: Font.Medium }
+                font { family: skin.sans; pixelSize: theme.bodySize; weight: Font.Medium }
             }
 
             // The card of the open status: a header and the list of its agents.
@@ -198,7 +201,7 @@ Item {
                             text: agentRow.modelData.label
                             color: theme.textColor
                             elide: Text.ElideRight
-                            font { family: skin.sans; pixelSize: 13 }
+                            font { family: skin.sans; pixelSize: theme.bodySize }
                         }
                         // The terminal address, only for rows that look the same without it.
                         Text {
@@ -209,7 +212,7 @@ Item {
                             anchors.baseline: label.baseline
                             text: agentRow.modelData.address
                             color: theme.faintColor
-                            font { family: skin.sans; pixelSize: 12; features: { "tnum": 1 } }
+                            font { family: skin.sans; pixelSize: theme.smallSize; features: { "tnum": 1 } }
                         }
                         Text {
                             id: detail
@@ -222,7 +225,7 @@ Item {
                             color: agentRow.note === "failed" ? skin.panel.failedColor
                                 : agentRow.note === "opening" ? skin.panel.openingColor : theme.dimColor
                             font {
-                                family: skin.sans; pixelSize: 12
+                                family: skin.sans; pixelSize: theme.smallSize
                                 weight: agentRow.note !== "" ? Font.Medium : Font.Normal
                             }
                         }
@@ -253,7 +256,7 @@ Item {
                 elide: Text.ElideRight
                 text: skin.panel.failedMessage
                 color: skin.panel.failedColor
-                font { family: skin.sans; pixelSize: 12; weight: Font.Medium }
+                font { family: skin.sans; pixelSize: theme.smallSize; weight: Font.Medium }
             }
         }
     }
