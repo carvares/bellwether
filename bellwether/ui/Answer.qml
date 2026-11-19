@@ -157,7 +157,10 @@ Window {
     // detail is in view, or when the person scrolls to its end. The values are read from the backend, not from the
     // bindings of the window, so that a report never goes for a question that the window does not show yet.
     readonly property Item detailView: detailLoader.item
-    readonly property bool detailAtEnd: detailView === null || detailView.atEnd
+    // The last line of the detail is in its view, and its view is in the window (the content of the window can
+    // scroll too, on a low screen).
+    readonly property bool detailAtEnd: detailView === null || (detailView.atEnd
+        && column.y + detailLoader.y + detailLoader.height <= scroller.contentY + scroller.height + 1)
     readonly property bool hasAccept: {
         for (var i = 0; i < prompt.options.length; i++)
             if (prompt.options[i].effect === "accept")

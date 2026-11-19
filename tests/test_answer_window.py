@@ -918,3 +918,22 @@ def test_a_wide_option_has_a_tag_in_words_and_the_others_do_not(app, desk):
     tags = {b.property("key"): [i.property("text") for i in walk(b) if i.property("isWideTag") and i.isVisible()]
             for b in d.buttons()}
     assert tags == {"1": [], "2": ["Standing permission"], "3": ["Standing permission"], "4": []}
+
+
+def test_on_a_low_screen_the_end_of_the_detail_must_be_in_the_window_too(app, desk):
+    """The detail fits in its own view, but the content of a low window scrolls: the view itself is out of the
+    window at first, so it is not reported seen until the content scrolls to it."""
+    d = desk(screens=[EDIT])
+    d.open_group("blocked")
+    click(app, d.root, d.control("t1"))
+    d.window.setProperty("roomHeight", 300)  # the window is 220 px high
+    d.window.setProperty("guardMs", 600000)
+    assert wait_for(app, lambda: d.state() == "ready" and not d.backend._session.busy)
+    settle(app)
+    scroller, view = d.one("isScroller"), d.one("isDetail")
+    assert d.window.height() == 220 and scroller.property("scrolls") and view.property("atEnd") is True
+    d.window.setProperty("guardMs", 20)
+    assert not wait_for(app, lambda: d.backend.prompt["seen"] is True, 0.5)
+    assert not d.button("1").property("enabled")
+    scroller.setProperty("contentY", scroller.property("contentHeight") - scroller.height())
+    assert wait_for(app, lambda: d.backend.prompt["seen"] is True)
