@@ -1094,16 +1094,58 @@ def test_a_change_of_the_layout_keeps_the_editor_open_with_the_colour_of_the_new
     assert window.property("theme").metaObject().className().startswith("ETheme") and text_findings(window) == []
 
 
+CONTROL_FILES = sorted((layouts.UI_PATH / "controls").glob("*.qml")) + [layouts.UI_PATH / "Options.qml"]
+# What a text size of a control may be made of, after the rule of the skins (tests/test_look_qml.py): a theme token
+# (`theme.bodySize`), or a size of the design through the font scale (`theme.size(10)`). Two forms on top of it:
+# a token one pixel larger (`theme.smallSize + 1`: it keeps the font scale of the token), and the smaller of two
+# such sizes (`Math.min(a, b)`), or one of two by a flag of the control (`button.small ? a : b`).
+SIZE = r"(?:\w+\.)?theme\.(?:\w+Size(?:\s*\+\s*1)?|size\(\d+\))"
+SIZE_FORMS = [rf"{SIZE}", rf"Math\.min\({SIZE},\s*{SIZE}\)", rf"\w+\.\w+\s*\?\s*{SIZE}\s*:\s*{SIZE}"]
+
+
 def test_no_control_file_has_a_text_size_or_a_look_of_qt_quick_controls():
-    files = sorted((layouts.UI_PATH / "controls").glob("*.qml")) + [layouts.UI_PATH / "Options.qml"]
-    assert len(files) == 8
-    for file in files:
+    assert len(CONTROL_FILES) == 10
+    for file in CONTROL_FILES:
         text = file.read_text()
         assert "QtQuick.Controls" not in text, file.name
-        sizes = re.findall(r"pixelSize: ([^\n;}]+)", text)
-        assert all("theme." in size for size in sizes), (file.name, sizes)
-    # The limits and the steps of the two sliders are those of the backend, not numbers of the window.
+        uses = re.findall(r"\bpixelSize\b\s*(:?)\s*([^\n;}]*)", text)
+        for colon, value in uses:
+            assert colon == ":", f"{file.name}: pixelSize is set in a different way: {value!r}"
+            assert any(re.fullmatch(form, value.strip()) for form in SIZE_FORMS), f"{file.name}: pixelSize: {value}"
+        assert "pointSize" not in text, file.name
+    # The limits and the steps of the three sliders are those of the backend, not numbers of the window.
     text = (layouts.UI_PATH / "Options.qml").read_text()
     for member in ("scaleMin", "scaleMax", "scaleStep", "scaleDefault", "fontScaleMin", "fontScaleMax",
-                   "fontScaleStep", "fontScaleDefault", "fontFamilies", "colorRoles", "lookIsCustom"):
+                   "fontScaleStep", "fontScaleDefault", "opacityMin", "opacityMax", "opacityStep", "fontFamilies",
+                   "colorRoles", "lookIsCustom"):
         assert f"backend.{member}" in text, member
+    for file in CONTROL_FILES:
+        assert not re.search(r"^\s*(from|to|step|defaultValue):\s*[\d.]", file.read_text(), re.M), file.name
+
+
+# The colours that a control file may state, each with its reason. Every other colour comes from the theme.
+COLOUR_LITERALS = {
+    "ColorEditor.qml": {"#000000": "the value of `colour` before the caller binds it",
+                        "#8ab4f8": "the example in the text of the hint (\"Use a colour like #8ab4f8\")"},
+    "ColorSwatch.qml": {"#000000": "the value of `colour` before the caller binds it"},
+    "LayoutCard.qml": {"#0b0e11": "`tagInk`: the dark ink of the tag on the accent (inkOn picks light on a dark accent)",
+                       "#05070a": "the plate under the preview picture (the pictures are drawn for it)"},
+    "Options.qml": {"#000000": "a colour for a swatch and the editor while backend.colors has no value for a role"},
+}
+
+
+def test_no_control_file_has_a_colour_of_its_own_except_the_presets_and_the_documented_ones():
+    for file in CONTROL_FILES:
+        text = file.read_text()
+        if file.name == "ColorEditor.qml":  # the palette: 16 presets, its purpose
+            (palette,) = re.findall(r"presets: \[([^\]]*)\]", text)
+            assert len(re.findall(r'"#[0-9a-f]{6}"', palette)) == 16
+            text = text.replace(palette, "")
+        found = re.findall(r"#[0-9a-fA-F]{3,8}\b", text)
+        assert sorted(set(found)) == sorted(COLOUR_LITERALS.get(file.name, {})), file.name
+        assert len(found) == (2 if file.name == "Options.qml" else len(set(found))), (file.name, found)
+        named = {word for word in re.findall(r'"([A-Za-z]+)"', text) if QColor.isValidColorName(word)}
+        assert named <= {"transparent"}, (file.name, named)  # a name of a colour ("white") is a colour too
+        for red, green, blue in re.findall(r"Qt\.rgba\(([^,]+),([^,]+),([^,]+),", text):  # a token with an opacity
+            assert [red.strip()[-2:], green.strip()[-2:], blue.strip()[-2:]] == [".r", ".g", ".b"], (file.name, red)
+        assert not re.search(r"Qt\.(hsla|hsva|hsl|hsv)\(", text), file.name

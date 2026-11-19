@@ -25,8 +25,6 @@ Window {
     readonly property int tagHeight: theme.fit(18)
     readonly property int cardHeight: 8 + 124 + nameHeight + 6 + descriptionHeight + 8 + tagHeight + 8
     readonly property int cardGap: 12
-    // The dark text of the tag on the accent.
-    readonly property color tagInk: "#0b0e11"
     // The custom look: two columns (Size at the left, Text at the right), each a label, a control, a value and
     // a reset mark; then the eight colours in one row of two groups.
     readonly property int innerWidth: fixedWidth - 2 * pad
@@ -284,149 +282,17 @@ Window {
                         model: backend.layouts
 
                         // One layout. A layout that is not built yet is dim and cannot be chosen.
-                        Rectangle {
-                            id: card
+                        Controls.LayoutCard {
                             required property var modelData
-                            readonly property string layoutId: modelData.id
-                            readonly property bool built: modelData.built
-                            readonly property bool selected: backend.layout === modelData.id
-                            readonly property bool hovered: built && pointer.containsMouse
-
-                            function choose() {
-                                if (built)
-                                    backend.setLayout(modelData.id)
-                            }
-
+                            theme: options.theme
+                            layout: modelData
+                            selected: backend.layout === modelData.id
                             width: options.cardWidth
                             height: options.cardHeight
-                            radius: options.theme.itemRadius
-                            color: selected ? options.theme.selectedColor : hovered ? options.theme.hoverColor : "transparent"
-                            border.width: selected ? options.theme.frameWidth : 1
-                            border.color: selected ? options.theme.accentColor
-                                : hovered ? options.theme.faintColor : options.theme.lineColor
-                            activeFocusOnTab: built
-                            Accessible.role: Accessible.RadioButton
-                            Accessible.name: "Layout " + modelData.id + ", " + modelData.name
-                                + (selected ? ", selected" : built ? "" : ", coming next")
-                            Accessible.checkable: true
-                            Accessible.checked: selected
-                            Accessible.focusable: built
-                            Accessible.onPressAction: choose()
-                            Keys.onReturnPressed: choose()
-                            Keys.onEnterPressed: choose()
-                            Keys.onSpacePressed: choose()
-
-                            // The ornament of the layout on the selected card (Layout C: the corner brackets).
-                            Loader {
-                                id: cardOrnament
-                                anchors.fill: parent
-                                sourceComponent: card.selected ? options.theme.decoration : null
-                                Binding { target: cardOrnament.item; property: "tone"; value: options.theme.accentColor }
-                            }
-
-                            // The keyboard focus: a ring outside the card.
-                            Rectangle {
-                                readonly property bool isFocusRing: true
-                                visible: card.activeFocus
-                                anchors.fill: parent
-                                anchors.margins: -4
-                                radius: card.radius > 0 ? card.radius + 4 : 0
-                                color: "transparent"
-                                border.width: 2
-                                border.color: options.theme.textColor
-                            }
-
-                            Item {
-                                id: content
-                                x: 8
-                                y: 8
-                                width: parent.width - 16
-                                height: parent.height - 16
-                                opacity: card.built ? 1 : 0.4
-
-                                Rectangle {
-                                    width: parent.width
-                                    height: 116
-                                    radius: Math.min(3, options.theme.itemRadius)
-                                    color: "#05070a"
-                                    Image {
-                                        readonly property bool isPreview: true
-                                        anchors.centerIn: parent
-                                        width: parent.width
-                                        height: parent.height - 8
-                                        fillMode: Image.PreserveAspectFit
-                                        smooth: true
-                                        mipmap: true
-                                        source: card.modelData.preview
-                                    }
-                                }
-                                Text {
-                                    id: cardName
-                                    y: 124
-                                    width: parent.width
-                                    height: options.nameHeight
-                                    verticalAlignment: Text.AlignVCenter
-                                    text: card.modelData.id + " — " + card.modelData.name
-                                    color: options.theme.textColor
-                                    elide: Text.ElideRight
-                                    font {
-                                        family: options.theme.fontFamily; pixelSize: options.theme.bodySize + 1
-                                        weight: Font.DemiBold
-                                        capitalization: options.theme.uppercaseTitles ? Font.AllUppercase : Font.MixedCase
-                                    }
-                                }
-                                Text {
-                                    id: cardDescription
-                                    y: cardName.y + cardName.height + 6
-                                    width: parent.width
-                                    // Two lines for every card in every theme.
-                                    height: options.descriptionHeight
-                                    clip: true
-                                    text: card.modelData.description
-                                    color: options.theme.dimColor
-                                    wrapMode: Text.WordWrap
-                                    maximumLineCount: 2
-                                    elide: Text.ElideRight
-                                    font {
-                                        family: options.theme.fontFamily
-                                        pixelSize: Math.min(options.theme.size(12), options.theme.smallSize + 1)
-                                    }
-                                }
-                                // The state of the card, in words.
-                                Rectangle {
-                                    readonly property bool isTag: true
-                                    visible: card.selected || !card.built
-                                    y: cardDescription.y + cardDescription.height + 8
-                                    width: tagText.implicitWidth + 12
-                                    height: options.tagHeight
-                                    radius: Math.min(9, options.theme.itemRadius)
-                                    color: card.selected ? options.theme.accentColor : options.theme.lineColor
-                                    Text {
-                                        id: tagText
-                                        anchors.centerIn: parent
-                                        text: card.selected ? "SELECTED" : "COMING NEXT"
-                                        // On the accent: the dark ink of this window, or the light ink on a dark accent.
-                                        color: card.selected ? options.theme.inkOn(options.theme.accentColor, options.tagInk)
-                                            : options.theme.textColor
-                                        font {
-                                            family: options.theme.fontFamily; pixelSize: options.theme.size(9)
-                                            letterSpacing: 1; weight: Font.Bold
-                                        }
-                                    }
-                                }
-                            }
-
-                            MouseArea {
-                                id: pointer
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: card.built ? Qt.PointingHandCursor : Qt.ArrowCursor
-                                onClicked: {
-                                    if (card.built)
-                                        card.forceActiveFocus()
-                                    card.choose()
-                                }
-                            }
+                            nameHeight: options.nameHeight
+                            descriptionHeight: options.descriptionHeight
+                            tagHeight: options.tagHeight
+                            onChosen: backend.setLayout(layoutId)
                         }
                     }
                 }
@@ -440,64 +306,24 @@ Window {
                     height: sizeTitle.height + 10 + options.controlHeight
 
                     Controls.SectionTitle { id: sizeTitle; theme: options.theme; text: "Size" }
-                    Item {
+                    Controls.SliderRow {
                         id: sizeRow
+                        theme: options.theme
                         y: sizeTitle.height + 10
                         width: parent.width
                         height: options.controlHeight
-
-                        Text {
-                            width: options.labelWidth - 8
-                            height: parent.height
-                            verticalAlignment: Text.AlignVCenter
-                            elide: Text.ElideRight
-                            text: "Panel size"
-                            color: options.theme.textColor
-                            font { family: options.theme.fontFamily; pixelSize: options.theme.bodySize }
-                        }
-                        Controls.LookSlider {
-                            id: sizeSlider
-                            readonly property string sliderFor: "scale"
-                            theme: options.theme
-                            x: options.labelWidth
-                            width: parent.width - x - options.valueWidth - options.resetWidth - 16
-                            height: parent.height
-                            label: "Panel size"
-                            from: backend.scaleMin
-                            to: backend.scaleMax
-                            step: backend.scaleStep
-                            defaultValue: backend.scaleDefault
-                            value: backend.scale
-                            onMoved: (value) => backend.setScale(value)
-                            onResetRequested: backend.setScale(backend.scaleDefault)
-                        }
-                        Text {
-                            readonly property string valueFor: "scale"
-                            x: sizeSlider.x + sizeSlider.width + 8
-                            width: options.valueWidth
-                            height: parent.height
-                            verticalAlignment: Text.AlignVCenter
-                            horizontalAlignment: Text.AlignRight
-                            elide: Text.ElideRight
-                            text: sizeSlider.percent + " %"
-                            color: options.theme.textColor
-                            font { family: options.theme.fontFamily; pixelSize: options.theme.bodySize; features: { "tnum": 1 } }
-                        }
-                        Controls.LookButton {
-                            readonly property string resetFor: "scale"
-                            theme: options.theme
-                            small: true
-                            visible: backend.scale !== backend.scaleDefault
-                            enabled: visible
-                            anchors.right: parent.right
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "Reset"
-                            spoken: "Reset the panel size to " + Math.round(backend.scaleDefault * 100) + " percent"
-                            onActivated: {
-                                sizeSlider.forceActiveFocus()
-                                backend.setScale(backend.scaleDefault)
-                            }
-                        }
+                        name: "scale"
+                        label: "Panel size"
+                        from: backend.scaleMin
+                        to: backend.scaleMax
+                        step: backend.scaleStep
+                        defaultValue: backend.scaleDefault
+                        value: backend.scale
+                        labelWidth: options.labelWidth
+                        valueWidth: options.valueWidth
+                        resetWidth: options.resetWidth
+                        onMoved: (value) => backend.setScale(value)
+                        onResetRequested: backend.setScale(backend.scaleDefault)
                     }
                 }
 
@@ -510,64 +336,24 @@ Window {
                     height: textTitle.height + 10 + options.controlHeight + 8 + fontChooser.height
 
                     Controls.SectionTitle { id: textTitle; theme: options.theme; text: "Text" }
-                    Item {
+                    Controls.SliderRow {
                         id: textRow
+                        theme: options.theme
                         y: textTitle.height + 10
                         width: parent.width
                         height: options.controlHeight
-
-                        Text {
-                            width: options.labelWidth - 8
-                            height: parent.height
-                            verticalAlignment: Text.AlignVCenter
-                            elide: Text.ElideRight
-                            text: "Text size"
-                            color: options.theme.textColor
-                            font { family: options.theme.fontFamily; pixelSize: options.theme.bodySize }
-                        }
-                        Controls.LookSlider {
-                            id: textSlider
-                            readonly property string sliderFor: "fontScale"
-                            theme: options.theme
-                            x: options.labelWidth
-                            width: parent.width - x - options.valueWidth - options.resetWidth - 16
-                            height: parent.height
-                            label: "Text size"
-                            from: backend.fontScaleMin
-                            to: backend.fontScaleMax
-                            step: backend.fontScaleStep
-                            defaultValue: backend.fontScaleDefault
-                            value: backend.fontScale
-                            onMoved: (value) => backend.setFontScale(value)
-                            onResetRequested: backend.setFontScale(backend.fontScaleDefault)
-                        }
-                        Text {
-                            readonly property string valueFor: "fontScale"
-                            x: textSlider.x + textSlider.width + 8
-                            width: options.valueWidth
-                            height: parent.height
-                            verticalAlignment: Text.AlignVCenter
-                            horizontalAlignment: Text.AlignRight
-                            elide: Text.ElideRight
-                            text: textSlider.percent + " %"
-                            color: options.theme.textColor
-                            font { family: options.theme.fontFamily; pixelSize: options.theme.bodySize; features: { "tnum": 1 } }
-                        }
-                        Controls.LookButton {
-                            readonly property string resetFor: "fontScale"
-                            theme: options.theme
-                            small: true
-                            visible: backend.fontScale !== backend.fontScaleDefault
-                            enabled: visible
-                            anchors.right: parent.right
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "Reset"
-                            spoken: "Reset the text size to " + Math.round(backend.fontScaleDefault * 100) + " percent"
-                            onActivated: {
-                                textSlider.forceActiveFocus()
-                                backend.setFontScale(backend.fontScaleDefault)
-                            }
-                        }
+                        name: "fontScale"
+                        label: "Text size"
+                        from: backend.fontScaleMin
+                        to: backend.fontScaleMax
+                        step: backend.fontScaleStep
+                        defaultValue: backend.fontScaleDefault
+                        value: backend.fontScale
+                        labelWidth: options.labelWidth
+                        valueWidth: options.valueWidth
+                        resetWidth: options.resetWidth
+                        onMoved: (value) => backend.setFontScale(value)
+                        onResetRequested: backend.setFontScale(backend.fontScaleDefault)
                     }
                     Text {
                         y: fontChooser.y

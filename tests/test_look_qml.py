@@ -612,7 +612,7 @@ def test_a_wanted_colour_with_an_opacity_is_judged_as_it_is_drawn_on_the_plate(a
     assert readable(theme, "#00ffffff", "#ffffff") == dark  # nothing is drawn: the ink
 
 
-@pytest.mark.parametrize("skin", ["A.qml", "B.qml", "../Options.qml"])
+@pytest.mark.parametrize("skin", ["A.qml", "B.qml", "../controls/LayoutCard.qml"])
 def test_no_file_states_a_dark_ink_of_its_own_for_a_solid_plate(skin):
     text = (layouts.SKINS_PATH / skin).read_text()
     assert "#202124" not in text and "inkOn(" in text
