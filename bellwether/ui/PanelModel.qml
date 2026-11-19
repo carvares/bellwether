@@ -18,7 +18,7 @@ QtObject {
     //   alert      attention, and the state has an agent
     //   share      count / total, from 0 to 1 (0 with no agents)
     //   start      the sum of the shares of the states before this one: where its part of a ring or strip starts
-    //   agents     the rows of the group in their order: {key, icon, label, detail, address, spoken}
+    //   agents     the rows of the group in their order: {key, icon, label, detail, address, spoken, canAnswer}
     // Offline, every count is 0.
     readonly property var groups: {
         var source = backend.groups
@@ -121,7 +121,7 @@ QtObject {
 
     // ----- the pointer -----
 
-    // The status item or agent row under the pointer, for the pointer look of a skin. The window gives it with
+    // The status item, the agent row or the answer control of a row under the pointer, for the pointer look of a skin. The window gives it with
     // hover(). null during a drag, and for a status item that cannot open (see canOpen).
     property Item hoverItem: null
 
@@ -178,6 +178,13 @@ QtObject {
     // Show the agent in the Herdr app. One jump at a time: a call while a jump runs does nothing.
     function jump(key) {
         backend.focus(key)
+    }
+
+    // Open the answer window for a blocked agent (the "Answer" control of its row). While a jump runs it does
+    // nothing, as a click on a row.
+    function answer(key) {
+        if (opening === "")
+            backend.showAnswer(key)
     }
 
     // The parts of a share strip of `width` pixels, one for each of the four groups in their order, as

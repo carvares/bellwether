@@ -52,6 +52,8 @@ class Backend(QObject):
     lookIsCustomChanged = Signal()
     # The answer to a blocked agent: the value `prompt` or the flag `answering` is different.
     promptChanged = Signal()
+    # The "Answer" control of a row was used and a prompt is open: the answer window shows (bellwether/answer.py).
+    answerRequested = Signal()
     _snapshot = Signal(object)
     _focusDone = Signal()
 
@@ -492,6 +494,14 @@ class Backend(QObject):
     def openPrompt(self, key: str) -> None:
         """Open the prompt of the agent row with this key. A key that is not in the list does nothing."""
         self._session.open(key)
+
+    @Slot(str)
+    def showAnswer(self, key: str) -> None:
+        """The "Answer" control of an agent row: open the prompt of that row and ask for the answer window. With no
+        prompt open after it (a key that is not in the list), no window is asked for."""
+        self._session.open(key)
+        if self._session.state != "closed":
+            self.answerRequested.emit()
 
     @Slot()
     def closePrompt(self) -> None:

@@ -225,19 +225,25 @@ Window {
     }
 
     // The first item at (x, y) of `item`, from the outside in, whose hitRole is one of `roles`: "status" (a
-    // status row, with stateName), "agent" (an agent row, with key) or "scroll" (a list that scrolls).
+    // status row, with stateName), "agent" (an agent row, with key), "answer" (the answer control of an agent row,
+    // with key) or "scroll" (a list that scrolls). An agent row can hold a target of its own: the search goes on
+    // inside the row, and the row is the answer when nothing in it is one.
     function hitAt(item, x, y, roles) {
+        var row = null
         var child = item.childAt(x, y)
         while (child) {
-            if (roles.indexOf(child.hitRole) >= 0)
-                return child
+            if (roles.indexOf(child.hitRole) >= 0) {
+                if (child.hitRole !== "agent")
+                    return child
+                row = child
+            }
             var point = child.mapFromItem(item, x, y)
             item = child
             x = point.x
             y = point.y
             child = item.childAt(x, y)
         }
-        return null
+        return row
     }
 
     // A length of the skin in pixels of the screen: the next whole pixel. (0.000001: 320 × 1.1 is not 353.)
@@ -368,7 +374,8 @@ Window {
     }
 
     // The one pointer handler of the panel. A press that moves 6 px or more drags the widget.
-    // A press that moves less is a click on the row under it: a status row opens, an agent row jumps.
+    // A press that moves less is a click on the target under it: a status row opens, an agent row jumps, and the
+    // answer control of a row opens the answer window (and the row does not jump).
     // The pointer is in pixels of the screen at every scale: the 6 px, and the panel moves as far as the pointer.
     MouseArea {
         id: pointerArea
@@ -392,7 +399,7 @@ Window {
         onPressed: (mouse) => { startX = mouse.x; startY = mouse.y; moved = false; lastMoveMs = 0 }
         onPositionChanged: (mouse) => {
             if (!pressed) {
-                root.panel.hover(under(mouse, ["status", "agent"]))
+                root.panel.hover(under(mouse, ["status", "answer", "agent"]))
                 return
             }
             var dx = mouse.x - startX
@@ -418,9 +425,11 @@ Window {
                 root.settle()
                 return
             }
-            var row = under(mouse, ["status", "agent"])
+            var row = under(mouse, ["status", "answer", "agent"])
             if (row && row.hitRole === "status")
                 root.panel.toggle(row.stateName)
+            else if (row && row.hitRole === "answer")
+                root.panel.answer(row.key)
             else if (row)
                 root.panel.jump(row.key)
         }

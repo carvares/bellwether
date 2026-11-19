@@ -6,7 +6,7 @@ import QtQuick
 Item {
     id: row
 
-    // The row from the backend: {key, icon, label, detail, address, spoken}.
+    // The row from the backend: {key, icon, label, detail, address, spoken, canAnswer}.
     required property var modelData
     required property int index
     // The AgentList that holds this row.
@@ -26,6 +26,9 @@ Item {
     readonly property string noteText: failed ? view.panel.failedMessage : opening ? "opening…" : modelData.detail
     // The pointer is on this row.
     readonly property bool hovered: view.panel.hoverItem === row
+    // The row has an "Answer" control (AnswerControl.qml): the agent is blocked and the answer window can open for
+    // it. The one place of this rule for every skin; the backend decides (canAnswer of the row).
+    readonly property bool canAnswer: modelData.canAnswer === true
     // The last row of the group.
     readonly property bool last: index === view.count - 1
 
