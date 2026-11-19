@@ -1,6 +1,7 @@
 """The layouts (skins) of the panel: the five approved designs, and which of them are built."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 DEFAULT = "C"
@@ -36,3 +37,24 @@ THEME_TOKENS = (
     "faintColor", "accentColor", "selectedColor", "hoverColor", "fontFamily", "titleSize", "bodySize", "smallSize",
     "letterSpacing", "uppercaseTitles", "decoration",
 )
+
+# The token of a theme file that holds the default colour of each role that a theme has. The theme file gives the
+# colour as a text, alone or in the helper of that role: `readonly property color panelColor: background("#f00b0e11")`.
+_ROLE_TOKENS = {"background": "panelColor", "text": "textColor", "frame": "frameColor", "accent": "accentColor"}
+# The colours of Layout C: for a theme file that cannot be read, or that does not have a token.
+FALLBACK_COLORS = {"background": "#f00b0e11", "text": "#e3e9ee", "frame": "#2b333b", "accent": "#8ab4f8"}
+
+
+def theme_colors(theme: Path) -> dict[str, str]:
+    """The default colour of the roles background, text, frame and accent in a theme file. The backend gives them
+    to the options window. A test checks that they are the values that the QML theme has."""
+    try:
+        text = Path(theme).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return dict(FALLBACK_COLORS)
+    found = dict(FALLBACK_COLORS)
+    for role, token in _ROLE_TOKENS.items():
+        match = re.search(rf'\bproperty color {token}: (?:{role}\()?"(#[0-9a-fA-F]{{6}}(?:[0-9a-fA-F]{{2}})?)"', text)
+        if match:
+            found[role] = match[1].lower()
+    return found

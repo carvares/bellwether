@@ -7,12 +7,15 @@ import threading
 import time
 from pathlib import Path
 
-from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
+from PySide6.QtCore import Property, QObject, QTimer, QUrl, Signal, Slot
+from PySide6.QtGui import QFontDatabase
 
 from . import layouts
 from .client import HerdrError, HerdrOffline
-from .settings import DEFAULT_PATH, load_layout, load_position, save_layout, save_position, save_screen
-from .state import ATTENTION, STATES, Agent, count_states, top_state
+from .settings import (
+    COLOR_ROLES, DEFAULT_LOOK, DEFAULT_PATH, FONT_SCALE_LIMITS, SCALE_LIMITS, clamped, load_layout, load_look,
+    load_position, save_layout, save_look, save_position, save_screen, valid_color)
+from .state import ATTENTION, STATE_COLORS, STATES, Agent, count_states, top_state
 
 log = logging.getLogger("bellwether")
 
@@ -25,6 +28,8 @@ FLOOR = 0.25
 # After a wake: the waits before more reads. The app shows some changes up to 0.5 s (one time 1.5 s) later
 # than herdr-core tells of them. The reads come 0.15, 0.4, 0.55, 1.0 and 1.6 s after the read of the wake.
 AFTER = (0.15, 0.25, 0.15, 0.45, 0.6)
+# Milliseconds from the last change of the custom look to its save: a slider that moves writes the file one time.
+LOOK_SAVE_DELAY = 400
 
 
 def _natural(address: str) -> list:
@@ -38,13 +43,18 @@ class Backend(QObject):
     focusFailed = Signal(str, str)
     openingChanged = Signal()
     layoutChanged = Signal()
+    # The custom look. colorsChanged: one of the colour maps is different (also after a change of the layout).
+    scaleChanged = Signal()
+    fontScaleChanged = Signal()
+    fontFamilyChanged = Signal()
+    colorsChanged = Signal()
     _snapshot = Signal(object)
     _focusDone = Signal()
 
     def __init__(self, client, interval: float = 1.0, settings_path: Path = DEFAULT_PATH, icons=None,
                  events=None, slow_interval: float = SLOW_INTERVAL, floor: float = FLOOR,
                  after: tuple[float, ...] = AFTER, clock=time.monotonic, wait=None,
-                 skins: dict[str, Path] | None = None) -> None:
+                 skins: dict[str, Path] | None = None, families: list[str] | None = None) -> None:
         super().__init__()
         self._clock = clock
         # wait(event, seconds) waits for a threading.Event and returns True when it is set. Tests give
@@ -80,6 +90,19 @@ class Backend(QObject):
             # Not the saved text: a file that a person changed can hold anything.
             log.warning("the saved layout is not available: the layout is %s", layouts.DEFAULT)
             self._layout = layouts.DEFAULT
+        # The font families that the user can choose. None: the list of the system, read at its first use.
+        self._families = families
+        self._look, ignored = load_look(self._settings_path)
+        if self._look["fontFamily"] and self._look["fontFamily"] not in self.fontFamilies:
+            self._look["fontFamily"] = ""
+            ignored.append("fontFamily")
+        if ignored:  # The keys only: a file that a person changed can hold anything.
+            log.warning("the saved custom look has values that cannot be used: %s", ", ".join(ignored))
+        self._look_timer = QTimer(self)
+        self._look_timer.setSingleShot(True)
+        self._look_timer.setInterval(LOOK_SAVE_DELAY)
+        self._look_timer.timeout.connect(self._save_look)
+        self.layoutChanged.connect(self.colorsChanged)  # the default colours are those of the layout that shows
         self._snapshot.connect(self.apply)
         self._focusDone.connect(self._set_opening)
 
@@ -163,16 +186,21 @@ class Backend(QObject):
         """The skin file of the layout."""
         return QUrl.fromLocalFile(str(self._skins[self._layout])) if self._layout in self._skins else QUrl()
 
-    @Property(QUrl, notify=layoutChanged)
-    def themeSource(self) -> QUrl:
-        """The theme tokens of the layout, for the options window: the file <letter>Theme.qml next to the skin.
-        A skin with no theme file gets the tokens of the default layout. Empty when that has none too."""
+    def _theme(self) -> Path | None:
+        """The theme file of the layout: <letter>Theme.qml next to the skin. A skin with no theme file gets the
+        theme of the default layout. None when that has none too."""
         for letter in (self._layout, layouts.DEFAULT):
             if letter in self._skins:
                 theme = layouts.theme_file(self._skins[letter])
                 if theme.is_file():
-                    return QUrl.fromLocalFile(str(theme))
-        return QUrl()
+                    return theme
+        return None
+
+    @Property(QUrl, notify=layoutChanged)
+    def themeSource(self) -> QUrl:
+        """The theme tokens of the layout, for the options window. Empty when there is no theme file."""
+        theme = self._theme()
+        return QUrl.fromLocalFile(str(theme)) if theme else QUrl()
 
     @Property("QVariantList", constant=True)
     def layouts(self) -> list[dict]:
@@ -187,6 +215,86 @@ class Backend(QObject):
             }
             for letter, name, description in layouts.LAYOUTS
         ]
+
+    # ----- the custom look, for QML -----
+
+    @Property(float, notify=scaleChanged)
+    def scale(self) -> float:
+        """The size of the whole panel: 1 is the size of the design."""
+        return self._look["scale"]
+
+    @Property(float, constant=True)
+    def scaleMin(self) -> float:
+        return SCALE_LIMITS[0]
+
+    @Property(float, constant=True)
+    def scaleMax(self) -> float:
+        return SCALE_LIMITS[1]
+
+    @Property(float, constant=True)
+    def scaleDefault(self) -> float:
+        return DEFAULT_LOOK["scale"]
+
+    @Property(float, notify=fontScaleChanged)
+    def fontScale(self) -> float:
+        """The size of every text against the size that its layout gives it."""
+        return self._look["fontScale"]
+
+    @Property(float, constant=True)
+    def fontScaleMin(self) -> float:
+        return FONT_SCALE_LIMITS[0]
+
+    @Property(float, constant=True)
+    def fontScaleMax(self) -> float:
+        return FONT_SCALE_LIMITS[1]
+
+    @Property(float, constant=True)
+    def fontScaleDefault(self) -> float:
+        return DEFAULT_LOOK["fontScale"]
+
+    @Property(str, notify=fontFamilyChanged)
+    def fontFamily(self) -> str:
+        """The font family of every layout and of the options window. "": each layout has its own font."""
+        return self._look["fontFamily"]
+
+    @Property("QStringList", constant=True)
+    def fontFamilies(self) -> list[str]:
+        """The font families that setFontFamily() takes, sorted, each one time: the fonts of the system that can
+        have any size and that have the Latin letters (so no symbol, emoji or bitmap font)."""
+        if self._families is None:
+            self._families = sorted(
+                {family for family in QFontDatabase.families()
+                 if not QFontDatabase.isPrivateFamily(family) and QFontDatabase.isSmoothlyScalable(family)
+                 and QFontDatabase.WritingSystem.Latin in QFontDatabase.writingSystems(family)},
+                key=str.casefold)
+        return self._families
+
+    @Property("QStringList", constant=True)
+    def colorRoles(self) -> list[str]:
+        """The colours that the user can change, in the order of the options window."""
+        return list(COLOR_ROLES)
+
+    @Property("QVariantMap", notify=colorsChanged)
+    def defaultColors(self) -> dict[str, str]:
+        """The colour of each role with no custom look, for the layout that shows: role -> "#rrggbb" (the
+        background: "#aarrggbb")."""
+        return {**{state: STATE_COLORS[state] for state in STATES},
+                **layouts.theme_colors(self._theme() or Path())}
+
+    @Property("QVariantMap", notify=colorsChanged)
+    def colorOverrides(self) -> dict[str, str]:
+        """Only the roles that the user changed: role -> colour. ThemeBase.qml applies them to the theme tokens."""
+        return dict(self._look["colors"])
+
+    @Property("QVariantMap", notify=colorsChanged)
+    def colors(self) -> dict[str, str]:
+        """The colour of each role as it applies now: the custom colour, or the default of the layout."""
+        return {**self.defaultColors, **self._look["colors"]}
+
+    @Property("QVariantMap", notify=colorsChanged)
+    def stateColors(self) -> dict[str, str]:
+        """The colour of each state as it applies now, with "offline" and "none": for the panel and the tray."""
+        return {**STATE_COLORS, **{state: color for state, color in self._look["colors"].items() if state in STATES}}
 
     # ----- state -----
 
@@ -231,6 +339,9 @@ class Backend(QObject):
             self._events.stop()  # Ends the child process of the event stream.
         if self._thread is not None:
             self._thread.join(timeout=3)
+        if self._look_timer.isActive():  # A change of the look that waits for its save.
+            self._look_timer.stop()
+            self._save_look()
 
     def _run(self) -> None:
         after: tuple[float, ...] = ()  # the waits before the reads that follow a wake and are not done yet
@@ -334,3 +445,70 @@ class Backend(QObject):
         log.error("the layout %s did not load (%s): the layout is %s", self._layout, reason, layouts.DEFAULT)
         self._layout = layouts.DEFAULT
         self.layoutChanged.emit()
+
+    # ----- the custom look: actions from QML -----
+    # Each slot checks its value, applies it at once, and saves it a moment later (LOOK_SAVE_DELAY after the last
+    # change, and when the program stops). It returns True when the value is accepted (also when nothing changes)
+    # and False for a value that is not valid: nothing changes then.
+
+    @Slot(float, result=bool)
+    def setScale(self, scale: float) -> bool:
+        """The size of the whole panel. A number out of the limits is clamped. Two decimal places."""
+        return self._set_number("scale", scale, self.scaleChanged)
+
+    @Slot(float, result=bool)
+    def setFontScale(self, scale: float) -> bool:
+        """The size of every text against its design. A number out of the limits is clamped. Two decimal places."""
+        return self._set_number("fontScale", scale, self.fontScaleChanged)
+
+    def _set_number(self, key: str, value: float, signal) -> bool:
+        number = clamped(key, value)
+        if number is None:
+            return False
+        self._change(key, number, signal)
+        return True
+
+    @Slot(str, result=bool)
+    def setFontFamily(self, family: str) -> bool:
+        """One family of fontFamilies, or "" for the font of each layout."""
+        if family and family not in self.fontFamilies:
+            return False
+        self._change("fontFamily", family, self.fontFamilyChanged)
+        return True
+
+    @Slot(str, str, result=bool)
+    def setColor(self, role: str, color: str) -> bool:
+        """One colour: a role of colorRoles and "#rrggbb" (the background also "#aarrggbb")."""
+        color = valid_color(role, color)
+        if color is None:
+            return False
+        self._change("colors", {**self._look["colors"], role: color}, self.colorsChanged)
+        return True
+
+    @Slot(str, result=bool)
+    def resetColor(self, role: str) -> bool:
+        """One colour back to the default of the layout."""
+        if role not in COLOR_ROLES:
+            return False
+        self._change("colors", {r: c for r, c in self._look["colors"].items() if r != role}, self.colorsChanged)
+        return True
+
+    @Slot()
+    def resetLook(self) -> None:
+        """Everything back to the defaults: the scale, the font scale, the font family and every colour."""
+        for key, signal in (("scale", self.scaleChanged), ("fontScale", self.fontScaleChanged),
+                            ("fontFamily", self.fontFamilyChanged), ("colors", self.colorsChanged)):
+            self._change(key, type(DEFAULT_LOOK[key])(DEFAULT_LOOK[key]), signal)
+
+    def _change(self, key: str, value, signal) -> None:
+        if value == self._look[key]:
+            return
+        self._look[key] = value
+        signal.emit()
+        self._look_timer.start()  # again from the start: the save comes after the last change of a burst
+
+    def _save_look(self) -> None:
+        try:
+            save_look(self._look, self._settings_path)
+        except OSError:
+            log.warning("the custom look was not saved")

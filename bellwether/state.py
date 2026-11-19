@@ -10,6 +10,16 @@ STATES: tuple[str, ...] = ("blocked", "done", "working", "idle")  # The order of
 # Which state the border and the tray dot show. The user chose idle above working.
 PRIORITY: tuple[str, ...] = ("blocked", "done", "idle", "working")
 ATTENTION: frozenset[str] = frozenset({"blocked", "done"})
+# The colour of each state, and of the top state with no agents ("none") and when Herdr does not answer ("offline").
+# The user can change the four of STATES (the custom look).
+STATE_COLORS: dict[str, str] = {
+    "blocked": "#f28b82",
+    "done": "#fdd663",
+    "working": "#8ab4f8",
+    "idle": "#81c995",
+    "offline": "#5f6368",
+    "none": "#5f6368",
+}
 
 _logged_words: set[str] = set()
 

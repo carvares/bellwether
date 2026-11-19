@@ -74,11 +74,12 @@ def save_layout(layout: str, path: Path = DEFAULT_PATH) -> None:
 
 
 def clamped(key: str, value) -> float | None:
-    """The number of "scale" or "fontScale" inside its limits. None for a value that is not a number."""
+    """The number of "scale" or "fontScale" inside its limits, with two decimal places. None for a value that is
+    not a number."""
     if type(value) not in (int, float) or not math.isfinite(value):
         return None
     low, high = _LIMITS[key]
-    return min(max(float(value), low), high)
+    return round(min(max(float(value), low), high), 2)
 
 
 def valid_color(role: str, value) -> str | None:

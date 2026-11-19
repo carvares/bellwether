@@ -9,18 +9,9 @@ from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
 from . import appicon
 from .appicon import tint
-from .state import PRIORITY
+from .state import PRIORITY, STATE_COLORS  # noqa: F401  (STATE_COLORS: the older place of the name)
 
 log = logging.getLogger("bellwether")
-
-STATE_COLORS: dict[str, str] = {
-    "blocked": "#f28b82",
-    "done": "#fdd663",
-    "working": "#8ab4f8",
-    "idle": "#81c995",
-    "offline": "#5f6368",
-    "none": "#5f6368",
-}
 
 
 def tooltip_text(online: bool, counters: list[dict]) -> str:
