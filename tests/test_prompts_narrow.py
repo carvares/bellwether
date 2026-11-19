@@ -86,12 +86,18 @@ def test_a_narrow_screen_gives_the_exact_prompt(name):
         assert prompt.options[0].description == DESCRIPTIONS[name]
 
 
-def private_words() -> set[str]:
-    """The names of this machine that no fixture may hold, found at run time (none is written in this file): the
-    login, the home folder, the folder of this repository, the folders directly under the project folder of the
-    home (the first folder of the path of the repository under the home), that path from its start, and the hidden
-    folders of the repository with a long name. The project folder alone ("projects") is a common word of made-up
-    paths: it counts only with the folder after it."""
+# Words of the made-up text of the prompt fixtures that can also be the name of a folder on a machine: such a name
+# tells nothing of the machine, and a fixture holds it by chance.
+FIXTURE_WORDS = frozenset({"projects", "project", "examples", "example", "sample", "samples", "notes", "someuser",
+                           "workarea", "madeupproj", "prompts", "claude", "codex"})
+
+
+def machine_names() -> set[str]:
+    """The names of this machine, found at run time (none is written in this file): the login, the home folder, the
+    folder of this repository, the folders directly under the project folder of the home (the first folder of the
+    path of the repository under the home), that path from its start, and the hidden folders of the repository with
+    a long name. The project folder alone is a common word of made-up paths: it counts only with the folder after
+    it."""
     home, root = Path.home(), Path(__file__).resolve().parents[1]
     words = {getpass.getuser(), home.name, root.name}
     parts = root.relative_to(home).parts if root.is_relative_to(home) else ()
@@ -102,12 +108,34 @@ def private_words() -> set[str]:
     return {word.lower() for word in words if word}
 
 
+def private(names) -> set[str]:
+    """The names that no fixture may hold: 5 characters or more, and not a word of the fixtures (a shorter name or a
+    common word can be in made-up text by chance, on any machine)."""
+    return {name.lower() for name in names if len(name) >= 5 and name.lower() not in FIXTURE_WORDS}
+
+
+def names_in(text: str, names) -> list[str]:
+    """The names that `text` holds as a whole word or as whole path segments (not inside a longer word)."""
+    text = text.lower()
+    return sorted(name for name in names if re.search(rf"(?<![a-z0-9_]){re.escape(name)}(?![a-z0-9_])", text))
+
+
+def test_the_name_guard_skips_short_names_and_fixture_words_and_finds_whole_words_only():
+    """m4 of re-review 2: a short folder name, or one that is a common word of the made-up fixtures, is not private;
+    a private name counts only as a whole word or whole path segments, not inside a longer word."""
+    assert private({"Ab", "abcd", "Projects", "notes", "Zorblaxian", "zorb/quixal"}) == {"zorblaxian", "zorb/quixal"}
+    text = "/home/someuser/zorblaxians/x zorblax-ian made-zorblaxian2 cd /tmp/zorb/quixal/y"
+    assert names_in(text, {"zorblaxian", "zorb/quixal"}) == ["zorb/quixal"]
+    assert names_in("see Zorblaxian.", {"zorblaxian"}) == ["zorblaxian"]
+    assert names_in("/a/zorblaxian-b/c", {"zorblaxian"}) == ["zorblaxian"]
+
+
 def test_no_prompt_fixture_has_a_name_of_this_machine():
-    words = private_words()
-    assert getpass.getuser().lower() in words and len(words) >= 3
+    names = machine_names()
+    assert getpass.getuser().lower() in names and len(names) >= 3
+    words = private(names)
     for path in FIXTURES.parent.rglob("*.txt"):
-        text = path.read_text().lower()
-        assert not [word for word in words if word in text], path.name
+        assert names_in(path.read_text(), words) == [], path.name
 
 
 @pytest.mark.parametrize("name", [name for name in EXPECTED if "claude-bash" in name or "claude-edit" in name])
