@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 import shiboken6
 from PySide6.QtCore import QPoint, QPointF, Qt, QUrl, qInstallMessageHandler
+from PySide6.QtGui import QColor
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent, QQmlEngine
 from PySide6.QtQuick import QQuickWindow
 from PySide6.QtTest import QTest
@@ -224,6 +225,43 @@ def test_every_skin_has_a_theme_file_with_all_the_tokens(app, letter):
     assert theme.property("panelColor").alpha() > 200 and theme.property("fontFamily")
     assert theme.property("frameWidth") >= 1 and 9 <= theme.property("smallSize") <= theme.property("titleSize") <= 16
     assert f"{letter}Theme {{" in skin.read_text()  # the skin uses its own tokens
+
+
+@pytest.mark.parametrize("letter", LETTERS)
+def test_the_default_colours_of_the_backend_are_the_colours_of_the_loaded_theme(app, letter, caplog):
+    """`layouts.theme_colors` reads the text of the theme file. The loaded QML theme is the truth."""
+    file = layouts.theme_file(built_skins()[letter])
+    theme, engine, errors = load_theme(file)
+    assert errors == []
+    caplog.clear()  # the backend of load_theme has no skins: it says so
+    loaded = {"background": theme.property("panelColor").name(QColor.NameFormat.HexArgb)}
+    for role, token in (("text", "textColor"), ("frame", "frameColor"), ("accent", "accentColor")):
+        assert theme.property(token).alpha() == 255
+        loaded[role] = theme.property(token).name()
+    assert layouts.theme_colors(file) == loaded
+    assert caplog.records == []
+
+
+@pytest.mark.parametrize("token, line", [
+    ("textColor", '    readonly property color textColor: text(Qt.color("#e8eaed"))'),  # the same value for QML
+    ("panelColor", '    readonly property color panelColor: background(Qt.rgba(0, 0, 0, 1))'),
+    ("accentColor", None),  # the token is not in the file
+])
+def test_a_theme_colour_that_cannot_be_read_from_the_file_is_an_error_and_never_the_colour_of_layout_c(
+        app, fake_client, tmp_path, caplog, token, line):
+    theme_b = layouts.theme_file(built_skins()["B"])
+    lines = [line if f"property color {token}:" in old else old for old in theme_b.read_text().splitlines()]
+    (tmp_path / "BTheme.qml").write_text("\n".join(l for l in lines if l is not None))
+    with pytest.raises(layouts.ThemeColorError, match=token):
+        layouts.theme_colors(tmp_path / "BTheme.qml")
+    # The backend still gives the options window a colour for each role, and the log has the error one time.
+    (tmp_path / "B.qml").write_text("import QtQuick\nItem {}")
+    backend = Backend(fake_client, settings_path=tmp_path / "state.json",
+                      skins={"C": built_skins()["C"], "B": tmp_path / "B.qml"})
+    backend.setLayout("B")
+    assert sorted(backend.defaultColors) == sorted(backend.colorRoles) and backend.colors == backend.defaultColors
+    errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+    assert errors == [f"the theme file BTheme.qml has no colour that can be read for {token}"]
 
 
 def test_a_theme_file_that_forgets_a_token_is_found(app, tmp_path):

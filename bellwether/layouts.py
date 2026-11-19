@@ -41,20 +41,30 @@ THEME_TOKENS = (
 # The token of a theme file that holds the default colour of each role that a theme has. The theme file gives the
 # colour as a text, alone or in the helper of that role: `readonly property color panelColor: background("#f00b0e11")`.
 _ROLE_TOKENS = {"background": "panelColor", "text": "textColor", "frame": "frameColor", "accent": "accentColor"}
-# The colours of Layout C: for a theme file that cannot be read, or that does not have a token.
+# The colours of Layout C: only for a theme file that cannot be read.
 FALLBACK_COLORS = {"background": "#f00b0e11", "text": "#e3e9ee", "frame": "#2b333b", "accent": "#8ab4f8"}
 
 
+class ThemeColorError(ValueError):
+    """A theme file that can be read has a role token whose colour is not written as `"#rrggbb"` text."""
+
+
 def theme_colors(theme: Path) -> dict[str, str]:
-    """The default colour of the roles background, text, frame and accent in a theme file. The backend gives them
-    to the options window. A test checks that they are the values that the QML theme has."""
+    """The default colour of the roles background, text, frame and accent in a theme file: "#rrggbb", and
+    "#aarrggbb" for the background. The backend gives them to the options window. A test compares them with the
+    loaded QML theme of each layout. A file that cannot be read gives the colours of Layout C. A file that can be
+    read and has a token with no colour text is an error (ThemeColorError names the token): never a silent
+    colour of a different layout."""
     try:
         text = Path(theme).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return dict(FALLBACK_COLORS)
-    found = dict(FALLBACK_COLORS)
+    found = {}
     for role, token in _ROLE_TOKENS.items():
-        match = re.search(rf'\bproperty color {token}: (?:{role}\()?"(#[0-9a-fA-F]{{6}}(?:[0-9a-fA-F]{{2}})?)"', text)
-        if match:
-            found[role] = match[1].lower()
+        match = re.search(rf'\bproperty color {token}: (?:{role}\()?"#([0-9a-fA-F]{{6}}(?:[0-9a-fA-F]{{2}})?)"', text)
+        if not match:
+            raise ThemeColorError(token)
+        color = match[1].lower()
+        # The panel is drawn with an opacity: its colour always has the alpha, as QML shows it.
+        found[role] = "#" + ("ff" + color if role == "background" and len(color) == 6 else color)
     return found

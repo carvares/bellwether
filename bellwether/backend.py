@@ -14,7 +14,7 @@ from . import layouts
 from .client import HerdrError, HerdrOffline
 from .icons import TEXT_COLOR
 from .settings import (
-    COLOR_ROLES, DEFAULT_LOOK, DEFAULT_PATH, FONT_SCALE_LIMITS, SCALE_LIMITS, clamped, load_layout, load_look,
+    COLOR_ROLES, DEFAULT_LOOK, DEFAULT_PATH, FONT_SCALE_LIMITS, FONT_SCALE_STEP, SCALE_LIMITS, SCALE_STEP, clamped, load_layout, load_look,
     load_position, save_layout, save_look, save_position, save_screen, valid_color)
 from .state import ATTENTION, STATE_COLORS, STATES, Agent, count_states, top_state
 
@@ -49,6 +49,7 @@ class Backend(QObject):
     fontScaleChanged = Signal()
     fontFamilyChanged = Signal()
     colorsChanged = Signal()
+    lookIsCustomChanged = Signal()
     _snapshot = Signal(object)
     _focusDone = Signal()
 
@@ -93,7 +94,11 @@ class Backend(QObject):
             self._layout = layouts.DEFAULT
         # The font families that the user can choose. None: the list of the system, read at its first use.
         self._families = families
+        self._theme_colors_of: dict[Path, dict[str, str]] = {}  # theme file -> its default colours
         self._look, ignored = load_look(self._settings_path)
+        # The keys of the look that changed and are not saved yet: "scale", "fontScale", "fontFamily", "colors"
+        # (every colour) and "colors.<role>". Only these go to the file.
+        self._unsaved: set[str] = set()
         if self._look["fontFamily"] and self._look["fontFamily"] not in self.fontFamilies:
             self._look["fontFamily"] = ""
             ignored.append("fontFamily")
@@ -237,6 +242,11 @@ class Backend(QObject):
     def scaleDefault(self) -> float:
         return DEFAULT_LOOK["scale"]
 
+    @Property(float, constant=True)
+    def scaleStep(self) -> float:
+        """The step of the size slider of the options window."""
+        return SCALE_STEP
+
     @Property(float, notify=fontScaleChanged)
     def fontScale(self) -> float:
         """The size of every text against the size that its layout gives it."""
@@ -253,6 +263,16 @@ class Backend(QObject):
     @Property(float, constant=True)
     def fontScaleDefault(self) -> float:
         return DEFAULT_LOOK["fontScale"]
+
+    @Property(float, constant=True)
+    def fontScaleStep(self) -> float:
+        """The step of the text size slider of the options window."""
+        return FONT_SCALE_STEP
+
+    @Property(bool, notify=lookIsCustomChanged)
+    def lookIsCustom(self) -> bool:
+        """A value of the look is not its default: "Reset to defaults" has something to do."""
+        return self._look != DEFAULT_LOOK
 
     @Property(str, notify=fontFamilyChanged)
     def fontFamily(self) -> str:
@@ -276,22 +296,39 @@ class Backend(QObject):
         """The colours that the user can change, in the order of the options window."""
         return list(COLOR_ROLES)
 
+    def _theme_colors(self) -> dict[str, str]:
+        """The colours of the theme file of the layout that shows. A theme file with a colour that cannot be read
+        is an error of the program: the log says it one time for the file, and the options window gets the
+        colours of Layout C so that it still works."""
+        theme = self._theme() or Path()
+        if theme not in self._theme_colors_of:
+            try:
+                self._theme_colors_of[theme] = layouts.theme_colors(theme)
+            except layouts.ThemeColorError as error:
+                log.error("the theme file %s has no colour that can be read for %s", theme.name, error)
+                self._theme_colors_of[theme] = dict(layouts.FALLBACK_COLORS)
+        return self._theme_colors_of[theme]
+
     @Property("QVariantMap", notify=colorsChanged)
     def defaultColors(self) -> dict[str, str]:
         """The colour of each role with no custom look, for the layout that shows: role -> "#rrggbb" (the
-        background: "#aarrggbb")."""
-        return {**{state: STATE_COLORS[state] for state in STATES},
-                **layouts.theme_colors(self._theme() or Path())}
+        background: "#aarrggbb", with the opacity of the layout)."""
+        return {**{state: STATE_COLORS[state] for state in STATES}, **self._theme_colors()}
 
     @Property("QVariantMap", notify=colorsChanged)
     def colorOverrides(self) -> dict[str, str]:
-        """Only the roles that the user changed: role -> colour. ThemeBase.qml applies them to the theme tokens."""
+        """Only the roles that the user changed: role -> colour, as it is saved (a background "#rrggbb" has no
+        opacity of its own). ThemeBase.qml applies them to the theme tokens."""
         return dict(self._look["colors"])
 
     @Property("QVariantMap", notify=colorsChanged)
     def colors(self) -> dict[str, str]:
-        """The colour of each role as it applies now: the custom colour, or the default of the layout."""
-        return {**self.defaultColors, **self._look["colors"]}
+        """The colour of each role as it is drawn now: the custom colour, or the default of the layout. The
+        background is always "#aarrggbb": a custom "#rrggbb" has the opacity of the layout that shows."""
+        colors = {**self.defaultColors, **self._look["colors"]}
+        if len(colors["background"]) == 7:
+            colors["background"] = self.defaultColors["background"][:3] + colors["background"][1:]
+        return colors
 
     @Property("QVariantMap", notify=colorsChanged)
     def stateColors(self) -> dict[str, str]:
@@ -484,7 +521,7 @@ class Backend(QObject):
         color = valid_color(role, color)
         if color is None:
             return False
-        self._change("colors", {**self._look["colors"], role: color}, self.colorsChanged)
+        self._change("colors", {**self._look["colors"], role: color}, self.colorsChanged, f"colors.{role}")
         return True
 
     @Slot(str, result=bool)
@@ -492,22 +529,33 @@ class Backend(QObject):
         """One colour back to the default of the layout."""
         if role not in COLOR_ROLES:
             return False
-        self._change("colors", {r: c for r, c in self._look["colors"].items() if r != role}, self.colorsChanged)
+        colors = {r: c for r, c in self._look["colors"].items() if r != role}
+        self._change("colors", colors, self.colorsChanged, f"colors.{role}")
         return True
 
     @Slot()
     def resetLook(self) -> None:
-        """Everything back to the defaults: the scale, the font scale, the font family and every colour."""
+        """Everything back to the defaults: the scale, the font scale, the font family and every colour. The file
+        then has none of the four keys (also not a value of them that this version or this system cannot use)."""
+        if not self.lookIsCustom:
+            return
         for key, signal in (("scale", self.scaleChanged), ("fontScale", self.fontScaleChanged),
                             ("fontFamily", self.fontFamilyChanged), ("colors", self.colorsChanged)):
             self._change(key, type(DEFAULT_LOOK[key])(DEFAULT_LOOK[key]), signal)
+        self._unsaved = set(DEFAULT_LOOK)
 
-    def _change(self, key: str, value, signal) -> None:
+    def _change(self, key: str, value, signal, unsaved: str = "") -> None:
+        """Apply one value of the look now and save it later. `unsaved`: what the save writes (the key itself, or
+        one colour of "colors")."""
         if value == self._look[key]:
             return
+        custom = self.lookIsCustom
         self._look[key] = value
+        self._unsaved.add(unsaved or key)
         self._tint_icons()
         signal.emit()
+        if custom != self.lookIsCustom:
+            self.lookIsCustomChanged.emit()
         self._look_timer.start()  # again from the start: the save comes after the last change of a burst
 
     def _tint_icons(self) -> None:
@@ -521,7 +569,9 @@ class Backend(QObject):
             self.changed.emit()  # the rows have new icon files
 
     def _save_look(self) -> None:
+        """Write the values that changed since the last save. Only these: the rest of the file stays."""
+        unsaved, self._unsaved = self._unsaved, set()
         try:
-            save_look(self._look, self._settings_path)
+            save_look(self._look, self._settings_path, unsaved)
         except OSError:
             log.warning("the custom look was not saved")

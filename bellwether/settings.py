@@ -15,6 +15,9 @@ DEFAULT_PATH = config_home() / NAME / "state.json"
 # The custom look. The least and the largest value of the two numbers; a number of the file out of them is clamped.
 SCALE_LIMITS = (0.75, 2.0)
 FONT_SCALE_LIMITS = (0.8, 1.4)
+# The step of a slider of the options window, for both numbers.
+SCALE_STEP = 0.05
+FONT_SCALE_STEP = 0.05
 # The colours that the user can change. Only the background can have an alpha ("#aarrggbb").
 COLOR_ROLES = ("blocked", "done", "working", "idle", "background", "text", "frame", "accent")
 # No custom look: a file without these keys. fontFamily "": the font of the layout. colors: only the changed roles.
@@ -32,15 +35,19 @@ def _load(path: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def _write(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(data))
+    os.replace(temporary, path)
+
+
 def _save(path: Path, changes: dict, drop: tuple[str, ...] = ()) -> None:
     """Write the file with `changes` and without the keys of `drop`. The other keys stay as they are."""
     path = Path(path)
     data = {key: value for key, value in _load(path).items() if key not in drop}
     data.update(changes)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(data))
-    os.replace(temporary, path)
+    _write(path, data)
 
 
 def load_position(path: Path = DEFAULT_PATH) -> tuple[int, int, str] | None:
@@ -122,7 +129,28 @@ def load_look(path: Path = DEFAULT_PATH) -> tuple[dict, list[str]]:
     return look, ignored
 
 
-def save_look(look: dict, path: Path = DEFAULT_PATH) -> None:
-    """Save the custom look. A value at its default has no key in the file."""
-    changes = {key: value for key, value in look.items() if value != DEFAULT_LOOK[key]}
-    _save(path, changes, drop=tuple(key for key in DEFAULT_LOOK if key not in changes))
+def save_look(look: dict, path: Path = DEFAULT_PATH, changed=None) -> None:
+    """Save the custom look. A value at its default has no key in the file.
+    `changed` names what to write: "scale", "fontScale", "fontFamily", "colors" (every colour: the key is replaced)
+    and "colors.<role>" (one colour). What is not named stays in the file as it is: a font family that this
+    system does not have now, a colour role of a later version. None: the four keys."""
+    path = Path(path)
+    before = _load(path)
+    data = dict(before)
+    for name in sorted(DEFAULT_LOOK if changed is None else changed):  # "colors" before "colors.<role>"
+        key, _, role = name.partition(".")
+        if role:
+            colors = dict(data["colors"]) if isinstance(data.get("colors"), dict) else {}
+            if role in look["colors"]:
+                colors[role] = look["colors"][role]
+            else:
+                colors.pop(role, None)
+            value = colors
+        else:
+            value = look[key]
+        if value == DEFAULT_LOOK[key]:
+            data.pop(key, None)
+        else:
+            data[key] = value
+    if data != before:  # A save that changes nothing does not write (and does not make) the file.
+        _write(path, data)

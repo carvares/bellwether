@@ -15,8 +15,7 @@ from PySide6.QtTest import QTest
 from bellwether import layouts
 from bellwether.__main__ import IMPORT_PATH, UI_PATH
 from bellwether.backend import Backend
-from bellwether.state import Agent
-from bellwether.tray import STATE_COLORS
+from bellwether.state import STATE_COLORS, Agent
 from tests.test_qml import (  # noqa: F401  (window is a fixture)
     LAYERSHELL_QMLDIR, OFFSCREEN_NOTE, OFFSET, click, js, many, place, rows, settle, use_screens, visible_texts,
     walk, window)

@@ -1,5 +1,6 @@
-from bellwether.state import STATES
-from bellwether.tray import STATE_COLORS, tooltip_text
+from bellwether import tray
+from bellwether.state import STATE_COLORS, STATES
+from bellwether.tray import tooltip_text
 
 
 def counters(**counts):
@@ -279,3 +280,7 @@ def test_the_tray_keeps_a_small_number_of_icons_while_the_user_tries_colours(app
         icons.icon(f"#{n:06x}")
     assert len(icons._icons) <= tray.TrayIcons.KEEP == 16
     assert not icons.icon("#0000c7").isNull() and not icons.icon("#000000").isNull()  # an icon that is gone is made again
+
+
+def test_the_status_colours_have_one_place_and_the_tray_module_does_not_give_them_a_second_name():
+    assert not hasattr(tray, "STATE_COLORS")

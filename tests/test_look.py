@@ -93,7 +93,15 @@ def test_the_default_colours_of_every_real_theme_file_are_read(app, fake_client,
 def test_the_theme_colours_of_a_file_that_cannot_be_read_are_those_of_layout_c(tmp_path):
     assert layouts.theme_colors(tmp_path / "NoTheme.qml") == layouts.FALLBACK_COLORS
     (tmp_path / "ZTheme.qml").write_text('ThemeBase { readonly property color textColor: text("#010203") }')
-    assert layouts.theme_colors(tmp_path / "ZTheme.qml") == {**layouts.FALLBACK_COLORS, "text": "#010203"}
+    with pytest.raises(layouts.ThemeColorError, match="panelColor"):  # a file that can be read: no colour of C
+        layouts.theme_colors(tmp_path / "ZTheme.qml")
+    (tmp_path / "ZTheme.qml").write_text("""ThemeBase {
+        readonly property color panelColor: background("#0A0B0C")
+        readonly property color textColor: text("#010203")
+        readonly property color frameColor: "#040506"
+        readonly property color accentColor: accent("#070809") }""")
+    assert layouts.theme_colors(tmp_path / "ZTheme.qml") == {
+        "background": "#ff0a0b0c", "text": "#010203", "frame": "#040506", "accent": "#070809"}
     assert layouts.FALLBACK_COLORS == {role: C_DEFAULTS[role] for role in ROLES[4:]}
 
 
@@ -179,12 +187,48 @@ def test_one_colour_goes_back_to_its_default_and_then_everything(backend):
     assert len(told) == 5  # nothing to reset: nothing to tell
 
 
+def test_the_background_colour_in_effect_is_the_colour_that_is_drawn_with_its_opacity(backend):
+    """colors: what the panel draws. colorOverrides: what the user chose and the file holds. defaultColors: the
+    layout."""
+    assert backend.colors["background"] == backend.defaultColors["background"] == "#f00b0e11"
+    told = told_by(backend)
+    backend.setColor("background", "#102030")  # no opacity of its own: the opacity of the layout
+    assert backend.colorOverrides["background"] == "#102030" and backend.colors["background"] == "#f0102030"
+    backend.setLayout("A")  # the opacity of Layout A is f2
+    assert backend.defaultColors["background"] == "#f21f2023" and backend.colors["background"] == "#f2102030"
+    assert told == ["colorsChanged", "colorsChanged"]
+    backend.setColor("background", "#80102030")  # its own opacity, in every layout
+    assert backend.colorOverrides["background"] == backend.colors["background"] == "#80102030"
+    backend.resetColor("background")
+    assert backend.colors["background"] == "#f21f2023" and "background" not in backend.colorOverrides
+    assert all(len(colour) == 7 for role, colour in backend.colors.items() if role != "background")
+
+
+def test_the_steps_of_the_two_sliders_come_from_the_backend(backend):
+    assert (backend.scaleStep, backend.fontScaleStep) == (0.05, 0.05)
+    assert backend.lookIsCustom is False
+    told = []
+    backend.lookIsCustomChanged.connect(lambda: told.append(backend.lookIsCustom))
+    backend.setScale(1.0)
+    backend.setScale(1.25)
+    backend.setColor("text", "#ffffff")
+    assert told == [True] and backend.lookIsCustom is True
+    backend.setScale(1.0)
+    assert told == [True]  # the colour is still custom
+    backend.resetColor("text")
+    backend.setFontFamily("Made Up Mono"), backend.setFontFamily("")
+    backend.setFontScale(1.1)
+    backend.resetLook()
+    assert told == [True, False, True, False, True, False]
+
+
 # ----- the save -----
 
 def test_a_burst_of_changes_is_saved_one_time_at_its_end_with_the_last_value(backend, path, monkeypatch):
     writes = []
     real = settings.save_look
-    monkeypatch.setattr("bellwether.backend.save_look", lambda look, where: (writes.append(dict(look)), real(look, where)))
+    monkeypatch.setattr("bellwether.backend.save_look",
+                        lambda look, where, changed: (writes.append(dict(look)), real(look, where, changed)))
     timer = backend._look_timer
     assert timer.isSingleShot() and timer.interval() == 400 and not timer.isActive()
     for step in range(76, 151):  # a slider that moves
@@ -295,3 +339,56 @@ def test_a_new_text_colour_makes_new_program_icons_and_removes_the_old_copies(ap
     later = make(fake_client, path, icons=Icons(tmp_path / "app", cache))
     later.apply([Agent("t1", "working", "ana", "", "pi")])
     assert "#abcdef" in icon_file(later).read_text()
+
+
+# ----- a save changes only what the user changed -----
+
+def test_a_font_family_that_is_not_installed_now_stays_in_the_file_when_a_different_value_changes(
+        app, fake_client, path, caplog):
+    path.write_text(json.dumps({"fontFamily": "Made Up Serif", "fontScale": 1.2, "colors": {"text": "#ffffff"}}))
+    backend = make(fake_client, path)  # this system does not have "Made Up Serif" now
+    assert backend.fontFamily == "" and backend.lookIsCustom is True
+    backend.setScale(1.5), backend.setColor("idle", "#00ff00")
+    backend.stop()
+    assert saved(path) == {"fontFamily": "Made Up Serif", "fontScale": 1.2, "scale": 1.5,
+                           "colors": {"text": "#ffffff", "idle": "#00ff00"}}
+    later = make(fake_client, path, families=[*FAMILIES, "Made Up Serif"])  # the font is installed later
+    assert later.fontFamily == "Made Up Serif"
+    later.setFontFamily("Made Up Mono")  # the user chooses a family: now the key changes
+    later.stop()
+    assert saved(path)["fontFamily"] == "Made Up Mono"
+
+
+def test_a_colour_role_of_a_later_version_and_a_bad_value_stay_in_the_file_when_other_values_change(
+        app, fake_client, path):
+    start = {"scale": "big", "colors": {"sparkle": "#123456", "text": "#ffffff", "done": "green"}, "later": [1]}
+    path.write_text(json.dumps(start))
+    backend = make(fake_client, path)
+    backend.setFontScale(1.2)
+    backend.stop()
+    assert saved(path) == {**start, "fontScale": 1.2}  # nothing of the other keys is touched
+    backend.setColor("idle", "#00ff00"), backend.resetColor("text")
+    backend.stop()
+    assert saved(path)["colors"] == {"sparkle": "#123456", "done": "green", "idle": "#00ff00"}
+    backend.setColor("done", "#0000ff"), backend.resetColor("idle")
+    backend.stop()
+    assert saved(path)["colors"] == {"sparkle": "#123456", "done": "#0000ff"}
+    backend.resetColor("done")
+    backend.stop()
+    assert saved(path) == {"scale": "big", "colors": {"sparkle": "#123456"}, "later": [1], "fontScale": 1.2}
+
+
+def test_reset_everything_removes_the_four_keys_from_the_file_with_all_that_they_hold(app, fake_client, path):
+    path.write_text(json.dumps({"x": 3, "y": 4, "scale": 1.5, "fontFamily": "Made Up Serif",
+                                "colors": {"sparkle": "#123456", "text": "#ffffff"}}))
+    backend = make(fake_client, path)
+    backend.resetLook()
+    backend.stop()
+    assert saved(path) == {"x": 3, "y": 4}
+
+
+def test_a_save_that_changes_nothing_does_not_write_the_file(app, fake_client, path):
+    backend = make(fake_client, path)
+    backend.setScale(1.5), backend.setScale(1.0)
+    backend.stop()
+    assert not path.exists()

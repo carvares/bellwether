@@ -16,8 +16,7 @@ from bellwether.__main__ import IMPORT_PATH, UI_PATH, follow_refresh_rate
 from bellwether.backend import Backend
 from bellwether.icons import Icons
 from bellwether.layouts import built_skins
-from bellwether.state import Agent
-from bellwether.tray import STATE_COLORS
+from bellwether.state import STATE_COLORS, Agent
 
 LAYERSHELL_QMLDIR = Path("/usr/lib/qt6/qml/org/kde/layershell/qmldir")
 # layer-shell-qt says this for every window on a platform that is not Wayland. It is expected off screen.
