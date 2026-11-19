@@ -282,6 +282,50 @@ def test_a_look_that_cannot_be_saved_still_applies_and_gives_one_log_line(app, f
     assert backend.scale == 1.5 and [r.getMessage() for r in caplog.records] == ["the custom look was not saved"]
 
 
+def failing_once(monkeypatch):
+    """The first save of the look fails (a full disk, made up); the saves after it work."""
+    real, calls = settings.save_look, []
+
+    def save(look, where, changed):
+        calls.append(set(changed))
+        if len(calls) == 1:
+            raise OSError("disk full (made up)")
+        real(look, where, changed)
+    monkeypatch.setattr("bellwether.backend.save_look", save)
+    return calls
+
+
+def test_a_save_that_fails_keeps_its_values_for_the_next_save(backend, path, monkeypatch):
+    calls = failing_once(monkeypatch)
+    backend.setScale(1.5)
+    fire(backend._look_timer)  # fails
+    assert not path.exists()
+    backend.setFontScale(1.2)
+    fire(backend._look_timer)
+    assert calls == [{"scale"}, {"scale", "fontScale"}] and saved(path) == {"scale": 1.5, "fontScale": 1.2}
+
+
+def test_a_save_that_fails_is_tried_again_when_the_program_stops(backend, path, monkeypatch):
+    failing_once(monkeypatch)
+    backend.setColor("idle", "#00ff00")
+    fire(backend._look_timer)  # fails
+    backend.stop()
+    assert saved(path) == {"colors": {"idle": "#00ff00"}}
+
+
+def test_a_reset_whose_save_fails_still_empties_the_file_at_the_next_save(backend, path, monkeypatch):
+    backend.setScale(1.5), backend.setColor("text", "#ffffff")
+    fire(backend._look_timer)
+    assert saved(path) == {"scale": 1.5, "colors": {"text": "#ffffff"}}
+    calls = failing_once(monkeypatch)
+    backend.resetLook()
+    fire(backend._look_timer)  # fails
+    assert saved(path) == {"scale": 1.5, "colors": {"text": "#ffffff"}}
+    backend.setFontFamily("Made Up Sans")
+    fire(backend._look_timer)
+    assert calls[1] == set(settings.DEFAULT_LOOK) and saved(path) == {"fontFamily": "Made Up Sans"}
+
+
 # ----- the start -----
 
 def test_a_saved_look_applies_at_the_start_with_no_log_line_and_no_write(app, fake_client, path, caplog):

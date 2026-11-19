@@ -378,8 +378,8 @@ class Backend(QObject):
             self._events.stop()  # Ends the child process of the event stream.
         if self._thread is not None:
             self._thread.join(timeout=3)
-        if self._look_timer.isActive():  # A change of the look that waits for its save.
-            self._look_timer.stop()
+        self._look_timer.stop()
+        if self._unsaved:  # A change of the look that waits for its save, or whose save failed.
             self._save_look()
 
     def _run(self) -> None:
@@ -574,4 +574,5 @@ class Backend(QObject):
         try:
             save_look(self._look, self._settings_path, unsaved)
         except OSError:
+            self._unsaved |= unsaved  # the next save (a change, or the stop) writes them with its own
             log.warning("the custom look was not saved")
