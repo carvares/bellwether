@@ -62,6 +62,10 @@ VALID: dict[tuple[str, str], Prompt] = {
         choices("Yes", ACCEPT_EDITS, "No"), "1", subtitle="fake.txt",
         detail=("  1 " + "─" * 40, "  2  Bash command", "  3  Do you want to proceed?", "  4  ❯ 1. Yes", "  5    2. No",
                 "  6  Esc to cancel · Tab to amend")),
+    # After the plan view: one rule is on the last line of the screen, below the dialog.
+    ("claude-code", "claude-create-rule-below"): Prompt(
+        "claude-code", "permission", "Create file", "Do you want to create plan-test.txt?",
+        choices("Yes", ACCEPT_EDITS, "No"), "1", subtitle="plan-test.txt", detail=("  1 ok",)),
     ("claude-code", "claude-create-tall"): Prompt(
         "claude-code", "permission", "", "Do you want to create long.txt?", choices("Yes", ACCEPT_EDITS, "No"), "1",
         detail=tuple(f"  {n:>3} made-up line {n}" for n in range(38, 151)), cut=True),
@@ -145,7 +149,7 @@ NOTHING = [
 def test_every_fixture_is_in_one_of_the_two_lists():
     named = {name for _, name in [*VALID, *NOTHING]}
     assert named == {path.stem for path in FIXTURES.glob("*.txt")}
-    assert (len(VALID), len(NOTHING)) == (18, 9)
+    assert (len(VALID), len(NOTHING)) == (19, 9)
 
 
 @pytest.mark.parametrize("app,name", list(VALID), ids=[name for _, name in VALID])
@@ -189,6 +193,18 @@ def test_text_after_the_dialog_gives_nothing():
             assert parse(app, screen(name) + tail) is None, name
 
 
+def test_only_one_rule_with_nothing_below_it_can_be_after_a_dialog():
+    text = screen("claude-bash")
+    rule = "─" * 200
+    assert parse("claude-code", text + "\n\n\n" + rule) == VALID[("claude-code", "claude-bash")]
+    assert parse("claude-code", text + "\n\n" + "─" * 170 + " a-session-name ─") == VALID[("claude-code", "claude-bash")]
+    for tail in ("\n" + rule, "\n\n" + rule + "\n" + rule, "\n\n" + rule + "\n\n" + rule, "\n\n" + rule + "\n❯",
+                 "\n\n" + rule + "\n  text", "\n\n ─" + rule, "\n\n" + rule + " a-name", "\n\n─── a-name ─",
+                 "\n\na-name " + rule):
+        assert parse("claude-code", text + tail) is None, tail[-8:]
+    assert parse("codex", screen("codex-command") + "\n\n" + rule) is None
+
+
 def test_a_dialog_that_is_only_in_the_history_gives_nothing():
     old = screen("claude-bash")
     assert parse("claude-code", old + "\n\n" + screen("claude-no-dialog")) is None
@@ -213,6 +229,8 @@ def frame_lines(app: str, name: str) -> tuple[list[str], list[int]]:
     # A "Tip:" line below the title is an advertisement of the program: it is not in the prompt.
     places = [place for place in range(start, len(lines)) if lines[place].strip() and lines[place] not in prompt.detail
               and not lines[place].startswith(" Tip: ")]
+    if name == "claude-create-rule-below":
+        places.pop()  # the rule with the session name, below the dialog: the dialog is whole with no such line
     return lines, places
 
 
@@ -262,7 +280,7 @@ def test_the_question_the_cursor_the_numbers_and_the_hint_are_required(app, name
     question = next(place for place in places if lines[place].strip() == prompt.question)
     assert parse(app, with_line(question)) is None
     # No hint line, for the dialogs that have one.
-    last = max(place for place, line in enumerate(lines) if line.strip())
+    last = places[-1]
     if last not in option_places:
         assert parse(app, with_line(last)) is None
         assert parse(app, with_line(last, lines[last].replace("to", "TO"))) is None

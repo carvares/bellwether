@@ -25,6 +25,7 @@ _ONE_HEADER = re.compile(r" ☐ (?P<title>\S.*)$")
 _TABS_HEADER = re.compile(r"←  (?P<tabs>\S.*\S)  ✔ Submit  →$")
 _TAB = re.compile(r"[☐☒] (?P<name>\S.*)$")
 _CHECK_BOX = re.compile(r"\[.\] ")
+_FOOTER = re.compile(r"─{20,}(?: [^─]{1,80} ─+)?$")
 
 
 def _line(line: str, char: str, indent: int = 0) -> bool:
@@ -74,6 +75,10 @@ def _above(lines: list[str], place: int, char: str, indent: int = 0) -> int:
 
 def read(text: str) -> Prompt | None:
     lines = lines_of(text)
+    # A session with a name (after the plan view) has one rule with that name on the last line of the screen, below
+    # the dialog and some empty lines. Only that: the input box of a screen with no dialog has text below its rule.
+    if len(lines) > 2 and _FOOTER.match(lines[-1]) and not lines[-2]:
+        lines = lines_of("\n".join(lines[:-1]))
     if len(lines) < 4:
         return None
     for reader in (_permission, _question, _review, _plan):
