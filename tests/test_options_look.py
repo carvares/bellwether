@@ -1,12 +1,13 @@
 """The controls of the custom look in the options window: the real Options.qml with the real backend on a scratch
 state file, and pointer and key events as a person makes them. Off screen."""
 import json
+import re
 import time
-from pathlib import Path
 
 import pytest
 import shiboken6
 from PySide6.QtCore import QPoint, QPointF, Qt, qInstallMessageHandler
+from PySide6.QtGui import QWheelEvent
 from PySide6.QtQml import QQmlApplicationEngine, QQmlExpression, qmlContext
 from PySide6.QtTest import QTest
 
@@ -15,9 +16,9 @@ from bellwether.__main__ import IMPORT_PATH, UI_PATH
 from bellwether.backend import Backend
 from bellwether.layouts import built_skins
 from bellwether.options import Options
-from bellwether.state import STATE_COLORS, Agent
+from bellwether.state import Agent
 from tests.audit import text_findings, walk
-from tests.test_options import LETTERS, SIZE_HINTS_NOTE, cards, load_theme, settle, spoken
+from tests.test_options import LETTERS, SIZE_HINTS_NOTE, cards, settle, spoken
 from tests.test_qml import LAYERSHELL_QMLDIR, OFFSCREEN_NOTE
 
 FAMILIES = ["Made Up Mono", "Made Up Sans", "Other Mono Wide", "Plain Serif"]
@@ -680,14 +681,21 @@ def test_on_a_screen_of_768_pixels_the_sections_scroll_and_the_header_and_the_fo
             if focused(window) == "Close":
                 break
         assert "Close the colour editor" in seen and seen[-1] == "Close"
-        # The wheel scrolls the sections.
-        place = centre(find(window, "sliderFor", "scale"))
-        before = scroller.property("contentY")
-        js(scroller, "scrollBy(-10000)")
-        assert scroller.property("contentY") == 0 and before > 0
-        js(scroller, "scrollBy(90)")
-        assert scroller.property("contentY") == 90 and thumb.y() > scroller.y() + 3
-        js(scroller, "scrollBy(10000)")
+        # The wheel scrolls the sections: one step of a mouse wheel is 60 pixels.
+        def turn(angle):
+            place = QPointF(centre(find(window, "sliderFor", "scale")))
+            app.sendEvent(window, QWheelEvent(place, place, QPoint(0, 0), QPoint(0, angle), Qt.MouseButton.NoButton,
+                                              NONE, Qt.ScrollPhase.NoScrollPhase, False))
+            settle(app)
+
+        assert scroller.property("contentY") > 0
+        for _ in range(30):
+            turn(120)
+        assert scroller.property("contentY") == 0
+        turn(-120)
+        assert scroller.property("contentY") == 60 and thumb.y() > scroller.y() + 3
+        for _ in range(30):
+            turn(-120)
         assert scroller.property("contentY") == scroller.property("contentHeight") - scroller.height()
         assert text_findings(window) == []
         backend._look_timer.stop()
@@ -969,7 +977,6 @@ def test_no_control_file_has_a_text_size_or_a_look_of_qt_quick_controls():
     for file in files:
         text = file.read_text()
         assert "QtQuick.Controls" not in text, file.name
-        import re
         sizes = re.findall(r"pixelSize: ([^\n;}]+)", text)
         assert all("theme." in size for size in sizes), (file.name, sizes)
     # The limits and the steps of the two sliders are those of the backend, not numbers of the window.
