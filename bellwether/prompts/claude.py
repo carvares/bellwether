@@ -13,7 +13,9 @@ from . import ACCEPT, DECLINE, OTHER, TEXT, Option, Prompt, lines_of, numbered
 
 APP = "claude-code"
 RULE, DASH = "─", "╌"
-PERMISSION_HINT = " Esc to cancel · Tab to amend"
+# The hint of a permission dialog. "Tab to amend" is not there while the cursor is on an option that cannot be
+# amended (measured: options 2 and 3 of a Bash dialog).
+PERMISSION_HINTS = (" Esc to cancel · Tab to amend", " Esc to cancel")
 TEXT_LABEL = "Type something."
 CHAT_LABEL = "Chat about this"
 PLAN_TEXT_LABEL = "Tell Claude what to change"
@@ -109,7 +111,7 @@ def read(text: str) -> Prompt | None:
 
 def _permission(lines: list[str]) -> Prompt | None:
     end = len(lines)
-    hint = lines[-1] == PERMISSION_HINT
+    hint = lines[-1] in PERMISSION_HINTS
     if hint:
         if lines[-2] != "":
             return None

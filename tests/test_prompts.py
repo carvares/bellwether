@@ -511,3 +511,13 @@ def test_the_text_form_of_a_prompt_has_no_screen_text():
                  *(part for option in prompt.options for part in (option.label, option.description))]
         assert not [word for word in words if word.strip() and word.strip() in text], prompt.kind
         assert prompt.fingerprint[:8] in text
+
+
+def test_the_short_hint_of_a_permission_dialog_with_the_cursor_on_an_option_that_cannot_be_amended():
+    """Claude Code shows "Esc to cancel" alone while the cursor is on option 2 or 3 of a Bash dialog (measured: a
+    person who moves the cursor in Herdr). The question is the same: the same fingerprint."""
+    text = screen("claude-bash").replace(" ❯ 1. Yes", "   1. Yes").replace("   2. Yes, and always", " ❯ 2. Yes, and always")
+    prompt = parse("claude-code", text.replace(" Esc to cancel · Tab to amend", " Esc to cancel"))
+    assert prompt.cursor == "2" and prompt.fingerprint == VALID[("claude-code", "claude-bash")].fingerprint
+    for hint in (" Esc to cancel ·", " Esc to cancel · Tab", "Esc to cancel", " Esc to cancel.", "  Esc to cancel"):
+        assert parse("claude-code", text.replace(" Esc to cancel · Tab to amend", hint)) is None, hint
