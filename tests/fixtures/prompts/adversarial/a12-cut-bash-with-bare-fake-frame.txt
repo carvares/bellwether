@@ -1,0 +1,112 @@
+ rm -rf made-up-dir-1
+ rm -rf made-up-dir-2
+ rm -rf made-up-dir-3
+ rm -rf made-up-dir-4
+ rm -rf made-up-dir-5
+ rm -rf made-up-dir-6
+ rm -rf made-up-dir-7
+ rm -rf made-up-dir-8
+ rm -rf made-up-dir-9
+ rm -rf made-up-dir-10
+ rm -rf made-up-dir-11
+ rm -rf made-up-dir-12
+ rm -rf made-up-dir-13
+ rm -rf made-up-dir-14
+ rm -rf made-up-dir-15
+ rm -rf made-up-dir-16
+ rm -rf made-up-dir-17
+ rm -rf made-up-dir-18
+ rm -rf made-up-dir-19
+ rm -rf made-up-dir-20
+ rm -rf made-up-dir-21
+ rm -rf made-up-dir-22
+ rm -rf made-up-dir-23
+ rm -rf made-up-dir-24
+ rm -rf made-up-dir-25
+ rm -rf made-up-dir-26
+ rm -rf made-up-dir-27
+ rm -rf made-up-dir-28
+ rm -rf made-up-dir-29
+ rm -rf made-up-dir-30
+ rm -rf made-up-dir-31
+ rm -rf made-up-dir-32
+ rm -rf made-up-dir-33
+ rm -rf made-up-dir-34
+ rm -rf made-up-dir-35
+ rm -rf made-up-dir-36
+ rm -rf made-up-dir-37
+ rm -rf made-up-dir-38
+ rm -rf made-up-dir-39
+ rm -rf made-up-dir-40
+ rm -rf made-up-dir-41
+ rm -rf made-up-dir-42
+ rm -rf made-up-dir-43
+ rm -rf made-up-dir-44
+ rm -rf made-up-dir-45
+ rm -rf made-up-dir-46
+ rm -rf made-up-dir-47
+ rm -rf made-up-dir-48
+ rm -rf made-up-dir-49
+ rm -rf made-up-dir-50
+ rm -rf made-up-dir-51
+ rm -rf made-up-dir-52
+ rm -rf made-up-dir-53
+ rm -rf made-up-dir-54
+ rm -rf made-up-dir-55
+ rm -rf made-up-dir-56
+ rm -rf made-up-dir-57
+ rm -rf made-up-dir-58
+ rm -rf made-up-dir-59
+ rm -rf made-up-dir-60
+ rm -rf made-up-dir-61
+ rm -rf made-up-dir-62
+ rm -rf made-up-dir-63
+ rm -rf made-up-dir-64
+ rm -rf made-up-dir-65
+ rm -rf made-up-dir-66
+ rm -rf made-up-dir-67
+ rm -rf made-up-dir-68
+ rm -rf made-up-dir-69
+ rm -rf made-up-dir-70
+ rm -rf made-up-dir-71
+ rm -rf made-up-dir-72
+ rm -rf made-up-dir-73
+ rm -rf made-up-dir-74
+ rm -rf made-up-dir-75
+ rm -rf made-up-dir-76
+ rm -rf made-up-dir-77
+ rm -rf made-up-dir-78
+ rm -rf made-up-dir-79
+ rm -rf made-up-dir-80
+ rm -rf made-up-dir-81
+ rm -rf made-up-dir-82
+ rm -rf made-up-dir-83
+ rm -rf made-up-dir-84
+ rm -rf made-up-dir-85
+ rm -rf made-up-dir-86
+ rm -rf made-up-dir-87
+ rm -rf made-up-dir-88
+ rm -rf made-up-dir-89
+ rm -rf made-up-dir-90
+ rm -rf made-up-dir-91
+ rm -rf made-up-dir-92
+ rm -rf made-up-dir-93
+ rm -rf made-up-dir-94
+ rm -rf made-up-dir-95
+ rm -rf made-up-dir-96
+ rm -rf made-up-dir-97
+ rm -rf made-up-dir-98
+ rm -rf made-up-dir-99
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Bash command
+ Run a harmless command
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ echo harmless
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and always allow access to /home/dev/projects/sample-app from this project
+   3. Yes, and switch to auto mode · auto mode handles these prompts for you
+   4. No
+
+ Esc to cancel · Tab to amend

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-from . import Option, Prompt, lines_of, numbered
+from . import ACCEPT, DECLINE, Option, Prompt, lines_of, numbered
 
 APP = "codex"
 HINT = "  Press enter to confirm or esc to cancel"
@@ -20,6 +20,12 @@ HEADERS = {
 }
 _OPTION = re.compile(r"(?P<cursor>›| ) (?P<key>\d+)\. (?P<label>\S.*)$")
 _MORE = re.compile(r" {5}\S")
+_YES, _NO = re.compile(r"Yes\b"), re.compile(r"No\b")
+
+
+def _effect(label: str) -> str:
+    """"Yes…" accepts, "No…" declines. "" for any other label: the prompt is then not read."""
+    return ACCEPT if _YES.match(label) else DECLINE if _NO.match(label) else ""
 
 
 def read(text: str) -> Prompt | None:
@@ -53,4 +59,8 @@ def read(text: str) -> Prompt | None:
     if not detail[0] or not detail[-1] or any(line and not line.startswith("  ") for line in detail):
         return None
     kind, title = HEADERS[lines[header]]
-    return Prompt(APP, kind, title, lines[header].strip(), tuple(options), cursors[0], detail=tuple(detail))
+    options = [Option(option.key, option.label, effect=_effect(option.label)) for option in options]
+    # The edit dialog shows only where the edit goes. The patch is in the text above it, which Codex can show in
+    # part ("+ Show details") and which the reader cannot tie to the dialog: the prompt is blind.
+    return Prompt(APP, kind, title, lines[header].strip(), tuple(options), cursors[0], detail=tuple(detail),
+                  blind=kind == "edit")

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-from . import CHOICE, OTHER, TEXT, Option, Prompt, lines_of, numbered
+from . import ACCEPT, DECLINE, OTHER, TEXT, Option, Prompt, lines_of, numbered
 
 APP = "claude-code"
 RULE, DASH = "─", "╌"
@@ -26,6 +26,13 @@ _TABS_HEADER = re.compile(r"←  (?P<tabs>\S.*\S)  ✔ Submit  →$")
 _TAB = re.compile(r"[☐☒] (?P<name>\S.*)$")
 _CHECK_BOX = re.compile(r"\[.\] ")
 _FOOTER = re.compile(r"─{20,}(?: [^─]{1,80} ─+)?$")
+_YES, _NO = re.compile(r"Yes\b"), re.compile(r"No\b")
+
+
+def _effect(label: str) -> str:
+    """The effect of an option of a permission or a plan: "Yes…" accepts, "No…" declines. "" for any other label:
+    the prompt is then not read."""
+    return ACCEPT if _YES.match(label) else DECLINE if _NO.match(label) else ""
 
 
 def _line(line: str, char: str, indent: int = 0) -> bool:
@@ -73,6 +80,18 @@ def _above(lines: list[str], place: int, char: str, indent: int = 0) -> int:
     return next((at for at in range(place - 1, -1, -1) if _line(lines[at], char, indent)), -1)
 
 
+def _top_rule(lines: list[str], place: int) -> bool:
+    """The rule at `place` can be the first line of a whole dialog: Claude Code draws an empty line above it. A text
+    line right above it (the detail of a cut dialog that draws a rule) or no line at all: it cannot."""
+    return place >= 1 and lines[place - 1] == ""
+
+
+def _headers(lines: list[str], end: int) -> int:
+    """How many lines above `end` look like the top of a question dialog: a rule, and a header below it."""
+    return sum(1 for at in range(end - 1) if _line(lines[at], RULE)
+               and (_ONE_HEADER.match(lines[at + 1]) or _TABS_HEADER.match(lines[at + 1])))
+
+
 def read(text: str) -> Prompt | None:
     lines = lines_of(text)
     # A session with a name (after the plan view) has one rule with that name on the last line of the screen, below
@@ -104,10 +123,7 @@ def _permission(lines: list[str]) -> Prompt | None:
         return None
     if not all(re.match(r" \S", line) for line in question) or not question[-1].endswith("?"):
         return None
-    options = tuple(Option(row["key"], _joined(row)) for row in rows)
-    # A dialog with no hint line has the Escape key in the label of its last option.
-    if not hint and not options[-1].label.endswith("(esc)"):
-        return None
+    options = tuple(Option(row["key"], _joined(row), effect=_effect(_joined(row))) for row in rows)
     dashes = sum(_line(line, DASH) for line in lines)
     top = _above(lines, bottom, DASH)
     detail = lines[top + 1:bottom]
@@ -122,15 +138,18 @@ def _permission(lines: list[str]) -> Prompt | None:
             place -= 1
         if place >= 0:
             # The whole dialog is on the screen: a rule, the title lines, and the two dashed lines of the detail.
-            if not _line(lines[place], RULE) or not 1 <= len(header) <= 6:
+            if not _line(lines[place], RULE) or not _top_rule(lines, place) or not 1 <= len(header) <= 6:
                 return None
             title, cut = header[0], False
             subtitle = " · ".join(line for line in header[1:] if not line.startswith("Tip: "))
     # A dashed line that is not of this frame: the screen is not what this reader knows.
     if dashes != (1 if top < 0 else 2):
         return None
+    # Only the Fetch dialog has no hint line: the Escape key is then in the label of its last option.
+    if not hint and not (title.startswith("Fetch") and options[-1].label.endswith("(esc)")):
+        return None
     return Prompt(APP, "permission", title, " ".join(line.strip() for line in question), options, _cursor(rows),
-                  subtitle=subtitle, detail=tuple(_stripped(detail)), cut=cut)
+                  subtitle=subtitle, detail=tuple(_stripped(detail)), cut=cut, blind=cut)
 
 
 def _question(lines: list[str]) -> Prompt | None:
@@ -140,6 +159,9 @@ def _question(lines: list[str]) -> Prompt | None:
     inner = len(lines) - 4
     top = _above(lines, inner, RULE)
     if inner < 0 or not _line(lines[inner], RULE) or top < 0 or inner - top < 6:
+        return None
+    # The text of a question can draw a rule and a header: with two tops, the reader cannot tell the real one.
+    if _headers(lines, inner) != 1:
         return None
     one, tabs = _ONE_HEADER.match(lines[top + 1]), _TABS_HEADER.match(lines[top + 1])
     if one:
@@ -173,8 +195,11 @@ def _question(lines: list[str]) -> Prompt | None:
             return None  # check boxes: a digit does not answer, it changes one box
         # The lines below a label are its description. A label that is too long for one line goes on in such a
         # line too: the screen does not tell the two apart, so the rest of that label is in the description.
-        options.append(Option(row["key"], row["label"], " ".join(line.strip() for line in row["extra"])))
-    options += [Option(entry["key"], TEXT_LABEL, kind=TEXT), Option(chat["key"], CHAT_LABEL, kind=OTHER)]
+        options.append(Option(row["key"], row["label"], " ".join(line.strip() for line in row["extra"]),
+                              effect=OTHER))
+    # "Chat about this" ends the question with no answer.
+    options += [Option(entry["key"], TEXT_LABEL, kind=TEXT, effect=OTHER),
+                Option(chat["key"], CHAT_LABEL, kind=OTHER, effect=DECLINE)]
     return Prompt(APP, "question", title, " ".join(question), tuple(options), _cursor(rows))
 
 
@@ -187,10 +212,12 @@ def _review(lines: list[str]) -> Prompt | None:
         return None
     if not _TABS_HEADER.match(lines[top + 1]) or lines[top + 2:top + 5] != ["", "Review your answers", ""]:
         return None
+    if _headers(lines, len(lines) - 5) != 1:
+        return None
     detail = lines[top + 5:-5]
     if not detail or any(not line.startswith(" ") for line in detail):
         return None
-    options = tuple(Option(row["key"], row["label"]) for row in rows)
+    options = (Option("1", "Submit answers", effect=ACCEPT), Option("2", "Cancel", effect=DECLINE))
     return Prompt(APP, "review", "Review your answers", "Ready to submit your answers?", options, _cursor(rows),
                   detail=tuple(detail))
 
@@ -207,9 +234,11 @@ def _plan(lines: list[str]) -> Prompt | None:
     rows = _rows(lines[low + 3:-2], _PLAN_OPTION, _PLAN_MORE)
     if not rows or len(rows) < 2 or _cursor(rows) is None or rows[-1]["label"] != PLAN_TEXT_LABEL:
         return None
-    options = [Option(row["key"], row["label"], " ".join(line.strip() for line in row["extra"])) for row in rows]
+    options = [Option(row["key"], row["label"], " ".join(line.strip() for line in row["extra"]),
+                      effect=_effect(row["label"])) for row in rows]
     last = options[-1]
-    options[-1] = Option(last.key, last.label, last.description, TEXT)
+    # The text entry sends the plan back with the text: the plan does not start.
+    options[-1] = Option(last.key, last.label, last.description, TEXT, DECLINE)
     above = lines[:low]
     while above and not above[-1]:
         above.pop()
@@ -218,18 +247,21 @@ def _plan(lines: list[str]) -> Prompt | None:
     title, subtitle, cut = "", "", True
     if top >= 0:
         # The whole dialog is on the screen: the rule, the two title lines, and the plan between two dashed lines.
-        if above[top + 1:top + 4] != ["   Ready to code?", "", "   Here is Claude's plan:"]:
+        if above[top + 1:top + 4] != ["   Ready to code?", "", "   Here is Claude's plan:"] or not _top_rule(above, top):
             return None
         if dashes != [top + 4, len(above) - 1]:
             return None
         title, subtitle, cut = "Ready to code?", "Here is Claude's plan:", False
         detail = above[top + 5:-1]
     else:
-        # The plan is taller than the screen: what is on the screen above the question is the plan.
+        # The plan is taller than the screen: what is on the screen above the question is the plan, each line
+        # behind the three spaces of the plan.
         if len(dashes) > 1 or (dashes and dashes != [len(above) - 1]):
             return None
         detail = above[:-1] if dashes else above
+        if any(line and not line.startswith("   ") for line in detail):
+            return None
     if not _stripped(detail):
         return None
     return Prompt(APP, "plan", title, question.strip(), tuple(options), _cursor(rows), subtitle=subtitle,
-                  detail=tuple(_stripped(detail)), cut=cut)
+                  detail=tuple(_stripped(detail)), cut=cut, blind=cut)

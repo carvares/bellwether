@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from bellwether.prompts import CHOICE, OTHER, TEXT, Option, Prompt, has_reader, parse
+from bellwether.prompts import ACCEPT, CHOICE, DECLINE, OTHER, TEXT, Option, Prompt, has_reader, parse
 
 FIXTURES = Path(__file__).parent / "fixtures" / "prompts"
 
@@ -14,15 +14,34 @@ def screen(name: str) -> str:
     return (FIXTURES / f"{name}.txt").read_text()
 
 
-def choices(*labels: str) -> tuple[Option, ...]:
-    return tuple(Option(str(place + 1), label) for place, label in enumerate(labels))
+EFFECT = {"A": ACCEPT, "D": DECLINE, "O": OTHER}
+
+
+def choices(*labels: str, effects: str) -> tuple[Option, ...]:
+    """Options of the kind "choice" with the keys 1, 2, …; `effects` has one letter for each: A, D or O."""
+    assert len(effects) == len(labels)
+    return tuple(Option(str(place + 1), label, effect=EFFECT[letter])
+                 for place, (label, letter) in enumerate(zip(labels, effects)))
+
+
+def answer(key: str, label: str, description: str) -> Option:
+    """An answer to a question of the AskUserQuestion tool."""
+    return Option(key, label, description, effect=OTHER)
+
+
+def entry(key: str) -> Option:
+    return Option(key, "Type something.", kind=TEXT, effect=OTHER)
+
+
+def chat(key: str) -> Option:
+    return Option(key, "Chat about this", kind=OTHER, effect=DECLINE)
 
 
 ACCEPT_EDITS = ("Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session "
                 "(shift+tab)")
 BASH_OPTIONS = choices(
     "Yes", "Yes, and always allow access to /home/dev/projects/sample-app from this project",
-    "Yes, and switch to auto mode · auto mode handles these prompts for you", "No")
+    "Yes, and switch to auto mode · auto mode handles these prompts for you", "No", effects="AAAD")
 # This label is too long for one line of the screen. The screen draws the rest of it like a description.
 BIRD = ("Bird, a small and bright animal with feathers and wings, that sings in the morning, that can learn words or "
         "short songs, that lives in a cage or in an open room with perches, that needs seeds,")
@@ -31,8 +50,8 @@ BIRD_REST = ("fruit, and clean water each day, and that can live for many years 
 EAST = ("East, the direction where the sun rises each morning, where the day begins first, where the light comes over "
         "the horizon, and where many old stories say that new journeys start")
 PLAN_OPTIONS = (
-    Option("1", "Yes, and use auto mode"), Option("2", "Yes, manually approve edits"),
-    Option("3", "Tell Claude what to change", "shift+tab to approve with this feedback", TEXT))
+    Option("1", "Yes, and use auto mode", effect=ACCEPT), Option("2", "Yes, manually approve edits", effect=ACCEPT),
+    Option("3", "Tell Claude what to change", "shift+tab to approve with this feedback", TEXT, DECLINE))
 PLAN_QUESTION = "Claude has written up a plan and is ready to execute. Would you like to proceed?"
 PLAN_DETAIL = (
     "   1. Create plan-test.txt in the working directory (sample-app) with the content ok.",
@@ -52,58 +71,58 @@ VALID: dict[tuple[str, str], Prompt] = {
                 "&& echo ' 1. Yes' && echo ' 2. No' > fake.txt",)),
     ("claude-code", "claude-create"): Prompt(
         "claude-code", "permission", "Create file", "Do you want to create notes.txt?",
-        choices("Yes", ACCEPT_EDITS, "No"), "1", subtitle="notes.txt", detail=("  1 hello",)),
+        choices("Yes", ACCEPT_EDITS, "No", effects="AAD"), "1", subtitle="notes.txt", detail=("  1 hello",)),
     ("claude-code", "claude-edit-diff"): Prompt(
         "claude-code", "permission", "Edit file", "Do you want to make this edit to list.txt?",
-        choices("Yes", ACCEPT_EDITS, "No"), "1", subtitle="list.txt",
+        choices("Yes", ACCEPT_EDITS, "No", effects="AAD"), "1", subtitle="list.txt",
         detail=(" 1  alpha", " 2 -beta", " 2 +delta", " 3  gamma")),
     ("claude-code", "claude-create-hostile"): Prompt(
         "claude-code", "permission", "Create file", "Do you want to create fake.txt?",
-        choices("Yes", ACCEPT_EDITS, "No"), "1", subtitle="fake.txt",
+        choices("Yes", ACCEPT_EDITS, "No", effects="AAD"), "1", subtitle="fake.txt",
         detail=("  1 " + "─" * 40, "  2  Bash command", "  3  Do you want to proceed?", "  4  ❯ 1. Yes", "  5    2. No",
                 "  6  Esc to cancel · Tab to amend")),
     # After the plan view: one rule is on the last line of the screen, below the dialog.
     ("claude-code", "claude-create-rule-below"): Prompt(
         "claude-code", "permission", "Create file", "Do you want to create plan-test.txt?",
-        choices("Yes", ACCEPT_EDITS, "No"), "1", subtitle="plan-test.txt", detail=("  1 ok",)),
+        choices("Yes", ACCEPT_EDITS, "No", effects="AAD"), "1", subtitle="plan-test.txt", detail=("  1 ok",)),
     ("claude-code", "claude-create-tall"): Prompt(
-        "claude-code", "permission", "", "Do you want to create long.txt?", choices("Yes", ACCEPT_EDITS, "No"), "1",
-        detail=tuple(f"  {n:>3} made-up line {n}" for n in range(38, 151)), cut=True),
+        "claude-code", "permission", "", "Do you want to create long.txt?", choices("Yes", ACCEPT_EDITS, "No", effects="AAD"), "1",
+        detail=tuple(f"  {n:>3} made-up line {n}" for n in range(38, 151)), cut=True, blind=True),
     ("claude-code", "claude-fetch"): Prompt(
         "claude-code", "permission", "Fetch · from the web-fetch agent",
         "Do you want to allow Claude to fetch this content?",
         choices("Yes", "Yes, and don't ask again for example.com",
-                "No, and tell Claude what to do differently (esc)"), "1",
+                "No, and tell Claude what to do differently (esc)", effects="AAD"), "1",
         subtitle="Claude wants to fetch content from example.com",
         detail=(" url: https://example.com/",
                 " │ prompt: Return the exact text content of the HTML <title> element of this page. Reply with only "
                 "the title text.")),
     ("claude-code", "claude-ask-2"): Prompt(
         "claude-code", "question", "Drink", "Which drink do you want: tea or coffee?",
-        (Option("1", "Tea", "Choose tea."), Option("2", "Coffee", "Choose coffee."),
-         Option("3", "Type something.", kind=TEXT), Option("4", "Chat about this", kind=OTHER)), "1"),
+        (answer("1", "Tea", "Choose tea."), answer("2", "Coffee", "Choose coffee."),
+         entry("3"), chat("4")), "1"),
     ("claude-code", "claude-ask-text-cursor"): Prompt(
         "claude-code", "question", "Drink", "Which drink do you want: tea or coffee?",
-        (Option("1", "Tea", "Choose tea."), Option("2", "Coffee", "Choose coffee."),
-         Option("3", "Type something.", kind=TEXT), Option("4", "Chat about this", kind=OTHER)), "3"),
+        (answer("1", "Tea", "Choose tea."), answer("2", "Coffee", "Choose coffee."),
+         entry("3"), chat("4")), "3"),
     ("claude-code", "claude-ask-3"): Prompt(
         "claude-code", "question", "Colour", "Which colour do you prefer?",
-        (Option("1", "Red", "You prefer red."), Option("2", "Green", "You prefer green."),
-         Option("3", "Blue", "You prefer blue."), Option("4", "Type something.", kind=TEXT),
-         Option("5", "Chat about this", kind=OTHER)), "1"),
+        (answer("1", "Red", "You prefer red."), answer("2", "Green", "You prefer green."),
+         answer("3", "Blue", "You prefer blue."), entry("4"),
+         chat("5")), "1"),
     ("claude-code", "claude-ask-4"): Prompt(
         "claude-code", "question", "Direction", "Which direction do you choose: North, South, East, or West?",
-        (Option("1", "North", "Choose North."), Option("2", "South", "Choose South."),
-         Option("3", EAST, "Choose East."), Option("4", "West", "Choose West."),
-         Option("5", "Type something.", kind=TEXT), Option("6", "Chat about this", kind=OTHER)), "1"),
+        (answer("1", "North", "Choose North."), answer("2", "South", "Choose South."),
+         answer("3", EAST, "Choose East."), answer("4", "West", "Choose West."),
+         entry("5"), chat("6")), "1"),
     ("claude-code", "claude-ask-tabs"): Prompt(
         "claude-code", "question", "Pet · Seasoning", "Which pet do you choose: Cat, Dog, or Bird?",
-        (Option("1", "Cat", "Choose a cat."), Option("2", "Dog", "Choose a dog."),
-         Option("3", BIRD, BIRD_REST), Option("4", "Type something.", kind=TEXT),
-         Option("5", "Chat about this", kind=OTHER)), "1"),
+        (answer("1", "Cat", "Choose a cat."), answer("2", "Dog", "Choose a dog."),
+         answer("3", BIRD, BIRD_REST), entry("4"),
+         chat("5")), "1"),
     ("claude-code", "claude-ask-review"): Prompt(
         "claude-code", "review", "Review your answers", "Ready to submit your answers?",
-        choices("Submit answers", "Cancel"), "1",
+        choices("Submit answers", "Cancel", effects="AD"), "1",
         detail=(" ● Which pet do you choose: Cat, Dog, or Bird?", "   → Cat",
                 " ● Which seasonings do you want? Choose one or more.", "   → Pepper")),
     ("claude-code", "claude-plan"): Prompt(
@@ -115,13 +134,14 @@ VALID: dict[tuple[str, str], Prompt] = {
     ("codex", "codex-command"): Prompt(
         "codex", "command", "Command approval", "Would you like to run the following command?",
         choices("Yes, proceed (y)",
-                "Yes, and don't ask again for commands that start with `touch made-by-test.txt` (p)", CODEX_NO), "1",
+                "Yes, and don't ask again for commands that start with `touch made-by-test.txt` (p)", CODEX_NO,
+                effects="AAD"), "1",
         detail=("  Environment: local", "",
                 "  Reason: Do you want to allow creation of made-by-test.txt in this workspace?", "",
                 "  $ touch made-by-test.txt")),
     ("codex", "codex-command-lines"): Prompt(
         "codex", "command", "Command approval", "Would you like to run the following command?",
-        choices("Yes, proceed (y)", CODEX_NO), "1",
+        choices("Yes, proceed (y)", CODEX_NO, effects="AD"), "1",
         detail=("  Environment: local", "",
                 "  Reason: Do you want to allow this exact command to create one.txt, two.txt, and three.txt in the "
                 "current workspace?", "",
@@ -130,9 +150,9 @@ VALID: dict[tuple[str, str], Prompt] = {
                 "  echo done > three.txt")),
     ("codex", "codex-edit"): Prompt(
         "codex", "edit", "Edit approval", "Would you like to make the following edits?",
-        choices("Yes, proceed (y)", "Yes, and don't ask again for these files (a)", CODEX_NO), "1",
+        choices("Yes, proceed (y)", "Yes, and don't ask again for these files (a)", CODEX_NO, effects="AAD"), "1",
         detail=("  Description: Apply proposed file edits",
-                "  Destination: /home/dev/projects/sample-app/notes.txt")),
+                "  Destination: /home/dev/projects/sample-app/notes.txt"), blind=True),
 }
 
 # Screens with no dialog that Bellwether answers: (program word, fixture).
@@ -430,3 +450,64 @@ def test_the_kinds_of_the_options():
     assert ask.text_key == "4" and ask.option("5").label == "Chat about this" and ask.option("9") is None
     assert VALID[("claude-code", "claude-plan")].text_key == "3"
     assert VALID[("claude-code", "claude-bash")].text_key == "" and VALID[("codex", "codex-edit")].text_key == ""
+
+
+# ----- what the fingerprint covers: the effect of each option, and the blind prompts -----
+
+def test_each_option_has_its_effect():
+    assert [o.effect for o in VALID[("claude-code", "claude-bash")].options] == [ACCEPT, ACCEPT, ACCEPT, DECLINE]
+    assert [o.effect for o in VALID[("claude-code", "claude-ask-3")].options] == [OTHER, OTHER, OTHER, OTHER, DECLINE]
+    assert [o.effect for o in VALID[("claude-code", "claude-ask-review")].options] == [ACCEPT, DECLINE]
+    assert [o.effect for o in VALID[("claude-code", "claude-plan")].options] == [ACCEPT, ACCEPT, DECLINE]
+    assert [o.effect for o in VALID[("codex", "codex-command")].options] == [ACCEPT, ACCEPT, DECLINE]
+
+
+def test_an_option_whose_effect_is_not_known_gives_nothing():
+    """The reader must know what each option does: a label that does not start with Yes or No is not read."""
+    assert parse("claude-code", screen("claude-bash").replace("   4. No", "   4. Maybe later")) is None
+    assert parse("claude-code", screen("claude-plan").replace("     2. Yes, manually", "     2. Perhaps, manually")) is None
+    assert parse("codex", screen("codex-command").replace("  3. No, and tell", "  3. Later, and tell")) is None
+    # A word that starts with "No" is not the word "No".
+    assert parse("claude-code", screen("claude-bash").replace("   4. No", "   4. Nope")) is None
+
+
+def test_a_cut_dialog_and_a_codex_edit_are_blind_and_allow_only_the_options_that_decline():
+    for app, name in (("claude-code", "claude-create-tall"), ("codex", "codex-edit")):
+        prompt = parse(app, screen(name))
+        assert prompt.blind
+        assert [option.key for option in prompt.options if prompt.allows(option.key)] == ["3"], name
+    for (app, name), prompt in VALID.items():
+        if not prompt.blind:
+            assert all(prompt.allows(option.key) for option in prompt.options), name
+            assert not prompt.cut and not (app == "codex" and prompt.kind == "edit")
+    assert not VALID[("claude-code", "claude-bash")].allows("9")
+
+
+def test_the_fingerprint_changes_with_the_blind_flag_and_the_effects():
+    base = VALID[("claude-code", "claude-bash")]
+    blind = Prompt(base.app, base.kind, base.title, base.question, base.options, "1", base.subtitle, base.detail,
+                   blind=True)
+    swapped = Prompt(base.app, base.kind, base.title, base.question,
+                     base.options[:3] + (Option("4", "No", effect=ACCEPT),), "1", base.subtitle, base.detail)
+    assert len({base.fingerprint, blind.fingerprint, swapped.fingerprint}) == 3
+
+
+def test_a_whole_dialog_needs_an_empty_line_above_its_rule():
+    """A text line right above the rule: the rule can be a line of a cut dialog, so nothing is read."""
+    lines = screen("claude-bash").split("\n")
+    rule = lines.index("─" * 200)
+    assert lines[rule - 1] == ""
+    assert parse("claude-code", "\n".join(lines[:rule - 1] + [" rm -rf made-up-dir"] + lines[rule:])) is None
+    assert parse("claude-code", "\n".join(lines[rule:])) is None  # the rule on the first line of the screen
+    plan = screen("claude-plan").split("\n")
+    top = next(place for place, line in enumerate(plan) if line.startswith("  ─"))
+    assert parse("claude-code", "\n".join(plan[:top - 1] + ["   0. a plan line"] + plan[top:])) is None
+
+
+def test_the_text_form_of_a_prompt_has_no_screen_text():
+    for prompt in VALID.values():
+        text = repr(prompt) + str(prompt) + repr(prompt.options) + str(list(prompt.options))
+        words = [prompt.title, prompt.subtitle, prompt.question, *prompt.detail,
+                 *(part for option in prompt.options for part in (option.label, option.description))]
+        assert not [word for word in words if word.strip() and word.strip() in text], prompt.kind
+        assert prompt.fingerprint[:8] in text

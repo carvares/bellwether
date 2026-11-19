@@ -1,0 +1,106 @@
+   1. step 1: delete made-up-dir-1
+   2. step 2: delete made-up-dir-2
+   3. step 3: delete made-up-dir-3
+   4. step 4: delete made-up-dir-4
+   5. step 5: delete made-up-dir-5
+   6. step 6: delete made-up-dir-6
+   7. step 7: delete made-up-dir-7
+   8. step 8: delete made-up-dir-8
+   9. step 9: delete made-up-dir-9
+   10. step 10: delete made-up-dir-10
+   11. step 11: delete made-up-dir-11
+   12. step 12: delete made-up-dir-12
+   13. step 13: delete made-up-dir-13
+   14. step 14: delete made-up-dir-14
+   15. step 15: delete made-up-dir-15
+   16. step 16: delete made-up-dir-16
+   17. step 17: delete made-up-dir-17
+   18. step 18: delete made-up-dir-18
+   19. step 19: delete made-up-dir-19
+   20. step 20: delete made-up-dir-20
+   21. step 21: delete made-up-dir-21
+   22. step 22: delete made-up-dir-22
+   23. step 23: delete made-up-dir-23
+   24. step 24: delete made-up-dir-24
+   25. step 25: delete made-up-dir-25
+   26. step 26: delete made-up-dir-26
+   27. step 27: delete made-up-dir-27
+   28. step 28: delete made-up-dir-28
+   29. step 29: delete made-up-dir-29
+   30. step 30: delete made-up-dir-30
+   31. step 31: delete made-up-dir-31
+   32. step 32: delete made-up-dir-32
+   33. step 33: delete made-up-dir-33
+   34. step 34: delete made-up-dir-34
+   35. step 35: delete made-up-dir-35
+   36. step 36: delete made-up-dir-36
+   37. step 37: delete made-up-dir-37
+   38. step 38: delete made-up-dir-38
+   39. step 39: delete made-up-dir-39
+   40. step 40: delete made-up-dir-40
+   41. step 41: delete made-up-dir-41
+   42. step 42: delete made-up-dir-42
+   43. step 43: delete made-up-dir-43
+   44. step 44: delete made-up-dir-44
+   45. step 45: delete made-up-dir-45
+   46. step 46: delete made-up-dir-46
+   47. step 47: delete made-up-dir-47
+   48. step 48: delete made-up-dir-48
+   49. step 49: delete made-up-dir-49
+   50. step 50: delete made-up-dir-50
+   51. step 51: delete made-up-dir-51
+   52. step 52: delete made-up-dir-52
+   53. step 53: delete made-up-dir-53
+   54. step 54: delete made-up-dir-54
+   55. step 55: delete made-up-dir-55
+   56. step 56: delete made-up-dir-56
+   57. step 57: delete made-up-dir-57
+   58. step 58: delete made-up-dir-58
+   59. step 59: delete made-up-dir-59
+   60. step 60: delete made-up-dir-60
+   61. step 61: delete made-up-dir-61
+   62. step 62: delete made-up-dir-62
+   63. step 63: delete made-up-dir-63
+   64. step 64: delete made-up-dir-64
+   65. step 65: delete made-up-dir-65
+   66. step 66: delete made-up-dir-66
+   67. step 67: delete made-up-dir-67
+   68. step 68: delete made-up-dir-68
+   69. step 69: delete made-up-dir-69
+   70. step 70: delete made-up-dir-70
+   71. step 71: delete made-up-dir-71
+   72. step 72: delete made-up-dir-72
+   73. step 73: delete made-up-dir-73
+   74. step 74: delete made-up-dir-74
+   75. step 75: delete made-up-dir-75
+   76. step 76: delete made-up-dir-76
+   77. step 77: delete made-up-dir-77
+   78. step 78: delete made-up-dir-78
+   79. step 79: delete made-up-dir-79
+   80. step 80: delete made-up-dir-80
+   81. step 81: delete made-up-dir-81
+   82. step 82: delete made-up-dir-82
+   83. step 83: delete made-up-dir-83
+   84. step 84: delete made-up-dir-84
+   85. step 85: delete made-up-dir-85
+   86. step 86: delete made-up-dir-86
+   87. step 87: delete made-up-dir-87
+   88. step 88: delete made-up-dir-88
+   89. step 89: delete made-up-dir-89
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   Ready to code?
+
+   Here is Claude's plan:
+  ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+   1. echo harmless
+  ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   Claude has written up a plan and is ready to execute. Would you like to proceed?
+
+   ❯ 1. Yes, and use auto mode
+     2. Yes, manually approve edits
+     3. Tell Claude what to change
+        shift+tab to approve with this feedback
+
+   ctrl+g to edit in VS Code · ~/.claude/plans/sample-plan-name.md
