@@ -223,6 +223,8 @@ Item {
                         AnswerControl {
                             id: answer
                             row: agentRow
+                            labelItem: label
+                            addressItem: address
                             tokens: theme
                             corner: 6; plated: true
                             anchors.right: parent.right

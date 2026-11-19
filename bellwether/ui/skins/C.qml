@@ -320,6 +320,9 @@ Item {
                                 AnswerControl {
                                     id: answer
                                     row: agentRow
+                                    labelItem: label
+                                    addressItem: address
+                                    labelGap: 8
                                     tokens: theme
                                     corner: 0; capitals: true
                                     anchors.right: parent.right

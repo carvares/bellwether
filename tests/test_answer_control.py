@@ -229,3 +229,24 @@ def test_the_control_has_the_accent_of_the_custom_look(app, panel):
     plate = next(i for i in walk(control) if i.property("isAnswerPlate"))
     assert QColor(plate.property("color")).name() == "#ff00aa"
     assert QColor(word.property("color")).name() in ("#202124", "#f1f3f4")  # the ink that can be read on the plate
+
+
+@pytest.mark.parametrize("letter", LETTERS)
+def test_at_large_text_the_label_of_a_blocked_row_has_room_before_its_workspace(app, tmp_path, letter):
+    """Text size 140 %: the label of the agent shows in full, and the workspace text at its right gives way first
+    (it is cut, or it goes)."""
+    made = Panel(app, tmp_path, [Agent("t1", "blocked", "a reviewer bot", "api / fix the login", "claude-code")])
+    try:
+        made.backend.setLayout(letter)
+        made.backend.setFontScale(1.4)
+        settle(app)
+        made.open_group("blocked")
+        row = made.row("t1")
+        texts = [i for i in walk(row) if i.inherits("QQuickText") and i.isVisible()]
+        label = next(i for i in texts if i.property("text") == "a reviewer bot")
+        assert label.property("truncated") is False, letter
+        workspace = [i for i in texts if "fix the login" in (i.property("text") or "")]
+        assert all(i.width() < i.implicitWidth() or i.width() == 0 for i in workspace), letter
+        assert made.warnings() == []
+    finally:
+        made.close()
