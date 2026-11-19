@@ -231,7 +231,7 @@ The widget follows the changes of herdr-core with one child process, `herdr-core
 
 ### Answer a blocked agent (the engine; no control in the panel yet)
 
-The widget has the engine to answer the question of a blocked agent. It reads the screen of that one agent with `herdr-core read`, finds the dialog of Claude Code or Codex, and presses the key of the option that you choose with `herdr-core keys` (a free text goes with `herdr-core send`). It reads the screen again before each key, and it presses nothing when the question is different. The text of a screen is in memory only while the question shows: the widget does not log it and does not write it to a file. The panel has no control for this yet: the "Answer" control and the answer window come with the next step. The details are in `docs/superpowers/specs/2026-11-19-bellwether-unblock-agents-design.md`.
+The widget has the engine to answer the question of a blocked agent. It reads the screen of that one agent with `herdr-core read`, finds the dialog of Claude Code or Codex, and presses the key of the option that you choose with `herdr-core keys` (a free text goes with `herdr-core send`). It reads the screen again before each key, and it presses nothing when the question is different. When the dialog does not show all that it approves (a dialog taller than the screen, or an edit of Codex), it can only decline: you approve in Herdr. The text of a screen is in memory only while the question shows: the widget does not log it and does not write it to a file. The panel has no control for this yet: the "Answer" control and the answer window come with the next step. The details are in `docs/superpowers/specs/2026-11-19-bellwether-unblock-agents-design.md`.
 
 ## Files
 
