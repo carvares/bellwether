@@ -9,8 +9,9 @@ Item {
 
     required property PanelModel panel
 
-    readonly property int statusRowHeight: 32
-    readonly property int agentRowHeight: 28
+    // The rows grow with a larger font (theme.fit).
+    readonly property int statusRowHeight: theme.fit(32)
+    readonly property int agentRowHeight: theme.fit(28)
     readonly property int inset: 14
     // The colour of the top status: the corner brackets and the tag in the header. Neutral with no agents
     // and when Herdr is offline.
@@ -48,20 +49,29 @@ Item {
             width: parent.width - skin.inset * 2
 
             // Header: name, total, and the top status as a lamp with a word.
+            // With a larger or a wider font the three parts do not all fit: the name goes first (it is not
+            // information), and then the total gets shorter.
             Item {
+                id: header
+                // The room at the left of the lamp and its word.
+                readonly property real room: width - lampWord.implicitWidth - 12 - 8
+                readonly property bool named: nameWord.implicitWidth + 12 + totalWord.implicitWidth <= room
                 width: parent.width
-                height: 22
+                height: theme.fit(22)
                 Text {
                     id: nameWord
+                    visible: header.named
                     anchors.verticalCenter: parent.verticalCenter
                     text: "BELLWETHER"
                     color: skin.dim
                     font { family: skin.mono; pixelSize: theme.smallSize; letterSpacing: 2; weight: Font.Bold }
                 }
                 Text {
+                    id: totalWord
                     readonly property bool isTotal: true
-                    anchors.left: nameWord.right
-                    anchors.leftMargin: 12
+                    x: header.named ? nameWord.width + 12 : 0
+                    width: Math.min(implicitWidth, header.room - x)
+                    elide: Text.ElideRight
                     anchors.verticalCenter: parent.verticalCenter
                     text: skin.panel.online ? "AGENTS " + skin.panel.pad2(skin.panel.total) : "NO LINK"
                     color: skin.dim
@@ -124,11 +134,11 @@ Item {
             Item {
                 visible: !skin.panel.online
                 width: parent.width
-                height: 44
+                height: theme.fit(44)
                 Rectangle {
                     y: 6
                     width: parent.width
-                    height: 32
+                    height: parent.height - 12
                     color: "transparent"
                     border.width: 1
                     border.color: skin.line
@@ -138,7 +148,7 @@ Item {
                         Rectangle {
                             required property int index
                             x: index * 10 - 40; y: -10
-                            width: 1; height: 60
+                            width: 1; height: parent.height + 28
                             rotation: 35
                             color: "#1d242b"
                         }
@@ -147,7 +157,7 @@ Item {
                         anchors.centerIn: parent
                         text: "OFFLINE"
                         color: skin.dim
-                        font { family: skin.mono; pixelSize: 13; letterSpacing: 4; weight: Font.Bold }
+                        font { family: skin.mono; pixelSize: theme.noticeSize; letterSpacing: 4; weight: Font.Bold }
                     }
                 }
             }
@@ -227,13 +237,13 @@ Item {
                                 visible: groupItem.group.count < 10
                                 text: "0"
                                 color: "#3a444d"
-                                font { family: skin.mono; pixelSize: 20; weight: Font.Bold }
+                                font { family: skin.mono; pixelSize: theme.numeralSize; weight: Font.Bold }
                             }
                             Text {
                                 readonly property string countFor: statusRow.stateName
                                 text: groupItem.group.count
                                 color: groupItem.empty ? "#4a555f" : groupItem.group.attention ? groupItem.tone : skin.ink
-                                font { family: skin.mono; pixelSize: 20; weight: Font.Bold }
+                                font { family: skin.mono; pixelSize: theme.numeralSize; weight: Font.Bold }
                             }
                         }
                     }
@@ -242,7 +252,7 @@ Item {
                         visible: groupItem.open
                         width: parent.width
                         // More rows than fit: a line under the list says so.
-                        height: agentList.height + (agentList.longer ? 20 : 4)
+                        height: agentList.height + (agentList.longer ? theme.fit(20) : 4)
 
                         AgentList {
                             id: agentList
@@ -304,7 +314,7 @@ Item {
                                     anchors.baseline: label.baseline
                                     text: "[" + agentRow.modelData.address + "]"
                                     color: theme.faintColor
-                                    font { family: skin.mono; pixelSize: 11 }
+                                    font { family: skin.mono; pixelSize: theme.detailSize }
                                 }
                                 Text {
                                     id: detail
@@ -317,7 +327,7 @@ Item {
                                         + agentRow.noteText
                                     color: agentRow.note === "failed" ? skin.panel.failedColor
                                         : agentRow.note === "opening" ? skin.panel.openingColor : skin.dim
-                                    font { family: skin.mono; pixelSize: 11 }
+                                    font { family: skin.mono; pixelSize: theme.detailSize }
                                 }
                             }
 
@@ -379,13 +389,13 @@ Item {
             Text {
                 visible: skin.panel.failedAlone
                 width: parent.width
-                height: 24
+                height: theme.fit(24)
                 leftPadding: 2
                 verticalAlignment: Text.AlignVCenter
                 elide: Text.ElideRight
                 text: "! " + skin.panel.failedMessage
                 color: skin.panel.failedColor
-                font { family: skin.mono; pixelSize: 11 }
+                font { family: skin.mono; pixelSize: theme.detailSize }
             }
         }
     }

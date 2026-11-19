@@ -9,7 +9,9 @@ Item {
 
     required property PanelModel panel
 
-    readonly property int agentRowHeight: 30
+    // The rows, the tiles and the header of the card grow with a larger font (theme.fit).
+    readonly property int agentRowHeight: theme.fit(30)
+    readonly property int headHeight: theme.fit(30)
     readonly property int pad: 10
     readonly property int gap: 8
     readonly property string sans: theme.fontFamily
@@ -58,7 +60,7 @@ Item {
                         readonly property bool solid: group.alert
                         readonly property bool hovered: skin.panel.hoverItem === tile
                         width: (column.width - skin.gap) / 2
-                        height: 74
+                        height: theme.fit(74)
                         radius: theme.itemRadius
                         color: solid ? group.color : empty ? "transparent" : skin.panel.faded(group.color, 0.13)
                         border.width: open ? 2 : empty ? 1 : 0
@@ -91,7 +93,7 @@ Item {
                             anchors.bottomMargin: 3
                             text: skin.panel.online ? tile.group.count : "–"
                             color: tile.solid ? "#202124" : tile.empty ? "#5f6368" : tile.group.color
-                            font { family: skin.sans; pixelSize: 34; weight: Font.DemiBold; features: { "tnum": 1 } }
+                            font { family: skin.sans; pixelSize: theme.numeralSize; weight: Font.DemiBold; features: { "tnum": 1 } }
                         }
                         // The mark of the open tile: a chevron that points to the list.
                         Text {
@@ -103,7 +105,7 @@ Item {
                             anchors.bottomMargin: 10
                             text: "▾"
                             color: tile.solid ? "#202124" : tile.group.color
-                            font { family: skin.sans; pixelSize: 14 }
+                            font { family: skin.sans; pixelSize: theme.markSize }
                         }
                     }
                 }
@@ -114,7 +116,7 @@ Item {
                 readonly property bool isOfflineLine: true
                 visible: !skin.panel.online
                 width: parent.width
-                height: 22
+                height: theme.fit(22)
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
                 text: "Herdr is offline"
@@ -127,42 +129,42 @@ Item {
                 id: card
                 visible: skin.panel.openState !== ""
                 width: parent.width
-                height: 30 + agentList.height + 6
+                height: skin.headHeight + agentList.height + 6
                 radius: 10
                 color: "#101114"
                 border.width: 1
                 border.color: skin.panel.faded(skin.panel.openColor, 0.45)
 
                 Rectangle {
-                    x: 12; y: 12; width: 8; height: 8; radius: 4
+                    x: 12; y: skin.headHeight / 2 - 3; width: 8; height: 8; radius: 4
                     color: skin.panel.openColor
                 }
                 Text {
                     readonly property bool isListTitle: true
                     x: 28
-                    y: 15 - height / 2 + 1
+                    y: skin.headHeight / 2 - height / 2 + 1
                     text: skin.panel.openLabel
                     color: theme.textColor
-                    font { family: skin.sans; pixelSize: 12; weight: Font.DemiBold }
+                    font { family: skin.sans; pixelSize: theme.labelSize; weight: Font.DemiBold }
                 }
                 // The number of agents, or the rows on the screen when the list scrolls: "1–8 of 12".
                 Text {
                     readonly property bool isListRange: true
                     anchors.right: parent.right
                     anchors.rightMargin: 12
-                    y: 15 - height / 2 + 1
+                    y: skin.headHeight / 2 - height / 2 + 1
                     text: agentList.longer
                         ? (agentList.first + 1) + "–" + (agentList.first + agentList.shown) + " of " + agentList.count
                         : agentList.count + (agentList.count === 1 ? " agent" : " agents")
                     color: theme.dimColor
-                    font { family: skin.sans; pixelSize: 11; features: { "tnum": 1 } }
+                    font { family: skin.sans; pixelSize: theme.detailSize; features: { "tnum": 1 } }
                 }
 
                 AgentList {
                     id: agentList
                     panel: skin.panel
                     rowHeight: skin.agentRowHeight
-                    y: 30
+                    y: skin.headHeight
                     width: parent.width
 
                     delegate: AgentRow {
@@ -251,7 +253,7 @@ Item {
                 readonly property bool isFailedLine: true
                 visible: skin.panel.failedAlone
                 width: parent.width
-                height: 22
+                height: theme.fit(22)
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
                 elide: Text.ElideRight

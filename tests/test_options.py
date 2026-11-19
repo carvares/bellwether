@@ -14,10 +14,16 @@ from bellwether.backend import Backend
 from bellwether import layouts
 from bellwether.layouts import built_skins
 from bellwether.options import Options
+from tests.conftest import FakeClient
 
 # Layout C of the program, and the test skin in the place of design B: a second layout that can be chosen.
 # A, D and E have no skin here: the window must show a design that is not built as "coming next".
 SKINS = {"C": built_skins()["C"], "B": Path(__file__).parent / "skins" / "T.qml"}
+
+
+# The off-screen platform says this when a window that shows gets a new fixed size (the options window grows with a
+# larger font). It is expected off screen: a real platform gives the new size limits to the compositor.
+SIZE_HINTS_NOTE = "does not support propagateSizeHints"
 
 
 def walk(item):
@@ -194,10 +200,14 @@ LETTERS = [letter for letter, _, _ in layouts.LAYOUTS]
 
 
 def load_theme(path):
-    """The token object of a theme file, with the engine that keeps it alive, and the errors."""
+    """The token object of a theme file, with the engine that keeps it alive, and the errors. The theme reads the
+    custom look of a backend (ThemeBase.qml): this backend has no state file, so no custom look."""
+    backend = Backend(FakeClient(), settings_path=Path("/not-there/bellwether-tests/state.json"), skins={})
     engine = QQmlEngine()
+    engine.rootContext().setContextProperty("backend", backend)
     component = QQmlComponent(engine, QUrl.fromLocalFile(str(path)))
-    return component.create(), (engine, component), [e.toString() for e in component.errors()]
+    # Python frees a tuple from its end: the engine goes before the backend that its bindings read.
+    return component.create(), (backend, component, engine), [e.toString() for e in component.errors()]
 
 
 def missing_tokens(theme):
@@ -221,7 +231,8 @@ def test_a_theme_file_that_forgets_a_token_is_found(app, tmp_path):
     text = theme_a.read_text()
     lines = [line for line in text.splitlines() if "hoverColor" not in line and "readonly property int radius" not in line]
     (tmp_path / "ZTheme.qml").write_text("\n".join(lines))
-    (tmp_path / "fonts.js").write_text((theme_a.parent / "fonts.js").read_text())  # the font helper of the themes
+    for helper in ("fonts.js", "ThemeBase.qml"):  # what every theme file uses
+        (tmp_path / helper).write_text((theme_a.parent / helper).read_text())
     theme, engine, errors = load_theme(tmp_path / "ZTheme.qml")
     assert errors == [] and missing_tokens(theme) == ["radius", "hoverColor"]
 
@@ -257,7 +268,7 @@ def real_options(app, fake_client, tmp_path):
         shiboken6.delete(engine)
         app.processEvents()
         qInstallMessageHandler(previous)
-    assert messages == []
+    assert [m for m in messages if SIZE_HINTS_NOTE not in m] == []
 
 
 def named(window, name):

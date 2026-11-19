@@ -1,9 +1,10 @@
-// The theme tokens of Layout C: the values that its skin and the options window share.
+// The theme tokens of Layout C: the values that its skin and the options window share. This file states the
+// values of the design; ThemeBase.qml applies the custom look to them (size(): the font scale).
 // The list of tokens is in the spec ("options window and layout skins", "Theme tokens").
 import QtQuick
 import "fonts.js" as Fonts
 
-QtObject {
+ThemeBase {
     id: tokens
 
     readonly property color panelColor: "#f00b0e11"
@@ -25,9 +26,16 @@ QtObject {
     // Hack, or the first monospace font that this system has.
     readonly property string fontFamily: Fonts.first(
         ["Hack", "JetBrains Mono", "DejaVu Sans Mono", "Liberation Mono", "Noto Sans Mono"], "monospace")
-    readonly property int titleSize: 12
-    readonly property int bodySize: 12
-    readonly property int smallSize: 10
+    readonly property int titleSize: size(12)
+    readonly property int bodySize: size(12)
+    readonly property int smallSize: size(10)
+    // The text sizes that only this design has.
+    // The count of a status row.
+    readonly property int numeralSize: size(20)
+    // The detail and the address of an agent row, and the line of a failed jump.
+    readonly property int detailSize: size(11)
+    // The word of the offline plate.
+    readonly property int noticeSize: size(13)
     readonly property real letterSpacing: 1.5
     readonly property bool uppercaseTitles: true
     // The frame ornament: four corner brackets, 14 px long and 2 px thick, in `tone`. The user of the

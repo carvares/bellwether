@@ -10,7 +10,9 @@ Item {
 
     required property PanelModel panel
 
-    readonly property int agentRowHeight: 30
+    // The rows, the headline, the tabs and the footer grow with a larger font (theme.fit).
+    readonly property int agentRowHeight: theme.fit(30)
+    readonly property int footerHeight: theme.fit(26)
     readonly property int pad: 12
     readonly property string sans: theme.fontFamily
     // The frame and the chip have the colour of the top status. Neutral with no agents and when Herdr is offline.
@@ -38,17 +40,18 @@ Item {
             // Headline: total at the left, top status as a chip at the right.
             Item {
                 width: parent.width
-                height: 44
+                height: theme.fit(44)
                 Text {
                     id: total
                     readonly property bool isTotal: true
                     x: skin.pad + 2
                     anchors.baseline: parent.top
-                    anchors.baselineOffset: 31
+                    anchors.baselineOffset: theme.fit(31)
                     text: skin.panel.online ? skin.panel.total : "Offline"
                     color: skin.panel.online ? theme.textColor : theme.dimColor
                     font {
-                        family: skin.sans; pixelSize: skin.panel.online ? 24 : 17; weight: Font.DemiBold
+                        family: skin.sans; weight: Font.DemiBold
+                        pixelSize: skin.panel.online ? theme.headlineSize : theme.noticeSize
                         features: { "tnum": 1 }
                     }
                 }
@@ -59,16 +62,16 @@ Item {
                     visible: skin.panel.online
                     text: skin.panel.total === 1 ? "agent" : "agents"
                     color: theme.dimColor
-                    font { family: skin.sans; pixelSize: 13 }
+                    font { family: skin.sans; pixelSize: theme.unitSize }
                 }
                 Rectangle {
                     anchors.right: parent.right
                     anchors.rightMargin: skin.pad
                     visible: skin.panel.online
-                    y: 11
+                    y: theme.fit(11)
                     width: chipText.implicitWidth + 30
-                    height: 24
-                    radius: 12
+                    height: theme.fit(24)
+                    radius: height / 2
                     color: skin.panel.quiet ? "transparent" : skin.panel.tint(skin.panel.topColor, 0.16)
                     border.width: 1
                     border.color: skin.panel.quiet ? theme.lineColor : skin.panel.tint(skin.panel.topColor, 0.55)
@@ -85,7 +88,7 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         text: skin.panel.topBadge
                         color: skin.panel.quiet ? theme.dimColor : skin.panel.topColor
-                        font { family: skin.sans; pixelSize: 12; weight: Font.DemiBold; features: { "tnum": 1 } }
+                        font { family: skin.sans; pixelSize: theme.badgeSize; weight: Font.DemiBold; features: { "tnum": 1 } }
                     }
                 }
             }
@@ -141,7 +144,7 @@ Item {
                         readonly property bool empty: group.count === 0
                         readonly property bool hovered: skin.panel.hoverItem === tab
                         width: tabs.width / 4
-                        height: 50
+                        height: theme.fit(50)
                         radius: theme.itemRadius
                         // The open tab has a plate in its colour. A lighter plate under the pointer.
                         color: open ? skin.panel.tint(group.color, hovered ? 0.20 : 0.14)
@@ -157,14 +160,14 @@ Item {
                             y: 5
                             text: skin.panel.online ? tab.group.count : "–"
                             color: tab.empty ? "#5f6368" : tab.group.color
-                            font { family: skin.sans; pixelSize: 20; weight: Font.DemiBold; features: { "tnum": 1 } }
+                            font { family: skin.sans; pixelSize: theme.numeralSize; weight: Font.DemiBold; features: { "tnum": 1 } }
                         }
                         Text {
                             anchors.horizontalCenter: parent.horizontalCenter
-                            y: 30
+                            y: theme.fit(30)
                             text: tab.group.label
                             color: tab.empty ? theme.faintColor : tab.open ? theme.textColor : "#bdc1c6"
-                            font { family: skin.sans; pixelSize: 11; weight: Font.Medium }
+                            font { family: skin.sans; pixelSize: theme.labelSize; weight: Font.Medium }
                         }
                         // An attention status with agents has a small lamp next to its number.
                         Rectangle {
@@ -172,7 +175,7 @@ Item {
                             visible: tab.group.alert
                             anchors.left: number.right
                             anchors.leftMargin: 4
-                            y: 9
+                            y: theme.fit(9)
                             width: 6; height: 6; radius: 3
                             color: tab.group.color
                         }
@@ -191,7 +194,7 @@ Item {
             Item {
                 visible: skin.panel.openState !== ""
                 width: parent.width
-                height: agentList.height + (agentList.longer ? 34 : 12)
+                height: agentList.height + (agentList.longer ? skin.footerHeight + 8 : 12)
 
                 AgentList {
                     id: agentList
@@ -268,7 +271,7 @@ Item {
                     anchors.bottom: parent.bottom
                     x: 2
                     width: parent.width - 4
-                    height: 26
+                    height: skin.footerHeight
                     radius: 11
                     color: "#17181b"
                     Text {
@@ -277,7 +280,7 @@ Item {
                         anchors.centerIn: parent
                         text: below > 0 ? below + " more  ↓" : agentList.first + " above  ↑"
                         color: theme.dimColor
-                        font { family: skin.sans; pixelSize: 11; weight: Font.Medium; features: { "tnum": 1 } }
+                        font { family: skin.sans; pixelSize: theme.detailSize; weight: Font.Medium; features: { "tnum": 1 } }
                     }
                 }
             }
@@ -287,7 +290,7 @@ Item {
                 readonly property bool isFailedLine: true
                 visible: skin.panel.failedAlone
                 width: parent.width
-                height: 28
+                height: theme.fit(28)
                 leftPadding: skin.pad + 2
                 rightPadding: skin.pad + 2
                 verticalAlignment: Text.AlignVCenter

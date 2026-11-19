@@ -15,7 +15,12 @@ Window {
     readonly property int pad: 24
     readonly property int headerHeight: 44
     readonly property int cardWidth: 196
-    readonly property int cardHeight: 226
+    // The texts of a card: the name (one line), the description (two lines) and the tag. Their boxes grow with a
+    // larger font (theme.fit), and the card and the window with them.
+    readonly property int nameHeight: theme.fit(20)
+    readonly property int descriptionHeight: theme.fit(34)
+    readonly property int tagHeight: theme.fit(18)
+    readonly property int cardHeight: 8 + 124 + nameHeight + 6 + descriptionHeight + 8 + tagHeight + 8
     readonly property int cardGap: 12
     // The header asks for a move of the window: the compositor moves it (no position code here).
     signal systemMoveRequested()
@@ -24,7 +29,7 @@ Window {
     flags: Qt.Window | Qt.FramelessWindowHint
     // The frame can have round corners: the window itself has no background.
     color: "transparent"
-    // The size is fixed, and the same in every theme: the content has one size.
+    // The size is fixed, and the same in every theme: the content has one size (1076 × 344 with the font scale 1).
     readonly property int fixedWidth: 5 * cardWidth + 4 * cardGap + 2 * pad
     readonly property int fixedHeight: headerHeight + 20 + sectionTitle.height + 14 + cardHeight + pad
     width: fixedWidth
@@ -152,7 +157,7 @@ Window {
             id: sectionTitle
             x: options.pad
             y: options.headerHeight + 20
-            height: 16
+            height: options.theme.fit(16)
             verticalAlignment: Text.AlignVCenter
             text: "Layout"
             color: options.theme.dimColor
@@ -250,9 +255,10 @@ Window {
                             }
                         }
                         Text {
+                            id: cardName
                             y: 124
                             width: parent.width
-                            height: 20
+                            height: options.nameHeight
                             verticalAlignment: Text.AlignVCenter
                             text: card.modelData.id + " — " + card.modelData.name
                             color: options.theme.textColor
@@ -264,25 +270,29 @@ Window {
                             }
                         }
                         Text {
-                            y: 150
+                            id: cardDescription
+                            y: cardName.y + cardName.height + 6
                             width: parent.width
                             // Two lines for every card in every theme.
-                            height: 34
+                            height: options.descriptionHeight
                             clip: true
                             text: card.modelData.description
                             color: options.theme.dimColor
                             wrapMode: Text.WordWrap
                             maximumLineCount: 2
                             elide: Text.ElideRight
-                            font { family: options.theme.fontFamily; pixelSize: Math.min(12, options.theme.smallSize + 1) }
+                            font {
+                                family: options.theme.fontFamily
+                                pixelSize: Math.min(options.theme.size(12), options.theme.smallSize + 1)
+                            }
                         }
                         // The state of the card, in words.
                         Rectangle {
                             readonly property bool isTag: true
                             visible: card.selected || !card.built
-                            y: 192
+                            y: cardDescription.y + cardDescription.height + 8
                             width: tagText.implicitWidth + 12
-                            height: 18
+                            height: options.tagHeight
                             radius: Math.min(9, options.theme.itemRadius)
                             color: card.selected ? options.theme.accentColor : options.theme.lineColor
                             Text {
@@ -290,7 +300,10 @@ Window {
                                 anchors.centerIn: parent
                                 text: card.selected ? "SELECTED" : "COMING NEXT"
                                 color: card.selected ? "#0b0e11" : options.theme.textColor
-                                font { family: options.theme.fontFamily; pixelSize: 9; letterSpacing: 1; weight: Font.Bold }
+                                font {
+                                    family: options.theme.fontFamily; pixelSize: options.theme.size(9)
+                                    letterSpacing: 1; weight: Font.Bold
+                                }
                             }
                         }
                     }

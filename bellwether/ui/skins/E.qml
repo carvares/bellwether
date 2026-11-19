@@ -10,8 +10,14 @@ Item {
 
     required property PanelModel panel
 
-    readonly property int agentRowHeight: 30
-    readonly property int legendRowHeight: 25
+    // The rows grow with a larger font (theme.fit). The ring grows half as much: its numeral must stay inside it,
+    // and the legend at its right keeps its room.
+    readonly property int agentRowHeight: theme.fit(30)
+    readonly property int legendRowHeight: theme.fit(25)
+    readonly property int ringSize: (100 + theme.fit(100)) / 2
+    // The total gets smaller above 99 and above 999: three digits and more must stay inside the ring.
+    readonly property int totalSize: !panel.online ? theme.noticeSize : panel.total > 999 ? theme.headlineSmallSize
+        : panel.total > 99 ? theme.headlineMidSize : theme.headlineSize
     readonly property string sans: theme.fontFamily
     // The frame has the colour of the top status. Neutral with no agents and when Herdr is offline.
     readonly property color signalColor: panel.quiet ? theme.frameColor : panel.topColor
@@ -36,8 +42,9 @@ Item {
             width: parent.width
 
             Item {
+                id: top
                 width: parent.width
-                height: 124
+                height: Math.max(skin.ringSize, legend.height) + 24
 
                 // The ring: one arc for each status that has agents. The handlers here only draw.
                 // The canvas has the pixels of the ring on the screen (panel.pixelScale) and is drawn that many
@@ -45,9 +52,9 @@ Item {
                 Item {
                     id: ring
                     x: 14
-                    y: 12
-                    width: 100
-                    height: 100
+                    y: (top.height - height) / 2
+                    width: skin.ringSize
+                    height: skin.ringSize
 
                     Canvas {
                         id: ringCanvas
@@ -66,16 +73,19 @@ Item {
                         onOpenStateChanged: requestPaint()
                         onOnlineChanged: requestPaint()
                         onPixelsChanged: requestPaint()
+                        onWidthChanged: requestPaint()
                         onPaint: {
                             var ctx = getContext("2d")
                             ctx.reset()
                             ctx.scale(pixels, pixels)
-                            var cx = ring.width / 2, cy = ring.height / 2, r = 40
+                            // The design has a ring of 100 px: a radius of 40 and a line of 9 (14 for the open status).
+                            var unit = ring.width / 100
+                            var cx = ring.width / 2, cy = ring.height / 2, r = 40 * unit
                             ctx.lineCap = "butt"
                             if (!online || skin.panel.parts === 0) {
                                 // No agents: a full grey ring. Offline: a ring of dashes.
                                 ctx.strokeStyle = theme.lineColor
-                                ctx.lineWidth = 9
+                                ctx.lineWidth = 9 * unit
                                 var dashes = online ? 1 : 24
                                 for (var k = 0; k < dashes; k++) {
                                     var a0 = k / dashes * 2 * Math.PI
@@ -91,7 +101,7 @@ Item {
                                     continue
                                 var open = openState === groups[i].state
                                 // The open status is thicker. The others go dim while a status is open.
-                                ctx.lineWidth = open ? 14 : 9
+                                ctx.lineWidth = (open ? 14 : 9) * unit
                                 ctx.globalAlpha = openState === "" || open ? 1 : 0.45
                                 ctx.strokeStyle = groups[i].color
                                 ctx.beginPath()
@@ -111,8 +121,7 @@ Item {
                     color: skin.panel.online && skin.panel.total > 0 ? theme.textColor : theme.faintColor
                     font {
                         family: skin.sans; weight: Font.DemiBold; features: { "tnum": 1 }
-                        // Three digits and more must stay inside the ring.
-                        pixelSize: !skin.panel.online ? 15 : skin.panel.total > 999 ? 16 : skin.panel.total > 99 ? 21 : 26
+                        pixelSize: skin.totalSize
                     }
                 }
                 Text {
@@ -122,13 +131,13 @@ Item {
                     anchors.topMargin: -4
                     text: skin.panel.total === 1 ? "agent" : "agents"
                     color: theme.dimColor
-                    font { family: skin.sans; pixelSize: 10; weight: Font.Medium }
+                    font { family: skin.sans; pixelSize: theme.unitSize; weight: Font.Medium }
                 }
 
                 // Legend: the four statuses with their counts.
                 Column {
                     id: legend
-                    x: 128
+                    x: ring.x + ring.width + 14
                     width: parent.width - x - 10
                     anchors.verticalCenter: ring.verticalCenter
 
@@ -163,12 +172,16 @@ Item {
                             }
                             Text {
                                 x: 25
+                                // A large count with a large font: the name gives the room.
+                                width: Math.min(implicitWidth, countText.x - 6 - x)
+                                elide: Text.ElideRight
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: item.group.label
                                 color: item.empty ? theme.faintColor : theme.textColor
                                 font { family: skin.sans; pixelSize: theme.titleSize; weight: Font.Medium }
                             }
                             Text {
+                                id: countText
                                 readonly property string countFor: item.stateName
                                 anchors.right: parent.right
                                 anchors.rightMargin: 10
@@ -176,7 +189,7 @@ Item {
                                 text: skin.panel.online ? item.group.count : "–"
                                 color: item.empty ? theme.faintColor : item.group.alert ? item.group.color : theme.textColor
                                 font {
-                                    family: skin.sans; pixelSize: 15; features: { "tnum": 1 }
+                                    family: skin.sans; pixelSize: theme.numeralSize; features: { "tnum": 1 }
                                     weight: item.group.alert ? Font.Bold : Font.DemiBold
                                 }
                             }
@@ -302,7 +315,7 @@ Item {
                 readonly property bool isFailedLine: true
                 visible: skin.panel.failedAlone
                 width: parent.width
-                height: 28
+                height: theme.fit(28)
                 leftPadding: 18
                 rightPadding: 18
                 verticalAlignment: Text.AlignVCenter

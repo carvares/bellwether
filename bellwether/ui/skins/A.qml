@@ -9,8 +9,9 @@ Item {
 
     required property PanelModel panel
 
-    readonly property int statusRowHeight: 38
-    readonly property int agentRowHeight: 30
+    // The rows grow with a larger font (theme.fit).
+    readonly property int statusRowHeight: theme.fit(38)
+    readonly property int agentRowHeight: theme.fit(30)
     readonly property string sans: theme.fontFamily
     // The frame has the colour of the top status. Neutral with no agents and when Herdr is offline.
     readonly property color signalColor: panel.quiet ? theme.frameColor : panel.topColor
@@ -105,9 +106,9 @@ Item {
                             anchors.right: parent.right
                             anchors.rightMargin: 8
                             anchors.verticalCenter: parent.verticalCenter
-                            width: Math.max(26, countText.implicitWidth + 14)
-                            height: 22
-                            radius: 11
+                            width: Math.max(height + 4, countText.implicitWidth + 14)
+                            height: theme.fit(22)
+                            radius: height / 2
                             color: filled ? groupItem.group.color : "transparent"
                             Text {
                                 id: countText
@@ -115,7 +116,7 @@ Item {
                                 anchors.centerIn: parent
                                 text: groupItem.group.count
                                 color: groupItem.group.alert ? "#202124" : groupItem.empty ? theme.faintColor : theme.textColor
-                                font { family: skin.sans; pixelSize: 15; weight: Font.DemiBold; features: { "tnum": 1 } }
+                                font { family: skin.sans; pixelSize: theme.numeralSize; weight: Font.DemiBold; features: { "tnum": 1 } }
                             }
                         }
                     }
@@ -238,7 +239,7 @@ Item {
                 readonly property bool isFailedLine: true
                 visible: skin.panel.failedAlone
                 width: parent.width
-                height: 28
+                height: theme.fit(28)
                 leftPadding: 26
                 rightPadding: 10
                 verticalAlignment: Text.AlignVCenter
