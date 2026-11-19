@@ -134,12 +134,45 @@ If the empty block stays in the window after that, remove it from your layout in
 - Click a card to use that layout. The panel changes at once and stays at its place, on its monitor, with the same open row. The widget saves the layout.
 - The window changes its look together with the panel. The cards stay at their places.
 - All five layouts are built. If the file of a layout is missing, its card is dim, has the tag "COMING NEXT", and a click on it does nothing.
-- Keyboard: Tab and Shift+Tab move between the cards that you can choose. Enter or Space selects the card. Esc closes the window.
+- Below the cards are the sections "Size", "Text" and "Colours" (see "Custom look"), and at the bottom "Reset to defaults".
+- On a low monitor the window is lower than its content. Turn the mouse wheel to move the sections. The header and the bottom line with "Reset to defaults" stay.
+- Keyboard: Tab and Shift+Tab move through the controls in the order of the window: the cards, the sliders, the font, the colours, "Reset to defaults" and the close control. Enter or Space presses a control. The arrow keys move a slider. The window moves its sections so that the control with the keyboard is on the screen.
+- Esc closes what is open inside the window first (the colour editor, the list of fonts). Then Esc closes the window.
 - Close the window with Esc or with the close control (×) in its header. The widget continues to run.
 
 ### Custom look
 
-You can change the size of the panel, the size of the text, the font and eight colours. One set of values applies to all five layouts and to the options window. The controls for this come in the options window. Until then you set the values in the state file `~/.config/bellwether/state.json`, beside `x`, `y`, `screen` and `layout`. Stop the widget (tray menu, "Quit"), change the file, and start the widget again.
+You can change the size of the panel, the size of the text, the font and eight colours. One set of values applies to all five layouts and to the options window. You change them in the options window. Each change applies at once, and the widget saves it a moment later.
+
+**Size**
+
+- "Panel size" is a slider from 75 % to 200 %, in steps of 5 %. The whole panel grows or shrinks while you move it. The options window keeps its size.
+- "Reset" next to the value goes back to 100 %. A double click on the handle of the slider does the same. The small line on the slider shows where 100 % is.
+
+**Text**
+
+- "Text size" is a slider from 80 % to 140 %, in steps of 5 %. It changes every text of the panel and of the options window.
+- "Font" shows the font in effect. Click it to open the list. "Layout default" is the first line: each layout then has its own font. Type some letters to see only the fonts with these letters in their name. Click a font, or move with the arrow keys and press Enter.
+
+**Colours**
+
+- There are two groups. "Status": Blocked, Done, Working, Idle. "Panel": Background, Text, Frame, Accent.
+- Each colour shows a sample and its value. Click a colour to open the editor below the row.
+- In the editor, click one of the 16 samples, or type a value such as `#8ab4f8` in the field "Hex". A valid value applies while you type. A value that is not a colour changes nothing, and the editor shows "Use a colour like #8ab4f8".
+- The editor of "Background" also has the slider "Opacity", from 10 % to 100 %.
+- A colour that you changed has the button "Reset". It gives back the colour of the layout.
+- "Done" or Esc closes the editor.
+
+**Reset to defaults**
+
+- The button at the bottom right of the window resets the size, the text size, the font and all colours.
+- You must click it two times. After the first click it shows "Click again to reset" for 3 seconds.
+- You cannot click it when nothing is changed.
+- You can always read this button and the close control (×), also when you chose a text colour that is the same as the background.
+
+**The state file**
+
+The widget keeps the values in `~/.config/bellwether/state.json`, beside `x`, `y`, `screen` and `layout`. You can also change the file by hand: stop the widget (tray menu, "Quit"), change the file, and start the widget again.
 
 | Key | Value | What it does |
 |---|---|---|
@@ -165,9 +198,11 @@ Example:
 
 - A number out of its limits is set to the nearest limit.
 - A value that the widget cannot use (a number as text, a colour in a different form, a font that this system does not have) is ignored: the default applies, and the log gets one line with the names of the keys. The other values of the file apply.
-- To go back to the look of the layouts, delete the four keys.
+- To go back to the look of the layouts, use "Reset to defaults", or delete the four keys.
+- A change in the options window writes only the value that you changed. The other keys of the file stay, also a font that this system does not have now.
 - At a large scale a long list can be higher than the monitor. The list then shows fewer than 8 agents at a time, and you turn the mouse wheel for the others.
-- The dark text on a filled badge (Layout A) and on a filled tile (Layout B) does not change. So a dark colour for `blocked` or `done` is hard to read there.
+- The text on a filled badge (Layout A) and on a filled tile (Layout B) is dark on a light status colour and light on a dark one.
+- A text size of 80 % makes the smallest texts of the options window 7 to 8 pixels high.
 
 ### When the Herdr app window is closed
 
