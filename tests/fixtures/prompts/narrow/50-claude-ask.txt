@@ -1,0 +1,41 @@
+
+           Claude Code v2.1.322
+ ▐▛███▛█   Model 11 with high effort
+▝▜██████▀  Sample Plans
+ ▝▝   ▝▝   ~/…/t25-live/work
+
+
+❯ Use the AskUserQuestion tool now to ask me one
+  question with the header Colour: 'Which made-up
+  colour scheme should the made-up widget use
+  for all of its made-up panels and made-up
+  badges?' Give 2 options. Each option label must
+  be about 14 words long and each description
+  about 30 words long. All content made-up.
+──────────────────────────────────────────────────
+ ☐ Colour
+
+│ Which made-up colour scheme should the made-up
+│ widget use for all of its made-up panels and
+│ made-up badges?
+
+❯ 1. Midnight Plumberry with glowing citrine edges
+     and soft fogged lavender panel backgrounds
+     shown throughout
+     Panels use a deep plumberry base with a faint
+     lavender fog. Badges glow in citrine gold.
+     The scheme feels calm at night and keeps
+     every made-up badge easy to spot.
+  2. Seaglass Tangerine with pale mintwater panels
+     and bright tangerine badges framed by
+     driftwood grey
+     Panels use a pale mintwater tint with thin
+     driftwood grey borders. Badges pop in bright
+     tangerine. The scheme feels light and sunny,
+     and it suits a made-up daytime dashboard
+     well.
+  3. Type something.
+──────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

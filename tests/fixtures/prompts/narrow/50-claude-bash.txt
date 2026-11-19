@@ -1,0 +1,44 @@
+
+           Claude Code v2.1.322
+ ▐▛███▛█   Model 11 with high effort
+▝▜██████▀  Sample Plans
+ ▝▝   ▝▝   ~/…/t25-live/work
+
+
+❯ Run exactly this one bash command with the Bash
+  tool and nothing else, do not shorten it:
+  touch made-up-file-alpha-made-up-file-beta-made
+  -up-file-gamma-made-up-file-delta-made-up-file-
+  epsilon.txt made-up-second-argument.txt && echo
+  made-up-done
+
+  Creating two empty placeholder files and
+  printing a done message
+  ⎿  $ touch made-up-file-alpha-made-up-file-beta-
+     made-up-file-gamma-made-up-file-delta-made-up
+     -file-epsilon.txt made-up-second-argument.txt
+     && echo made-up-done
+
+──────────────────────────────────────────────────
+ Bash command
+ Tip: auto mode handles these prompts for you —
+ choose "switch to auto mode" below
+ Create two empty placeholder files and print a
+ done message
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ │ touch made-up-file-alpha-made-up-file-beta-mad
+ │ e-up-file-gamma-made-up-file-delta-made-up-fil
+ │ e-epsilon.txt made-up-second-argument.txt &&
+ │ echo made-up-done
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and always allow access to /home/someus
+      er/Projects/Personal/bellwether/.superpowers
+      /sdd/2026-11-18-bellwether/t25-live/work
+      from this project
+   3. Yes, and switch to auto mode · auto mode
+      handles these prompts for you
+   4. No
+
+ Esc to cancel · Tab to amend

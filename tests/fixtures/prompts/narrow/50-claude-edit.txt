@@ -1,0 +1,37 @@
+
+           Claude Code v2.1.322
+ ▐▛███▛█   Model 11 with high effort
+▝▜██████▀  Sample Plans
+ ▝▝   ▝▝   ~/…/t25-live/work
+
+
+❯ In notes.txt replace the line 'made-up line
+  two' with this one long line: 'made-up line two
+  is now a much longer line with many made-up
+  words so that it is wider than the terminal for
+  sure, alpha beta gamma delta'. Use the Edit
+  tool once.
+
+  Read 1 file
+
+● Update(notes.txt)
+
+──────────────────────────────────────────────────
+ Edit file
+ notes.txt
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ 1  made-up line one
+ 2 -made-up line two
+ 2 +made-up line two is now a much longer line wit
+   +h many made-up words so that it is wider than
+   +the terminal for sure, alpha beta gamma delta
+ 3  made-up line three
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to make this edit to notes.txt?
+ ❯ 1. Yes
+   2. Yes, and switch to accept edits
+      (auto-approve file edits and common file
+      commands) for this session (shift+tab)
+   3. No
+
+ Esc to cancel · Tab to amend

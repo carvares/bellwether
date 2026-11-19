@@ -42,11 +42,13 @@ ACCEPT_EDITS = ("Yes, and switch to accept edits (auto-approve file edits and co
 BASH_OPTIONS = choices(
     "Yes", "Yes, and always allow access to /home/dev/projects/sample-app from this project",
     "Yes, and switch to auto mode · auto mode handles these prompts for you", "No", effects="AAAD")
-# This label is too long for one line of the screen. The screen draws the rest of it like a description.
+# This label is too long for one line of the screen. The screen draws the rest of it like a description: the reader
+# takes the next line as the label while its first word had no room at the end of the line before (Task 25).
 BIRD = ("Bird, a small and bright animal with feathers and wings, that sings in the morning, that can learn words or "
-        "short songs, that lives in a cage or in an open room with perches, that needs seeds,")
-BIRD_REST = ("fruit, and clean water each day, and that can live for many years with good care and attention from its "
-             "owner Choose a bird.")
+        "short songs, that lives in a cage or in an open room with perches, that needs seeds, "
+        "fruit, and clean water each day, and that can live for many years with good care and attention from its "
+        "owner")
+BIRD_REST = "Choose a bird."
 EAST = ("East, the direction where the sun rises each morning, where the day begins first, where the light comes over "
         "the horizon, and where many old stories say that new journeys start")
 PLAN_OPTIONS = (

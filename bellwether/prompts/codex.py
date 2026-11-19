@@ -46,7 +46,8 @@ def read(text: str) -> Prompt | None:
             cursors += [match["key"]] if match["cursor"] == "›" else []
         elif options and _MORE.match(line):
             last = options[-1]
-            options[-1] = Option(last.key, f"{last.label} {line.strip()}")
+            # Codex wraps a label at a space, and inside a word after a hyphen (measured on 80 and 50 columns).
+            options[-1] = Option(last.key, last.label + ("" if last.label.endswith("-") else " ") + line.strip())
         else:
             return None
     if len(options) < 2 or not numbered(options) or len(cursors) != 1:

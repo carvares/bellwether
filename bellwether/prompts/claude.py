@@ -66,8 +66,32 @@ def _cursor(rows: list[dict]) -> str | None:
     return marked[0] if len(marked) == 1 else None
 
 
-def _joined(row: dict) -> str:
-    return " ".join([row["label"], *(line.strip() for line in row["extra"])])
+def _wraps(first: str, second: str, width: int) -> bool:
+    """The line `second` goes on from `first` on a screen of `width` columns: `first` is full (a word was cut), or
+    the first word of `second` had no room at its end (measured on 80 and 50 columns: Claude Code wraps a text at a
+    space, and cuts a word that is longer than a line)."""
+    words = second.split()
+    return bool(words) and (len(first) >= width or len(first) + 1 + len(words[0]) > width)
+
+
+def _joined(row: dict, width: int = 0) -> str:
+    """The label of an option with the lines below it. A line that is full was cut inside a word: no space."""
+    text, last = row["label"], row["first"]
+    for line in row["extra"]:
+        text += ("" if width and len(last) >= width else " ") + line.strip()
+        last = line
+    return text
+
+
+def _paragraphs(lines: list[str], width: int) -> list[str]:
+    """Lines of a text as its paragraphs: a line that goes on from the line before (see `_wraps`) is joined to it."""
+    out: list[str] = []
+    for place, line in enumerate(lines):
+        if out and _wraps(lines[place - 1], line, width):
+            out[-1] += ("" if len(lines[place - 1]) >= width else " ") + line.strip()
+        else:
+            out.append(line.strip())
+    return out
 
 
 def _stripped(lines: list[str]) -> list[str]:
@@ -128,7 +152,8 @@ def _permission(lines: list[str]) -> Prompt | None:
         return None
     if not all(re.match(r" \S", line) for line in question) or not question[-1].endswith("?"):
         return None
-    options = tuple(Option(row["key"], _joined(row), effect=_effect(_joined(row))) for row in rows)
+    width = len(lines[bottom])  # a dashed line is as wide as the screen
+    options = tuple(Option(row["key"], _joined(row, width), effect=_effect(_joined(row, width))) for row in rows)
     dashes = sum(_line(line, DASH) for line in lines)
     top = _above(lines, bottom, DASH)
     detail = lines[top + 1:bottom]
@@ -139,14 +164,15 @@ def _permission(lines: list[str]) -> Prompt | None:
     if top >= 0:
         place = top - 1
         while place >= 0 and re.match(r" \S", lines[place]):
-            header.insert(0, lines[place].strip())
+            header.insert(0, lines[place])
             place -= 1
         if place >= 0:
             # The whole dialog is on the screen: a rule, the title lines, and the two dashed lines of the detail.
             if not _line(lines[place], RULE) or not _top_rule(lines, place) or not 1 <= len(header) <= 6:
                 return None
-            title, cut = header[0], False
-            subtitle = " · ".join(line for line in header[1:] if not line.startswith("Tip: "))
+            # On a narrow screen a line of the header goes on in the next line: the tip (left out), the purpose.
+            title, cut = header[0].strip(), False
+            subtitle = " · ".join(text for text in _paragraphs(header[1:], width) if not text.startswith("Tip: "))
     # A dashed line that is not of this frame: the screen is not what this reader knows.
     if dashes != (1 if top < 0 else 2):
         return None
@@ -185,6 +211,10 @@ def _question(lines: list[str]) -> Prompt | None:
     question, block = body[1:gap], body[gap + 1:]
     if not question or any(not re.match(r"\S", line) or _QUESTION_OPTION.match(line) for line in question):
         return None
+    # A question of more than one line has a bar in front of each line (measured on 50 columns).
+    if len(question) > 1 and all(line.startswith("│ ") for line in question):
+        question = [line[2:] for line in question]
+    width = len(lines[top])  # the rule is as wide as the screen
     rows = _rows([*block, lines[-3]], _QUESTION_OPTION, _QUESTION_MORE)
     if not rows or len(rows) < 3 or _cursor(rows) is None:
         return None
@@ -199,9 +229,13 @@ def _question(lines: list[str]) -> Prompt | None:
         if _CHECK_BOX.match(row["label"]):
             return None  # check boxes: a digit does not answer, it changes one box
         # The lines below a label are its description. A label that is too long for one line goes on in such a
-        # line too: the screen does not tell the two apart, so the rest of that label is in the description.
-        options.append(Option(row["key"], row["label"], " ".join(line.strip() for line in row["extra"]),
-                              effect=OTHER))
+        # line too, with the same indent: a line goes on from the line before when its first word had no room
+        # there (`_wraps`). The first line that does not is the start of the description.
+        label, last, extra = row["label"], row["first"], list(row["extra"])
+        while extra and _wraps(last, extra[0], width):
+            last = extra.pop(0)
+            label += " " + last.strip()
+        options.append(Option(row["key"], label, " ".join(line.strip() for line in extra), effect=OTHER))
     # "Chat about this" ends the question with no answer.
     options += [Option(entry["key"], TEXT_LABEL, kind=TEXT, effect=OTHER),
                 Option(chat["key"], CHAT_LABEL, kind=OTHER, effect=DECLINE)]
