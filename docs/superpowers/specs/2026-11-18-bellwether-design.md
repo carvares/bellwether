@@ -462,7 +462,7 @@ A look that cannot be read. The user can choose any colours, also a text in the 
 
 What the controls needed from the backend, and got in this task: `scaleStep`, `fontScaleStep`, `opacityMin`, `opacityMax`, `opacityStep`, `lookIsCustom` (with `lookIsCustomChanged`), and `colors.background` as the colour that is drawn.
 
-Limits: at a text size of 80 % the smallest texts of the window (the reset marks, the values of the colours, the tag) are 7 to 8 pixels high. A double click on the track of "Text size" away from its handle changes the text size with its first click, the window moves its rows, and the second click can miss the slider: the double click is for the handle, and "Reset" next to the value is the sure way. The window has no way to scroll with the mouse other than the wheel (the thumb is a sign, not a control); the keyboard also scrolls it.
+Limits: at a text size of 80 % the smallest texts of the window (the reset marks, the values of the colours, the tag) are 7 to 8 pixels high. A double click on the track of "Text size" away from its handle changes the text size with its first click, the window moves its rows, and the second click can miss the slider: the double click is for the handle, and "Reset" next to the value is the sure way. The window scrolls with the wheel, with a drag of the pointer or a finger, with a drag of the thumb, and with the keyboard.
 
 ## Goal
 
