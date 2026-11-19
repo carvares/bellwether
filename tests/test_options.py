@@ -86,7 +86,7 @@ def test_the_window_opens_one_time_and_a_second_open_shows_the_same_window(app, 
     options.open()
     settle(app)
     assert engine.rootObjects() == [window] and window.isVisible()
-    window.close()  # the close button of the title bar
+    window.close()  # as the close control in the header of the window does
     settle(app)
     assert not window.isVisible()
     options.open()
