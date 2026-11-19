@@ -101,7 +101,7 @@ class Bench:
         return self.backend.prompt["state"]
 
     def until(self, *states: str) -> bool:
-        return wait_for(self.app, lambda: self.state() in states and not self.backend._prompt_busy)
+        return wait_for(self.app, lambda: self.state() in states and not self.backend._session.busy)
 
     def open(self, key="t1", state="ready"):
         self.backend.openPrompt(key)
@@ -131,7 +131,7 @@ def labels(prompt: dict) -> list[str]:
 CLOSED = {
     "state": "closed", "key": "", "label": "", "program": "", "icon": "", "address": "", "kind": "", "title": "",
     "subtitle": "", "question": "", "detail": [], "cut": False, "options": [], "cursor": "", "freeText": False,
-    "screen": "", "reason": "", "message": "", "changed": False,
+    "screen": "", "reason": "", "message": "", "changed": False, "blind": False,
 }
 
 
@@ -156,12 +156,12 @@ def test_open_reads_the_screen_off_the_ui_thread_and_shows_the_prompt(bench):
         "kind": "permission", "title": "Bash command", "subtitle": "Create an empty test file",
         "question": "Do you want to proceed?", "detail": [" touch made-by-test.txt"], "cursor": "1",
         "options": [
-            {"key": "1", "label": "Yes", "description": "", "kind": "choice"},
+            {"key": "1", "label": "Yes", "description": "", "kind": "choice", "effect": "accept", "allowed": True},
             {"key": "2", "label": "Yes, and always allow access to /home/dev/projects/sample-app from this project",
-             "description": "", "kind": "choice"},
+             "description": "", "kind": "choice", "effect": "accept", "allowed": True},
             {"key": "3", "label": "Yes, and switch to auto mode · auto mode handles these prompts for you",
-             "description": "", "kind": "choice"},
-            {"key": "4", "label": "No", "description": "", "kind": "choice"}],
+             "description": "", "kind": "choice", "effect": "accept", "allowed": True},
+            {"key": "4", "label": "No", "description": "", "kind": "choice", "effect": "decline", "allowed": True}],
     }
 
 
@@ -171,10 +171,12 @@ def test_a_question_has_descriptions_kinds_and_the_free_text_flag(bench):
     b.open()
     assert b.prompt["freeText"] is True and b.prompt["kind"] == "question" and b.prompt["title"] == "Drink"
     assert b.prompt["options"] == [
-        {"key": "1", "label": "Tea", "description": "Choose tea.", "kind": "choice"},
-        {"key": "2", "label": "Coffee", "description": "Choose coffee.", "kind": "choice"},
-        {"key": "3", "label": "Type something.", "description": "", "kind": "text"},
-        {"key": "4", "label": "Chat about this", "description": "", "kind": "other"}]
+        {"key": "1", "label": "Tea", "description": "Choose tea.", "kind": "choice", "effect": "other", "allowed": True},
+        {"key": "2", "label": "Coffee", "description": "Choose coffee.", "kind": "choice", "effect": "other",
+         "allowed": True},
+        {"key": "3", "label": "Type something.", "description": "", "kind": "text", "effect": "other", "allowed": True},
+        {"key": "4", "label": "Chat about this", "description": "", "kind": "other", "effect": "decline",
+         "allowed": True}]
 
 
 def test_the_prompt_has_the_icon_of_the_row(app, tmp_path):
@@ -298,7 +300,7 @@ def test_the_sent_state_shows_before_the_window_closes(bench):
     b.backend.answer("1")
     assert b.until("sent")
     assert b.prompt["message"] == "Sent." and b.prompt["options"] == [] and b.prompt["key"] == "t1"
-    b.backend._sent_timer.timeout.emit()
+    b.backend._session._sent_timer.timeout.emit()
     assert b.state() == "closed"
 
 
@@ -391,12 +393,153 @@ def test_an_answer_with_no_prompt_ready_is_refused(bench, state, screens):
 def test_a_key_that_herdr_does_not_take_is_failed(bench):
     b = bench()
     b.open()
-    b.client.press_result = Failure("timeout")
+    b.client.press_result = Failure("herdr_unavailable")
     b.backend.answer("1")
     assert b.until("failed")
-    assert b.prompt["reason"] == "press_timeout" and b.client.pressed == [("t1", ["1"])]
+    assert b.prompt["reason"] == "press_herdr_unavailable" and b.client.pressed == [("t1", ["1"])]
     assert b.prompt["message"] == "The answer was not sent, or Herdr did not confirm it."
     assert len(b.client.reads) == 2  # no more reads after the failure
+
+
+# ----- a key or a text that Herdr did not confirm: it may still arrive -----
+
+MAY_ARRIVE = "Herdr did not confirm the answer. It may still arrive. Check in Herdr."
+
+
+def test_a_key_that_herdr_does_not_confirm_may_still_arrive_and_the_reads_go_on(bench):
+    """herdr-core holds a key while a person types in that terminal, and a killed `keys` still delivers it. A
+    timeout is therefore not "failed": the window says that the key may still arrive and reads on, bounded."""
+    b = bench(pending_follow=(0.0, 0.0, 0.0, 0.0))
+    b.open()
+    gate = threading.Event()
+    b.client.press_result = Failure("timeout")
+    b.client.screens = [BASH, lambda: (gate.wait(5), BASH)[1]]
+    b.backend.answer("1")
+    assert b.until("pending")
+    assert b.prompt["reason"] == "press_timeout" and b.prompt["message"] == MAY_ARRIVE
+    assert b.backend.answering is True and b.prompt["question"] == "Do you want to proceed?"
+    assert b.backend.answer("1") is False and b.backend.answerText("x") is False
+    b.backend.openPrompt("t1")  # does nothing while the key may still arrive
+    assert b.state() == "pending"
+    gate.set()
+    assert b.until("failed")  # the same question at the end of the reads: the key did not arrive (yet)
+    assert b.prompt["reason"] == "press_timeout" and b.prompt["message"] == MAY_ARRIVE
+    assert len(b.client.reads) == 2 + 4 and b.client.pressed == [("t1", ["1"])]
+
+
+def test_an_agent_that_goes_on_after_an_unconfirmed_key_is_sent_with_a_note_and_stays(bench):
+    b = bench(pending_follow=(0.0, 0.0))
+    b.open()
+    b.client.press_result = Failure("timeout")
+    b.backend.answer("1")
+    assert b.until("pending")
+    b.backend._snapshot.emit(WORKING)
+    assert b.until("sent")
+    assert b.prompt["reason"] == "unconfirmed"
+    assert b.prompt["message"] == ("The agent went on, but Herdr did not confirm the answer. Check in Herdr that it "
+                                   "got yours.")
+    assert not b.backend._session._sent_timer.isActive()  # the person reads it and closes the window
+
+
+def test_a_different_screen_after_an_unconfirmed_key_shows_no_buttons(bench):
+    """A new question can be the effect of the key, or of a person in Herdr while the key is still on its way."""
+    b = bench(pending_follow=(0.0, 0.0))
+    b.open()
+    b.client.press_result = Failure("timeout")
+    b.client.screens = [BASH, BASH, CREATE]  # before the key, the first read after it, then a new question
+    b.backend.answer("1")
+    assert b.until("failed")
+    assert b.client.reads == ["t1"] * 4 and b.client.pressed == [("t1", ["1"])]
+    assert b.states[-2:] == ["pending", "failed"] and b.prompt["reason"] == "press_timeout"
+    assert b.prompt["options"] == [] and b.prompt["message"] == MAY_ARRIVE
+
+
+def test_a_text_that_herdr_does_not_confirm_may_still_arrive(bench):
+    b = bench(pending_follow=(0.0,))
+    b.client.screens = [ASK]
+    b.open()
+    b.client.on_press = lambda: b.client.screens.__setitem__(slice(None), [ASK_CURSOR])
+    b.client.send_result = Failure("timeout")
+    b.backend.answerText("made-up text")
+    assert b.until("pending")
+    assert b.prompt["reason"] == "send_timeout" and b.prompt["message"] == MAY_ARRIVE
+    assert b.until("failed") and b.prompt["reason"] == "send_timeout"
+
+
+# ----- a key that herdr-core held: a person typed in that terminal just before -----
+
+HELD = "Herdr held the key while someone typed in this terminal. Check in Herdr that it answered the question you saw."
+
+
+def test_a_held_key_that_answered_says_so_and_the_window_stays(bench):
+    b = bench()
+    b.open()
+
+    def held():
+        b.now[0] += 3.0  # herdr-core gave the key 3 s after the command started
+        b.backend._snapshot.emit(WORKING)
+
+    b.client.on_press = held
+    b.backend.answer("1")
+    assert b.until("sent")
+    assert b.prompt["reason"] == "held" and b.prompt["message"] == HELD
+    assert not b.backend._session._sent_timer.isActive()
+
+
+def test_a_held_key_before_a_new_question_says_so(bench):
+    b = bench()
+    b.open()
+
+    def held():
+        b.now[0] += 3.0
+        b.client.screens[:] = [CREATE]
+
+    b.client.on_press = held
+    b.backend.answer("1")
+    assert b.until("ready") and b.prompt["title"] == "Create file"
+    assert b.prompt["reason"] == "held" and b.prompt["message"] == HELD and b.prompt["changed"] is False
+
+
+def test_a_key_that_went_at_once_is_not_held(bench):
+    b = bench()
+    b.open()
+
+    def quick():
+        b.now[0] += 0.05
+        b.backend._snapshot.emit(WORKING)
+
+    b.client.on_press = quick
+    b.backend.answer("1")
+    assert b.until("sent") and b.prompt["reason"] == "" and b.prompt["message"] == "Sent."
+
+
+# ----- a blind prompt: what it approves is not all on the screen -----
+
+TALL, CODEX_EDIT = shown("claude-create-tall"), shown("codex-edit")
+BLIND = "The full content is not visible here. Open it in Herdr to approve."
+
+
+@pytest.mark.parametrize("screen,agents", [(TALL, BLOCKED), (CODEX_EDIT, [Agent("t1", "blocked", "x", "Main", "codex")])],
+                         ids=["cut", "codex-edit"])
+def test_a_blind_prompt_allows_only_the_options_that_decline(bench, screen, agents):
+    b = bench(agents=agents)
+    b.client.screens = [screen]
+    b.open()
+    assert b.prompt["blind"] is True and b.prompt["message"] == BLIND
+    assert [(o["key"], o["effect"], o["allowed"]) for o in b.prompt["options"]] == [
+        ("1", "accept", False), ("2", "accept", False), ("3", "decline", True)]
+    assert b.backend.answer("1") is False and b.backend.answer("2") is False
+    assert b.client.pressed == [] and b.state() == "ready"
+    b.client.on_press = lambda: b.backend._snapshot.emit([Agent("t1", "working", "x", "Main", agents[0].app)])
+    assert b.backend.answer("3") is True
+    assert b.until("sent") and b.client.pressed == [("t1", ["3"])]
+
+
+def test_a_prompt_that_is_not_blind_has_no_blind_message_and_allows_every_option(bench):
+    b = bench()
+    b.open()
+    assert b.prompt["blind"] is False and b.prompt["message"] == ""
+    assert all(option["allowed"] for option in b.prompt["options"])
 
 
 def test_after_a_key_a_new_question_shows(bench):
@@ -443,7 +586,7 @@ def test_the_agent_that_is_not_blocked_after_a_key_ends_the_reads_at_once(bench)
     b = bench(follow=(30.0, 30.0))
     b.open()
     b.backend.answer("1")
-    assert wait_for(b.app, lambda: b.client.pressed and not b.backend._prompt_busy)
+    assert wait_for(b.app, lambda: b.client.pressed and not b.backend._session.busy)
     assert b.state() == "answering"
     b.backend.apply(list(WORKING))
     assert b.until("closed") and b.states[-2:] == ["sent", "closed"]
@@ -482,7 +625,8 @@ def test_a_text_answer_is_not_typed_when_the_entry_does_not_open(bench):
     assert b.until("failed")
     assert b.client.pressed == [("t1", ["3"])] and b.client.sent == []
     assert b.prompt["reason"] == "text_not_ready"
-    assert b.prompt["message"] == "The text entry did not open. Nothing was typed."
+    assert b.prompt["message"] == ("The text option was selected but its entry did not open. The text was not sent. "
+                                   "Check in Herdr.")
 
 
 def test_a_text_answer_on_a_changed_screen_presses_and_types_nothing(bench):
@@ -497,23 +641,54 @@ def test_a_text_answer_on_a_changed_screen_presses_and_types_nothing(bench):
 
 
 def test_a_text_answer_is_not_typed_when_the_question_changes_after_the_key(bench):
+    """The key of the text option went: the message must not say that nothing was sent."""
     b = bench()
     b.client.screens = [ASK]
     b.open()
     b.client.on_press = lambda: b.client.screens.__setitem__(slice(None), [CREATE])
     b.backend.answerText("made-up text")
     assert b.until("ready")
-    assert b.client.pressed == [("t1", ["3"])] and b.client.sent == [] and b.prompt["changed"] is True
-    assert b.prompt["title"] == "Create file"
+    assert b.client.pressed == [("t1", ["3"])] and b.client.sent == [] and b.prompt["changed"] is False
+    assert b.prompt["title"] == "Create file" and b.prompt["reason"] == "text_key_only"
+    assert b.prompt["message"] == "The text option was selected but the text was not sent. Check in Herdr."
+    # The reads go on: the note stays while the same question shows, and goes with the next one.
+    b.now[0] += 1.0
+    b.backend.apply(list(BLOCKED))
+    assert wait_for(b.app, lambda: len(b.client.reads) == 4 and not b.backend._session.busy)
+    assert b.prompt["reason"] == "text_key_only"
+    b.client.screens = [BASH]
+    b.now[0] += 1.0
+    b.backend.apply(list(BLOCKED))
+    assert wait_for(b.app, lambda: b.prompt["title"] == "Bash command" and not b.backend._session.busy)
+    assert b.prompt["reason"] == "" and b.prompt["message"] == ""
 
 
-@pytest.mark.parametrize("text", ["", "   ", "two\nlines", "esc\x1b[2J", "x" * 2001], ids=range(5))
-def test_a_text_that_is_not_valid_is_refused(bench, text):
+def test_a_text_answer_whose_key_went_before_a_screen_with_no_dialog_says_so(bench):
+    b = bench()
+    b.client.screens = [ASK]
+    b.open()
+    b.client.on_press = lambda: b.client.screens.__setitem__(slice(None), [NO_DIALOG])
+    b.backend.answerText("made-up text")
+    assert b.until("unreadable")
+    assert b.prompt["reason"] == "text_key_only" and b.client.sent == []
+
+
+@pytest.mark.parametrize("text,reason,message", [
+    ("", "text_empty", "Type a text first."), ("   ", "text_empty", "Type a text first."),
+    ("two\nlines", "text_lines", "The text must be one line."),
+    ("esc\x1b[2J", "text_control", "The text has characters that cannot be sent (control or direction characters)."),
+    ("x" * 2001, "text_long", "The text is too long: at most 2000 characters.")], ids=range(5))
+def test_a_text_that_is_not_valid_is_refused_with_a_reason(bench, text, reason, message):
+    """The window learns why from the prompt: `reason` and `message`. The question stays ready."""
     b = bench()
     b.client.screens = [ASK]
     b.open()
     assert b.backend.answerText(text) is False
     assert b.state() == "ready" and b.client.pressed == [] and b.client.sent == [] and b.client.reads == ["t1"]
+    assert b.prompt["reason"] == reason and b.prompt["message"] == message and b.prompt["freeText"] is True
+    b.client.on_press = lambda: b.client.screens.__setitem__(slice(None), [ASK_CURSOR])
+    assert b.backend.answerText("a coder \U0001F469\u200D\U0001F4BB") is True  # an emoji sequence is fine
+    assert wait_for(b.app, lambda: b.client.sent == [("t1", "a coder \U0001F469\u200D\U0001F4BB")])
 
 
 def test_a_text_answer_to_a_dialog_with_no_text_entry_is_refused(bench):
@@ -544,7 +719,7 @@ def test_an_agent_that_is_not_blocked_any_more_is_gone(bench, agents):
     b.backend.apply(agents)
     assert b.state() == "gone" and b.prompt["options"] == [] and b.prompt["question"] == ""
     assert b.prompt["label"] == "rev" and b.prompt["message"] == "This agent is not blocked now."
-    assert b.backend._prompt is None
+    assert b.backend._session.prompt is None
     reads = len(b.client.reads)
     b.now[0] += 10
     b.backend.apply(list(BLOCKED))
@@ -559,7 +734,7 @@ def test_an_unreadable_screen_goes_away_when_the_agent_is_not_blocked(bench):
     b.open(state="unreadable")
     assert b.prompt["screen"] == MARKER
     b.backend.apply(list(WORKING))
-    assert b.state() == "gone" and b.prompt["screen"] == "" and b.backend._screen_text == ""
+    assert b.state() == "gone" and b.prompt["screen"] == "" and b.backend._session._screen_text == ""
 
 
 # ----- refresh while open -----
@@ -571,7 +746,7 @@ def test_the_ticks_read_the_screen_again_at_most_two_times_each_second(bench):
     for step in range(40):  # four seconds of ticks, ten each second
         b.now[0] += 0.1
         b.backend.apply(list(BLOCKED))
-        assert wait_for(b.app, lambda: not b.backend._prompt_busy)
+        assert wait_for(b.app, lambda: not b.backend._session.busy)
     assert 6 <= len(b.client.reads) - 1 <= 8
     assert b.states == ["loading", "ready"]  # the same screen: no change for QML
 
@@ -587,12 +762,12 @@ def test_a_tick_shows_a_new_question_and_a_screen_that_is_not_known(bench):
     b.client.screens = [Screen(MARKER, True)]
     b.now[0] += 1
     b.backend.apply(list(BLOCKED))
-    assert b.until("unreadable") and b.prompt["screen"] == MARKER and b.backend._prompt is None
+    assert b.until("unreadable") and b.prompt["screen"] == MARKER and b.backend._session.prompt is None
     b.client.screens = [BASH]
     b.now[0] += 1
     b.backend.apply(list(BLOCKED))
     assert b.until("ready")
-    assert b.prompt["screen"] == "" and b.backend._screen_text == ""  # the text is dropped with the state
+    assert b.prompt["screen"] == "" and b.backend._session._screen_text == ""  # the text is dropped with the state
 
 
 def test_a_status_change_of_the_agent_reads_the_screen_again(bench):
@@ -609,7 +784,7 @@ def test_a_tick_read_that_fails_keeps_the_prompt(bench):
     b.client.screens = [Failure("timeout")]
     b.now[0] += 1
     b.backend.apply(list(BLOCKED))
-    assert wait_for(b.app, lambda: len(b.client.reads) == 2 and not b.backend._prompt_busy)
+    assert wait_for(b.app, lambda: len(b.client.reads) == 2 and not b.backend._session.busy)
     assert b.state() == "ready" and b.prompt["title"] == "Bash command"
 
 
@@ -646,7 +821,7 @@ def test_close_drops_the_prompt_and_the_screen_text(bench):
     b.client.screens = [Screen(MARKER, True)]
     b.open(state="unreadable")
     b.backend.closePrompt()
-    assert b.prompt == CLOSED and b.backend._prompt is None and b.backend._screen_text == ""
+    assert b.prompt == CLOSED and b.backend._session.prompt is None and b.backend._session._screen_text == ""
     assert MARKER not in repr(vars(b.backend))
     b.backend.closePrompt()  # a second close changes nothing
     assert b.states == ["loading", "unreadable", "closed"]
@@ -679,9 +854,9 @@ def test_a_close_while_the_reads_after_a_key_run_stops_them(bench):
     b = bench(follow=(30.0, 30.0))
     b.open()
     b.backend.answer("1")
-    assert wait_for(b.app, lambda: b.client.pressed and not b.backend._prompt_busy)
+    assert wait_for(b.app, lambda: b.client.pressed and not b.backend._session.busy)
     b.backend.closePrompt()
-    assert b.prompt == CLOSED and not b.backend._follow_timer.isActive()
+    assert b.prompt == CLOSED and not b.backend._session._follow_timer.isActive()
 
 
 def test_an_error_in_the_worker_is_failed_and_logs_the_class_only(bench, caplog):
@@ -792,7 +967,7 @@ def test_no_text_of_a_screen_is_in_a_log_record_or_in_a_file(app, tmp_path, capl
             assert MARKER in repr(b.prompt)  # the test is real: the text is in the value for QML
             b.now[0] += 1
             b.backend.apply(list(b.backend._agents))
-            assert wait_for(app, lambda: not b.backend._prompt_busy)
+            assert wait_for(app, lambda: not b.backend._session.busy)
             b.backend.answer(MARKER)
             b.backend.answerText(MARKER + "\n")
             if place < 4:

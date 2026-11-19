@@ -10,9 +10,10 @@ from pathlib import Path
 from PySide6.QtCore import Property, QObject, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QFontDatabase
 
-from . import layouts, prompts
-from .client import Failure, HerdrError, HerdrOffline, valid_address, valid_text
+from . import layouts
+from .client import HerdrError, HerdrOffline, valid_address
 from .icons import TEXT_COLOR
+from .prompt_session import FOLLOW, PROMPT_FLOOR, SENT_SECONDS, PromptSession
 from .settings import (
     COLOR_ROLES, DEFAULT_LOOK, DEFAULT_PATH, FONT_SCALE_LIMITS, FONT_SCALE_STEP, OPACITY_LIMITS, OPACITY_STEP,
     SCALE_LIMITS, SCALE_STEP, clamped, load_layout, load_look, load_position, save_layout, save_look, save_position,
@@ -32,49 +33,10 @@ FLOOR = 0.25
 AFTER = (0.15, 0.25, 0.15, 0.45, 0.6)
 # Milliseconds from the last change of the custom look to its save: a slider that moves writes the file one time.
 LOOK_SAVE_DELAY = 400
-# The answer to a blocked agent. While a prompt is open, the screen of its agent is read again at each tick of the
-# list and at each change of the agent, with at least this many seconds from one read to the next.
-PROMPT_FLOOR = 0.5
-# After a key: the waits before the reads that look for the result, in seconds. Then the reads end (5 seconds).
-FOLLOW = (0.2, 0.3, 0.5, 0.5, 0.75, 0.75, 1.0, 1.0)
-# After the key that opens a text entry: this many reads, with this wait before each, look for the cursor in it.
-ENTRY_TRIES = 4
-ENTRY_WAIT = 0.25
-# Seconds that the state "sent" shows before the prompt closes.
-SENT_SECONDS = 1.0
-# The terminals that herdr-core does not have any more, as the reason codes of the client.
-GONE_CODES = frozenset({"herdr_not_found", "herdr_finished", "unknown_terminal"})
-# What the answer window says. Fixed text: never a part of a screen or of the output of a command.
-PROMPT_MESSAGES = {
-    "not_blocked": "This agent is not blocked now.",
-    "no_reader": "Bellwether cannot read the questions of this program.",
-    "not_recognised": "Bellwether does not know this screen.",
-    "incomplete": "Herdr could not read the whole screen.",
-    "changed": "The question changed. Nothing was sent.",
-    "no_effect": "The answer was sent, but the question did not change.",
-    "text_not_ready": "The text entry did not open. Nothing was typed.",
-    "sent": "Sent.",
-    "error": "Bellwether had an error. Open the agent in Herdr.",
-    "read": "The screen of the agent could not be read.",
-    "send": "The answer was not sent, or Herdr did not confirm it.",
-}
-
-
 def _natural(address: str) -> list:
     """A sort key that reads the numbers of an address as numbers: "t2" is before "t10"."""
     # The split gives text and numbers in turn: the parts at the odd places are the numbers.
     return [int(part) if place % 2 else part for place, part in enumerate(re.split(r"(\d+)", address))]
-
-
-class _Outcome:
-    """What one worker of the prompt found. `kind`: "screen" (a read), "pressed" (the answer went to the terminal),
-    "changed" (the screen was different: nothing went), or "failed" with a reason code."""
-
-    def __init__(self, kind: str, screen=None, prompt=None, reason: str = "") -> None:
-        self.kind = kind
-        self.screen = screen  # a Screen, or None
-        self.prompt = prompt  # the Prompt of the screen, or None
-        self.reason = reason
 
 
 class Backend(QObject):
@@ -92,14 +54,13 @@ class Backend(QObject):
     promptChanged = Signal()
     _snapshot = Signal(object)
     _focusDone = Signal()
-    _promptDone = Signal(int, object)
 
     def __init__(self, client, interval: float = 1.0, settings_path: Path = DEFAULT_PATH, icons=None,
                  events=None, slow_interval: float = SLOW_INTERVAL, floor: float = FLOOR,
                  after: tuple[float, ...] = AFTER, clock=time.monotonic, wait=None,
                  skins: dict[str, Path] | None = None, families: list[str] | None = None,
                  prompt_floor: float = PROMPT_FLOOR, follow: tuple[float, ...] = FOLLOW,
-                 sent_seconds: float = SENT_SECONDS) -> None:
+                 pending_follow: tuple[float, ...] | None = None, sent_seconds: float = SENT_SECONDS) -> None:
         super().__init__()
         self._clock = clock
         # wait(event, seconds) waits for a threading.Event and returns True when it is set. Tests give
@@ -156,29 +117,10 @@ class Backend(QObject):
         self._snapshot.connect(self.apply)
         self._focusDone.connect(self._set_opening)
         # ----- the answer to one blocked agent (see "the prompt" below) -----
-        self._prompt_floor = prompt_floor
-        self._follow = follow
-        self._prompt_state = "closed"
-        self._prompt_agent: Agent | None = None  # the agent of the open prompt, as it was in the list
-        self._prompt: prompts.Prompt | None = None  # the question that shows
-        self._screen_text = ""  # the screen, only while the state is "unreadable"
-        self._prompt_reason = ""
-        self._prompt_changed = False  # the last answer did not go: the screen was different
-        self._prompt_serial = 0  # the number of the last worker: the result of an older one is ignored
-        self._prompt_busy = False  # the last worker runs
-        self._prompt_cancel = threading.Event()  # set when the prompt of a worker closes: it then presses nothing
-        self._prompt_read_at = float("-inf")  # the clock at the start of the last read
-        self._follow_left: tuple[float, ...] = ()  # the waits of the reads after a key that are not done yet
-        self._answered = ""  # the fingerprint of the question that the last key answered
-        self._followed = False  # the key of the answer went to the terminal: the reads after it run
-        self._follow_timer = QTimer(self)
-        self._follow_timer.setSingleShot(True)
-        self._follow_timer.timeout.connect(self._follow_read)
-        self._sent_timer = QTimer(self)
-        self._sent_timer.setSingleShot(True)
-        self._sent_timer.setInterval(int(sent_seconds * 1000))
-        self._sent_timer.timeout.connect(self.closePrompt)
-        self._promptDone.connect(self._prompt_done)
+        self._session = PromptSession(
+            client, self._agent, self._blocked_agent, lambda agent: self._rows([agent])[0], self._wake.set,
+            self._stop.is_set, clock, self._wait, prompt_floor, follow, pending_follow, sent_seconds, parent=self)
+        self._session.changed.connect(self.promptChanged)
 
     # ----- properties for QML -----
 
@@ -429,7 +371,7 @@ class Backend(QObject):
             self._online = online
             self._agents = agents
             self.changed.emit()
-        self._prompt_tick()
+        self._session.tick()
 
     def fetch(self) -> list[Agent] | None:
         """Read one snapshot. Runs on the worker thread."""
@@ -524,309 +466,47 @@ class Backend(QObject):
             self._focusDone.emit()
             self._wake.set()
 
-    # ----- the prompt: the answer to one blocked agent -----
-    # States: closed -> loading -> ready | unreadable | gone | failed; ready -> answering -> sent -> closed, or
-    # -> ready (a new question, or the screen was different and nothing went), unreadable, gone, failed.
-    # The UI thread has the state. A worker thread does one job (a read, or a read and an answer) and gives its
-    # result through _promptDone. The text of a screen is in memory only: no log line and no file has it.
+    # ----- the prompt: the answer to one blocked agent (bellwether/prompt_session.py) -----
+    # The names for QML stay on the backend: the property `prompt`, the flag `answering`, the signal `promptChanged`,
+    # and the slots openPrompt, answer, answerText and closePrompt.
 
     @Property("QVariantMap", notify=promptChanged)
     def prompt(self) -> dict:
         """The open prompt for the answer window. Every key is always there."""
-        agent, prompt, state = self._prompt_agent, self._prompt, self._prompt_state
-        row = self._rows([agent])[0] if agent else {}
-        reason = self._prompt_reason
-        if state == "gone":
-            message = PROMPT_MESSAGES["not_blocked"]
-        elif state == "sent":
-            message = PROMPT_MESSAGES["sent"]
-        elif state == "failed":
-            message = PROMPT_MESSAGES.get(reason) or PROMPT_MESSAGES["send" if reason.startswith(("press", "send"))
-                                                                     else "read"]
-        else:
-            message = PROMPT_MESSAGES.get(reason, "")
-        return {
-            "state": state,
-            "key": agent.key if agent else "",
-            "label": row.get("label", ""),
-            "program": agent.app if agent else "",
-            "icon": row.get("icon", ""),
-            "address": agent.key if agent else "",
-            "kind": prompt.kind if prompt else "",
-            "title": prompt.title if prompt else "",
-            "subtitle": prompt.subtitle if prompt else "",
-            "question": prompt.question if prompt else "",
-            "detail": list(prompt.detail) if prompt else [],
-            "cut": prompt.cut if prompt else False,
-            "options": [{"key": o.key, "label": o.label, "description": o.description, "kind": o.kind}
-                        for o in prompt.options] if prompt else [],
-            "cursor": prompt.cursor if prompt else "",
-            "freeText": bool(prompt and prompt.text_key),
-            "screen": self._screen_text if state == "unreadable" else "",
-            "reason": reason,
-            "message": message,
-            "changed": self._prompt_changed,
-        }
+        return self._session.value()
 
     @Property(bool, notify=promptChanged)
     def answering(self) -> bool:
-        """An answer is on its way: a second one is ignored."""
-        return self._prompt_state == "answering"
+        """An answer is on its way, or may still arrive: a second one is ignored."""
+        return self._session.answering
+
+    def _agent(self, key: str) -> Agent | None:
+        return next((a for a in self._agents if a.key == key), None)
 
     def _blocked_agent(self, key: str) -> Agent | None:
         """The agent of the list with this key, when Herdr is there and the agent is blocked."""
-        agent = next((a for a in self._agents if a.key == key), None)
+        agent = self._agent(key)
         return agent if self._online and agent is not None and agent.status == "blocked" else None
-
-    def _set_prompt(self, state: str, reason: str = "", prompt=None, screen_text: str = "", changed: bool = False,
-                    keep_agent: bool = True) -> None:
-        """Set the state of the prompt. What the new state does not show is dropped: the question, the screen."""
-        before = (self._prompt_state, self._prompt, self._screen_text, self._prompt_reason, self._prompt_changed,
-                  self._prompt_agent)
-        self._prompt_state, self._prompt_reason, self._prompt_changed = state, reason, changed
-        self._prompt = prompt
-        self._screen_text = screen_text if state == "unreadable" else ""
-        if not keep_agent:
-            self._prompt_agent = None
-        if state != "answering":
-            self._follow_timer.stop()
-            self._follow_left = ()
-            self._followed = False
-        if state != "sent":
-            self._sent_timer.stop()
-        after = (self._prompt_state, self._prompt, self._screen_text, self._prompt_reason, self._prompt_changed,
-                 self._prompt_agent)
-        if after != before:  # also the same question with the cursor on a different option
-            if state != before[0] or reason != before[3]:
-                log.info("prompt terminal=%s app=%s state=%s reason=%s", self._prompt_agent.key if self._prompt_agent
-                         else "-", self._prompt_agent.app if self._prompt_agent else "-", state, reason or "-")
-            self.promptChanged.emit()
-
-    def _end_workers(self) -> None:
-        """No worker that runs now changes the prompt or presses a key after this."""
-        self._prompt_cancel.set()
-        self._prompt_cancel = threading.Event()
-        self._prompt_serial += 1
-        self._prompt_busy = False
 
     @Slot(str)
     def openPrompt(self, key: str) -> None:
         """Open the prompt of the agent row with this key. A key that is not in the list does nothing."""
-        agent = next((a for a in self._agents if a.key == key), None)
-        if agent is None or self._stop.is_set() or self._prompt_state == "answering":
-            return  # An answer that is on its way ends first.
-        self._end_workers()
-        self._prompt_agent = agent
-        if self._blocked_agent(key) is None or not valid_address(key):
-            self._set_prompt("gone", "not_blocked")
-            return
-        self._set_prompt("loading")
-        self._work(self._job_read)
+        self._session.open(key)
 
     @Slot()
     def closePrompt(self) -> None:
-        """Close the prompt and drop the question and the screen text. A key that is not pressed yet is not pressed."""
-        self._end_workers()
-        self._set_prompt("closed", keep_agent=False)
+        """Close the prompt and drop the question and the screen text."""
+        self._session.close()
 
     @Slot(str, result=bool)
     def answer(self, key: str) -> bool:
-        """Press the key of one option of the shown prompt. True: the answer started. False: it is refused (no
-        prompt is ready, an answer is on its way, or the prompt has no such option)."""
-        prompt = self._prompt
-        option = prompt.option(key) if prompt and self._prompt_state == "ready" else None
-        if option is None or option.kind == prompts.TEXT:
-            return False
-        self._start_answer(self._job_answer, prompt, key)
-        return True
+        """Press the key of one option of the shown prompt. True: the answer started. False: it is refused."""
+        return self._session.answer(key)
 
     @Slot(str, result=bool)
     def answerText(self, text: str) -> bool:
         """Answer the shown prompt with a text, when it has a text entry. True: the answer started."""
-        prompt = self._prompt
-        if prompt is None or self._prompt_state != "ready" or not prompt.text_key or not valid_text(text):
-            return False
-        self._start_answer(self._job_text, prompt, text)
-        return True
-
-    def _start_answer(self, job, prompt, value: str) -> None:
-        self._end_workers()  # a read of a tick that runs now is not needed: the answer reads again
-        self._answered = prompt.fingerprint
-        self._set_prompt("answering", prompt=prompt)
-        self._work(job, prompt, value)
-
-    def _work(self, job, *args) -> None:
-        """Start one worker. The result of a worker that started before it is ignored."""
-        self._prompt_serial += 1
-        self._prompt_busy = True
-        self._prompt_read_at = self._clock()
-        agent = self._prompt_agent
-        threading.Thread(target=self._prompt_work, name="herdr-prompt", daemon=True,
-                         args=(self._prompt_serial, self._prompt_cancel, job, agent, *args)).start()
-
-    def _prompt_work(self, serial: int, cancel: threading.Event, job, agent: Agent, *args) -> None:
-        try:
-            outcome = job(cancel, agent, *args)
-        except Exception as exc:  # The class name only: the text of an error can hold a screen.
-            log.warning("prompt failed terminal=%s error=%s", agent.key, type(exc).__name__)
-            outcome = _Outcome("failed", reason="error")
-        self._promptDone.emit(serial, outcome)
-
-    # ----- the jobs: they run on the worker thread and do not touch the state -----
-
-    def _read(self, agent: Agent) -> _Outcome:
-        screen = self._client.read_screen(agent.key)
-        if isinstance(screen, Failure):
-            return _Outcome("failed", reason=f"read_{screen.code}" if screen.code not in GONE_CODES else screen.code)
-        return _Outcome("screen", screen, prompts.parse(agent.app, screen.text, screen.complete))
-
-    def _job_read(self, cancel: threading.Event, agent: Agent) -> _Outcome:
-        return self._read(agent)
-
-    def _same(self, cancel: threading.Event, agent: Agent, shown) -> _Outcome | None:
-        """Read the screen again. None: it has the shown question, and the prompt is still open."""
-        found = self._read(agent)
-        if found.kind == "failed":
-            return found
-        if found.prompt is None or found.prompt.fingerprint != shown.fingerprint:
-            log.info("answer terminal=%s app=%s result=changed", agent.key, agent.app)
-            return _Outcome("changed", found.screen, found.prompt)
-        return _Outcome("failed", reason="closed") if cancel.is_set() else None
-
-    def _job_answer(self, cancel: threading.Event, agent: Agent, shown, key: str) -> _Outcome:
-        different = self._same(cancel, agent, shown)
-        if different is not None:
-            return different
-        failure = self._client.press(agent.key, [key])
-        log.info("answer terminal=%s app=%s key=%s result=%s", agent.key, agent.app, key,
-                 failure.code if failure else "pressed")
-        return _Outcome("failed", reason=f"press_{failure.code}") if failure else _Outcome("pressed")
-
-    def _job_text(self, cancel: threading.Event, agent: Agent, shown, text: str) -> _Outcome:
-        different = self._same(cancel, agent, shown)
-        if different is not None:
-            return different
-        key = shown.text_key
-        failure = self._client.press(agent.key, [key])
-        log.info("answer terminal=%s app=%s key=%s result=%s", agent.key, agent.app, key,
-                 failure.code if failure else "pressed")
-        if failure:
-            return _Outcome("failed", reason=f"press_{failure.code}")
-        # The key moves the cursor to the text entry. The text goes only when the screen shows the cursor there.
-        for _ in range(ENTRY_TRIES):
-            if self._wait(cancel, ENTRY_WAIT):
-                return _Outcome("failed", reason="closed")
-            found = self._read(agent)
-            if found.kind == "failed":
-                return found
-            if found.prompt is None or found.prompt.fingerprint != shown.fingerprint:
-                log.info("answer terminal=%s app=%s result=changed", agent.key, agent.app)
-                return _Outcome("changed", found.screen, found.prompt)
-            if found.prompt.cursor == key:
-                break
-        else:
-            return _Outcome("failed", reason="text_not_ready")
-        failure = self._client.send_text(agent.key, text)
-        log.info("answer terminal=%s app=%s text result=%s", agent.key, agent.app, failure.code if failure else "sent")
-        return _Outcome("failed", reason=f"send_{failure.code}") if failure else _Outcome("pressed")
-
-    # ----- the results: on the UI thread -----
-
-    def _show_screen(self, outcome: _Outcome, changed: bool = False) -> None:
-        """Show what a read found: the question, or the screen that no reader knows."""
-        agent = self._prompt_agent
-        reason = "changed" if changed else ""
-        if outcome.prompt is not None:
-            self._set_prompt("ready", reason, prompt=outcome.prompt, changed=changed)
-            return
-        if not changed:
-            reason = ("no_reader" if not prompts.has_reader(agent.app) else
-                      "not_recognised" if outcome.screen.complete else "incomplete")
-        self._set_prompt("unreadable", reason, screen_text=outcome.screen.text, changed=changed)
-
-    @Slot(int, object)
-    def _prompt_done(self, serial: int, outcome: _Outcome) -> None:
-        if serial != self._prompt_serial:
-            return  # A worker of a prompt that is closed, or an older read.
-        self._prompt_busy = False
-        state, agent = self._prompt_state, self._prompt_agent
-        if state not in ("loading", "ready", "unreadable", "answering") or agent is None:
-            return
-        blocked = self._blocked_agent(agent.key) is not None
-        if outcome.kind == "failed" and outcome.reason in GONE_CODES:
-            self._set_prompt("gone", outcome.reason)
-        elif state == "answering":
-            self._answer_done(outcome, blocked)
-        elif outcome.kind == "failed":
-            if state == "loading":
-                self._set_prompt("failed", outcome.reason)
-            # A later read that fails changes nothing: the next tick reads again.
-        elif outcome.kind == "screen":
-            # The note "the question changed" stays while the same thing shows.
-            same = (outcome.prompt.fingerprint == self._prompt.fingerprint
-                    if outcome.prompt is not None and self._prompt is not None
-                    else outcome.prompt is None and state == "unreadable")
-            self._show_screen(outcome, changed=self._prompt_changed and same)
-
-    def _answer_done(self, outcome: _Outcome, blocked: bool) -> None:
-        """The result of a worker while an answer is on its way: of the answer, or of a read after its key."""
-        if not self._followed:
-            if outcome.kind == "pressed":
-                # Read the list now, and the screen after a moment: the agent goes on, or it asks its next question.
-                self._followed = True
-                self._follow_left = self._follow
-                self._wake.set()
-                self._follow_next("no_effect")
-            elif outcome.kind == "failed":
-                self._set_prompt("failed", outcome.reason)
-            elif blocked:
-                self._show_screen(outcome, changed=True)  # Nothing went: the screen was different. Say it.
-            else:
-                self._set_prompt("gone", "not_blocked")
-        elif not blocked:
-            self._sent()
-        elif outcome.prompt is not None and outcome.prompt.fingerprint != self._answered:
-            self._show_screen(outcome)  # the next question
-        elif outcome.kind == "screen" and outcome.prompt is None and not self._follow_left:
-            self._show_screen(outcome)  # the reads ended with a screen that no reader knows
-        else:
-            self._follow_next("no_effect" if outcome.kind == "screen" else outcome.reason)
-
-    def _follow_next(self, reason: str) -> None:
-        """Wait, then read the screen again. With no read left, the answer ends as failed with `reason`."""
-        if not self._follow_left:
-            self._set_prompt("failed", reason)
-            return
-        seconds, self._follow_left = self._follow_left[0], self._follow_left[1:]
-        self._follow_timer.start(int(seconds * 1000))
-
-    @Slot()
-    def _follow_read(self) -> None:
-        if self._prompt_state == "answering" and not self._prompt_busy:
-            self._work(self._job_read)
-
-    def _sent(self) -> None:
-        self._set_prompt("sent")
-        self._sent_timer.start()
-
-    def _prompt_tick(self) -> None:
-        """After each read of the list: the prompt of an agent that is not blocked now is gone (after a key: it is
-        sent). The screen of a prompt that shows is read again, with a pause from one read to the next."""
-        state, agent = self._prompt_state, self._prompt_agent
-        if agent is None or state not in ("loading", "ready", "unreadable", "answering"):
-            return
-        current = self._blocked_agent(agent.key)
-        if state == "answering":
-            if current is None and self._followed:
-                self._end_workers()  # a read after the key that runs now has nothing more to say
-                self._sent()
-            return
-        if current is None:
-            self._end_workers()
-            self._set_prompt("gone", "not_blocked")
-            return
-        if state != "loading" and not self._prompt_busy and self._clock() - self._prompt_read_at >= self._prompt_floor:
-            self._work(self._job_read)
+        return self._session.answer_text(text)
 
     @Slot(int, int)
     @Slot(int, int, str)
