@@ -16,6 +16,7 @@ through a signal. The text of a screen is in memory only: no log line and no fil
 from __future__ import annotations
 
 import logging
+import re
 import threading
 
 from PySide6.QtCore import QObject, QTimer, Signal, Slot
@@ -83,6 +84,19 @@ MESSAGES = {
     "read": "The screen of the agent could not be read.",
     "send": "The answer was not sent, or Herdr did not confirm it.",
 }
+# The labels of the options that approve only the one thing that the dialog shows, without the key hint that Codex
+# puts at the end ("(y)"). Every other option that approves does more than that ("always allow …", "don't ask again
+# …", "auto mode", "accept edits … for this session"): the window gives it a different look (`wide`), so that a
+# person does not give a standing permission by habit. A label that is not known here is taken as wide.
+PLAIN_ACCEPTS = frozenset({"Yes", "Yes, proceed", "Yes, manually approve edits", "Submit answers"})
+_KEY_HINT = re.compile(r" \([a-z+]{1,12}\)$")
+
+
+def wide(option) -> bool:
+    """The option approves more than the one thing that the dialog shows."""
+    return option.effect == prompts.ACCEPT and _KEY_HINT.sub("", option.label) not in PLAIN_ACCEPTS
+
+
 # The notes that stay while the same question (or the same unknown screen) shows: a tick does not take them away.
 NOTES = frozenset({"changed", "text_key_only", "held", "text_empty", "text_long", "text_lines", "text_control"})
 
@@ -170,6 +184,7 @@ class PromptSession(QObject):
         self._held = False  # herdr-core held the last key
         self._unconfirmed = ""  # the reason code of a key or a text that Herdr did not confirm, or ""
         self._marks: dict[str, Mark] = {}  # the terminals that an earlier answer may still reach
+        self._shown = 0  # the number of the question that shows: one more for each different question
         self._follow_timer = QTimer(self)
         self._follow_timer.setSingleShot(True)
         self._follow_timer.timeout.connect(self._follow_read)
@@ -215,7 +230,8 @@ class PromptSession(QObject):
             "cut": prompt.cut if prompt else False,
             "blind": prompt.blind if prompt else False,
             "options": [{"key": o.key, "label": o.label, "description": o.description, "kind": o.kind,
-                         "effect": o.effect, "allowed": ready and prompt.allows(o.key)} for o in prompt.options]
+                         "effect": o.effect, "wide": wide(o), "allowed": ready and prompt.allows(o.key)}
+                        for o in prompt.options]
             if prompt else [],
             "cursor": prompt.cursor if prompt else "",
             "freeText": bool(ready and prompt and prompt.text_key and prompt.allows(prompt.text_key)),
@@ -223,6 +239,9 @@ class PromptSession(QObject):
             "reason": reason,
             "message": message,
             "changed": reason == "changed",
+            # A number that is different for each question that shows (0: none shows). The window uses it for its
+            # short guard after a new question; the fingerprint itself stays in the engine.
+            "shown": self._shown if prompt else 0,
         }
 
     @property
@@ -235,6 +254,8 @@ class PromptSession(QObject):
         before = (self.state, self.prompt, self._screen_text, self._reason, self.agent)
         self.state, self._reason = state, reason
         self._note = reason if reason in NOTES else ""
+        if prompt is not None and (self.prompt is None or self.prompt.fingerprint != prompt.fingerprint):
+            self._shown += 1
         self.prompt = prompt
         self._screen_text = screen_text if state == "unreadable" else ""
         if not keep_agent:

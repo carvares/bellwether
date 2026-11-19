@@ -143,7 +143,7 @@ def labels(prompt: dict) -> list[str]:
 CLOSED = {
     "state": "closed", "key": "", "label": "", "program": "", "icon": "", "address": "", "kind": "", "title": "",
     "subtitle": "", "question": "", "detail": [], "cut": False, "options": [], "cursor": "", "freeText": False,
-    "screen": "", "reason": "", "message": "", "changed": False, "blind": False,
+    "screen": "", "reason": "", "message": "", "changed": False, "blind": False, "shown": 0,
 }
 
 
@@ -164,16 +164,18 @@ def test_open_reads_the_screen_off_the_ui_thread_and_shows_the_prompt(bench):
     assert b.until("ready")
     assert b.states == ["loading", "ready"] and b.client.reads == ["t1"]
     assert b.prompt == {
-        **CLOSED, "state": "ready", "key": "t1", "label": "rev", "program": "claude-code", "address": "t1",
+        **CLOSED, "state": "ready", "shown": 1, "key": "t1", "label": "rev", "program": "claude-code", "address": "t1",
         "kind": "permission", "title": "Bash command", "subtitle": "Create an empty test file",
         "question": "Do you want to proceed?", "detail": [" touch made-by-test.txt"], "cursor": "1",
         "options": [
-            {"key": "1", "label": "Yes", "description": "", "kind": "choice", "effect": "accept", "allowed": True},
+            {"key": "1", "label": "Yes", "description": "", "kind": "choice", "effect": "accept", "wide": False,
+             "allowed": True},
             {"key": "2", "label": "Yes, and always allow access to /home/dev/projects/sample-app from this project",
-             "description": "", "kind": "choice", "effect": "accept", "allowed": True},
+             "description": "", "kind": "choice", "effect": "accept", "wide": True, "allowed": True},
             {"key": "3", "label": "Yes, and switch to auto mode · auto mode handles these prompts for you",
-             "description": "", "kind": "choice", "effect": "accept", "allowed": True},
-            {"key": "4", "label": "No", "description": "", "kind": "choice", "effect": "decline", "allowed": True}],
+             "description": "", "kind": "choice", "effect": "accept", "wide": True, "allowed": True},
+            {"key": "4", "label": "No", "description": "", "kind": "choice", "effect": "decline", "wide": False,
+             "allowed": True}],
     }
 
 
@@ -183,12 +185,14 @@ def test_a_question_has_descriptions_kinds_and_the_free_text_flag(bench):
     b.open()
     assert b.prompt["freeText"] is True and b.prompt["kind"] == "question" and b.prompt["title"] == "Drink"
     assert b.prompt["options"] == [
-        {"key": "1", "label": "Tea", "description": "Choose tea.", "kind": "choice", "effect": "other", "allowed": True},
-        {"key": "2", "label": "Coffee", "description": "Choose coffee.", "kind": "choice", "effect": "other",
+        {"key": "1", "label": "Tea", "description": "Choose tea.", "kind": "choice", "effect": "other", "wide": False,
          "allowed": True},
-        {"key": "3", "label": "Type something.", "description": "", "kind": "text", "effect": "other", "allowed": True},
+        {"key": "2", "label": "Coffee", "description": "Choose coffee.", "kind": "choice", "effect": "other",
+         "wide": False, "allowed": True},
+        {"key": "3", "label": "Type something.", "description": "", "kind": "text", "effect": "other", "wide": False,
+         "allowed": True},
         {"key": "4", "label": "Chat about this", "description": "", "kind": "other", "effect": "decline",
-         "allowed": True}]
+         "wide": False, "allowed": True}]
 
 
 def test_the_prompt_has_the_icon_of_the_row(app, tmp_path):
@@ -1470,3 +1474,50 @@ def test_the_end_of_a_key_command_after_the_stop_does_nothing(bench):
     late(None)
     b.app.processEvents()
     assert b.state() == "closed" and b.client.pressed == [("t1", ["1"])]
+
+
+# ----- for the answer window: the options that approve more than one thing, and the number of the question -----
+
+def test_only_the_plain_yes_is_not_wide_in_every_dialog_of_the_fixtures():
+    from bellwether.prompt_session import wide
+    seen = {}
+    for path in sorted(FIXTURES.glob("*.txt")) + sorted((FIXTURES / "narrow").glob("*.txt")):
+        prompt = parse("codex" if "codex" in path.name else "claude-code", path.read_text())
+        for option in (prompt.options if prompt else ()):
+            if option.effect == ACCEPT:
+                seen[option.label] = wide(option)
+    plain = {label for label, is_wide in seen.items() if not is_wide}
+    assert plain == {"Yes", "Yes, proceed (y)", "Yes, manually approve edits", "Submit answers"}
+    wide_ones = {label for label, is_wide in seen.items() if is_wide}
+    assert len(wide_ones) >= 6 and all(label.startswith("Yes, ") for label in wide_ones)
+    for word in ("always allow", "auto mode", "don't ask again", "accept edits", "allow all edits"):
+        assert any(word in label for label in wide_ones) or word == "allow all edits", word
+    assert wide(Option("1", "Yes, and something new", effect=ACCEPT)) is True  # not known: wide
+    assert wide(Option("1", "No", effect=DECLINE)) is False and wide(Option("1", "Yes", effect="other")) is False
+
+
+def test_the_map_says_which_options_are_wide(bench):
+    b = bench()
+    b.open()
+    assert [(o["label"][:8], o["wide"]) for o in b.prompt["options"]] == [
+        ("Yes", False), ("Yes, and", True), ("Yes, and", True), ("No", False)]
+
+
+def test_each_different_question_has_its_own_number_and_the_same_question_keeps_it(bench):
+    b = bench()
+    assert b.prompt["shown"] == 0
+    b.open()
+    first = b.prompt["shown"]
+    assert first > 0
+    b.backend.apply(list(BLOCKED))  # a tick reads the same question again
+    b.now[0] += 1.0
+    b.backend.apply(list(BLOCKED))
+    assert b.until("ready") and b.prompt["shown"] == first
+    b.client.on_press = lambda: b.client.screens.__setitem__(slice(None), [CREATE])
+    assert b.backend.answer("1") is True
+    assert b.prompt["shown"] == first  # while the answer is on its way the question is the same
+    assert b.until("ready") and b.prompt["title"] == "Create file" and b.prompt["shown"] == first + 1
+    b.backend.closePrompt()
+    assert b.prompt["shown"] == 0
+    b.open()
+    assert b.prompt["shown"] == first + 2
