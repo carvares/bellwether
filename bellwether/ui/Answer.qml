@@ -61,15 +61,37 @@ Window {
         return null
     }
 
-    // ----- the guard after a new question -----
+    // ----- the guards after a new question -----
 
     // A question that takes the place of an other one in the open window could get the second click of a person
-    // who clicks two times on the same place. So for `guardMs` after a question shows, no option and no key
-    // answers. The engine has its own rules; this one is of the window.
+    // who clicks two times on the same place, or the next keys of a person who types. So each time a question shows,
+    // and each time the window comes into a state where it can answer (also the same question again):
+    // - the pointer answers only after `guardMs` with no press of a key or of the pointer (400 ms: the double-click
+    //   time of KDE, so the second click of a double click never answers);
+    // - a number key answers only after `keyQuietMs` with no key press (1000 ms: a person who types presses a key
+    //   each 0.1 to 0.3 s, so 1 s with no key means that the typing has stopped);
+    // - when the keyboard was in the text field, or a key was pressed in the `lockMs` (2 s) before the question
+    //   changed, the number keys stay off for that question until a click in the window or the Tab key.
+    // Each press of a key or of the pointer starts a guard that is not over again. The engine has its own rules;
+    // these are of the window.
     property int guardMs: 400
-    property bool armed: true
-    // The question took the place of an other question of the same agent while the window was open.
+    property int keyQuietMs: 1000
+    property int lockMs: 2000
+    readonly property bool answerable: phase === "ready" && hasQuestion
+    // The number of the question for which each guard is over (0: none).
+    property int pointerPassed: 0
+    property int keysPassed: 0
+    readonly property bool armed: answerable && shown !== 0 && pointerPassed === shown
+    readonly property bool keysArmed: armed && keysPassed === shown
+    property bool digitsLocked: false
+    property real lastKeyAt: 0
+    // The keyboard is in the text field; when it left it.
+    property bool inField: false
+    property real fieldLeftAt: 0
+    // The question took the place of an other question of the same agent while the window was open, and how many
+    // questions showed since the window opened.
     property bool fresh: false
+    property int questionCount: 0
     // The text field of the question (it is inside the list of the options), or null.
     property Item entryItem: null
     // The program hides and shows the window to bring it to the front: that is not a close.
@@ -80,27 +102,83 @@ Window {
     onShownChanged: {
         if (shown === 0)
             return
+        var now = Date.now()
         fresh = lastShown !== 0 && lastKey === prompt.key
+        questionCount = fresh ? questionCount + 1 : 1
+        // The field lost the keyboard in the same moment: the change of the question took it.
+        var typing = inField || now - fieldLeftAt < 250
+        digitsLocked = fresh && (typing || now - lastKeyAt < lockMs)
         lastShown = shown
         lastKey = prompt.key
-        armed = false
-        guardTimer.restart()
+        startGuard()
+        if (fresh)
+            changeFlash.restart()
         // Nothing of the question before stays: no text in the field, and no option has the keyboard.
         if (entryItem)
             entryItem.text = ""
         frame.forceActiveFocus()
     }
+    onAnswerableChanged: if (answerable) startGuard()
+    onArmedChanged: Qt.callLater(reportSeen)
+
+    function startGuard() {
+        pointerPassed = 0
+        keysPassed = 0
+        pointerTimer.restart()
+        keyTimer.restart()
+    }
+    // A press of a key (`isKey`) or of the pointer: a guard that is not over starts again. A press of the pointer
+    // in the window also turns the number keys on again.
+    function notePress(isKey) {
+        if (isKey)
+            lastKeyAt = Date.now()
+        else
+            digitsLocked = false
+        if (pointerPassed !== shown)
+            pointerTimer.restart()
+        if (keysPassed !== shown)
+            keyTimer.restart()
+    }
     Timer {
-        id: guardTimer
+        id: pointerTimer
         interval: answer.guardMs
-        onTriggered: answer.armed = true
+        onTriggered: answer.pointerPassed = backend.prompt.shown
+    }
+    Timer {
+        id: keyTimer
+        interval: answer.keyQuietMs
+        onTriggered: answer.keysPassed = backend.prompt.shown
+    }
+
+    // ----- the end of the detail -----
+
+    // An option that approves needs the end of the detail seen (the engine refuses it before). The window tells the
+    // engine when the last line of the detail was in view after the guard of the question: at once when the whole
+    // detail is in view, or when the person scrolls to its end. The values are read from the backend, not from the
+    // bindings of the window, so that a report never goes for a question that the window does not show yet.
+    readonly property Item detailView: detailLoader.item
+    readonly property bool detailAtEnd: detailView === null || detailView.atEnd
+    readonly property bool hasAccept: {
+        for (var i = 0; i < prompt.options.length; i++)
+            if (prompt.options[i].effect === "accept")
+                return true
+        return false
+    }
+    // Later, not inside the change: the report changes the prompt, and the prompt the place of the detail.
+    onDetailAtEndChanged: Qt.callLater(reportSeen)
+    function reportSeen() {
+        var current = backend.prompt
+        if (current.state === "ready" && current.shown !== 0 && current.shown === pointerPassed && !current.seen
+                && detailAtEnd)
+            backend.detailSeen(current.shown)
     }
 
     // ----- actions: each is one act of the person -----
 
-    // Press one option. Only while the prompt is ready, the option is allowed, and the guard has passed.
-    function choose(key) {
-        if (phase !== "ready" || !armed)
+    // Press one option (`how`: "pointer" for a click or the key of an option that has the keyboard, "digit" for a
+    // number key). Only while the prompt is ready, the option is allowed, and the guards have passed.
+    function choose(key, how) {
+        if (phase !== "ready" || !armed || (how === "digit" && (!keysArmed || digitsLocked)))
             return false
         for (var i = 0; i < prompt.options.length; i++) {
             var option = prompt.options[i]
@@ -127,11 +205,13 @@ Window {
 
     // A digit presses the option with that key. The digit of the text option puts the keyboard in the field.
     function digit(key) {
+        if (!keysArmed || digitsLocked)
+            return
         if (textOption && textOption.key === key && prompt.freeText && entryItem) {
             entryItem.take()
             return
         }
-        choose(key)
+        choose(key, "digit")
     }
 
     title: "Bellwether — Answer"
@@ -154,10 +234,17 @@ Window {
             lastShown = 0
             lastKey = ""
             fresh = false
+            digitsLocked = false
             backend.closePrompt()
         }
     }
-    onActiveFocusItemChanged: scroller.reveal(activeFocusItem)
+    onActiveFocusItemChanged: {
+        var field = activeFocusItem !== null && activeFocusItem.isAnswerField === true
+        if (inField && !field)
+            fieldLeftAt = Date.now()
+        inField = field
+        scroller.reveal(activeFocusItem)
+    }
 
     Connections {
         target: backend
@@ -188,14 +275,22 @@ Window {
         border.width: answer.theme.frameWidth
         border.color: answer.theme.frameColor
         focus: true
-        // The keys of the window, when the text field does not have the keyboard (it takes its keys itself).
+        // The keys of the window, when the text field does not have the keyboard (it takes its keys itself). Each key
+        // counts for the guards. Tab turns the number keys on again (and moves the keyboard on).
         Keys.onPressed: (event) => {
+            answer.notePress(true)
             var plain = (event.modifiers & ~Qt.KeypadModifier) === Qt.NoModifier
-            if (plain && event.key >= Qt.Key_1 && event.key <= Qt.Key_9) {
+            var view = detailLoader.item ? detailLoader.item : screenLoader.item
+            if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+                answer.digitsLocked = false
+            } else if (plain && event.key >= Qt.Key_1 && event.key <= Qt.Key_9) {
                 answer.digit(String(event.key - Qt.Key_0))
                 event.accepted = true
-            } else if (plain && detailLoader.item && (event.key === Qt.Key_PageDown || event.key === Qt.Key_PageUp)) {
-                detailLoader.item.scrollBy(event.key === Qt.Key_PageDown ? 120 : -120)
+            } else if (plain && view && (event.key === Qt.Key_PageDown || event.key === Qt.Key_PageUp)) {
+                view.page(event.key === Qt.Key_PageDown)
+                event.accepted = true
+            } else if (plain && view && (event.key === Qt.Key_End || event.key === Qt.Key_Home)) {
+                view.toEnd(event.key === Qt.Key_End)
                 event.accepted = true
             }
         }
@@ -328,12 +423,39 @@ Window {
                 width: scroller.width
                 height: column.height + 2 * 16
 
+                // A short light over the content when a new question takes the place of the one before.
+                Rectangle {
+                    readonly property bool isChangeFlash: true
+                    anchors.fill: parent
+                    color: answer.theme.accentColor
+                    opacity: 0
+                    SequentialAnimation on opacity {
+                        id: changeFlash
+                        running: false
+                        NumberAnimation { to: 0.22; duration: 120 }
+                        NumberAnimation { to: 0; duration: 1100; easing.type: Easing.InQuad }
+                    }
+                }
+
                 Column {
                     id: column
                     x: answer.pad
                     y: 16
                     width: parent.width - 2 * answer.pad
                     spacing: 10
+                    // The height of everything in the column but the detail, with the spaces: the detail takes
+                    // what the screen leaves free.
+                    readonly property real restHeight: {
+                        var total = 0, shown = 0
+                        for (var i = 0; i < children.length; i++) {
+                            var child = children[i]
+                            if (child === detailLoader || !child.visible)
+                                continue
+                            total += child.height
+                            shown += 1
+                        }
+                        return total + spacing * shown
+                    }
 
                     // The note of the engine: why nothing can be sent, what was not sent, what to check.
                     Rectangle {
@@ -377,19 +499,31 @@ Window {
                         font { family: answer.theme.fontFamily; pixelSize: answer.theme.bodySize }
                     }
 
-                    // A question that took the place of the one before it.
+                    // A question that took the place of the one before it, with its number since the window opened.
                     Text {
                         readonly property bool isNewMark: true
                         visible: answer.fresh && answer.hasQuestion
                         width: parent.width
                         textFormat: Text.PlainText
-                        text: "New question"
+                        text: "New question (no. " + answer.questionCount + ")"
                         color: answer.theme.accentColor
                         font {
                             family: answer.theme.fontFamily; pixelSize: answer.theme.smallSize; weight: Font.DemiBold
                             letterSpacing: answer.theme.letterSpacing
                             capitalization: answer.theme.uppercaseTitles ? Font.AllUppercase : Font.MixedCase
                         }
+                    }
+
+                    // The number keys are off for a question that came while the person typed.
+                    Text {
+                        readonly property bool isDigitsOff: true
+                        visible: answer.digitsLocked && answer.answerable
+                        width: parent.width
+                        textFormat: Text.PlainText
+                        wrapMode: Text.Wrap
+                        text: "New question — click or press Tab to use the number keys"
+                        color: answer.warnColor
+                        font { family: answer.theme.fontFamily; pixelSize: answer.theme.smallSize + 1; weight: Font.DemiBold }
                     }
 
                     // The title of the dialog and the lines below it (a file name, the purpose of a command).
@@ -431,8 +565,9 @@ Window {
                             theme: answer.theme
                             lines: answer.prompt.detail
                             name: "What the agent asks for"
-                            // The view takes what the screen leaves free, and at least five lines.
-                            maxHeight: Math.max(110, Math.min(300, answer.roomHeight - 80 - 420))
+                            // The view takes all the height that the screen leaves free, and at least five lines.
+                            maxHeight: Math.max(110, answer.roomHeight - 80 - answer.headerHeight - answer.footerHeight
+                                                     - 32 - column.restHeight)
                         }
                     }
                     Text {
@@ -444,6 +579,19 @@ Window {
                         text: "This is only the lower part: the dialog is taller than the screen of the agent."
                         color: answer.warnColor
                         font { family: answer.theme.fontFamily; pixelSize: answer.theme.smallSize + 1 }
+                    }
+
+                    // The options that approve are off until the last line of the detail was in view.
+                    Text {
+                        readonly property bool isSeenNote: true
+                        visible: answer.answerable && !answer.blind && answer.hasAccept && !answer.prompt.seen
+                                 && answer.detailView !== null && answer.detailView.scrolls
+                        width: parent.width
+                        textFormat: Text.PlainText
+                        wrapMode: Text.Wrap
+                        text: "Scroll to the end of the text above to approve."
+                        color: answer.warnColor
+                        font { family: answer.theme.fontFamily; pixelSize: answer.theme.smallSize + 1; weight: Font.DemiBold }
                     }
 
                     Text {
@@ -495,7 +643,7 @@ Window {
                                     choice: slot.choice
                                     warnColor: answer.warnColor
                                     enabled: !slot.isField && slot.choice.allowed && slot.choice.kind !== "text"
-                                    onActivated: answer.choose(slot.choice.key)
+                                    onActivated: answer.choose(slot.choice.key, "pointer")
                                 }
                                 // The text option: the field, "Send", and below them the message of a text that
                                 // was refused.
@@ -518,6 +666,7 @@ Window {
                                             choice: slot.choice
                                             width: parent.width - send.width - 8
                                             onAccepted: answer.sendText()
+                                            onTyped: answer.notePress(true)
                                         }
                                         Controls.LookButton {
                                             id: send
@@ -620,6 +769,16 @@ Window {
                 text: "Open in Herdr"
                 spoken: "Open the agent in Herdr"
                 onActivated: answer.openInHerdr()
+            }
+        }
+
+        // Every press of the pointer in the window counts for the guards; the press then goes on to what is below.
+        MouseArea {
+            anchors.fill: parent
+            z: 10
+            onPressed: (mouse) => {
+                answer.notePress(false)
+                mouse.accepted = false
             }
         }
 

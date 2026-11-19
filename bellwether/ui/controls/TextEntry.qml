@@ -13,6 +13,8 @@ Rectangle {
     readonly property bool isTextEntry: true
     readonly property Item input: field
     signal accepted()
+    // A key was pressed in the field (the window counts it for its guard after a new question).
+    signal typed()
 
     function take() {
         field.forceActiveFocus()
@@ -74,5 +76,9 @@ Rectangle {
         Accessible.role: Accessible.EditableText
         Accessible.name: "Option " + entry.choice.key + ", " + entry.choice.label + ", text"
         onAccepted: entry.accepted()
+        Keys.onPressed: (event) => {
+            entry.typed()
+            event.accepted = false  // the key goes on to the field
+        }
     }
 }

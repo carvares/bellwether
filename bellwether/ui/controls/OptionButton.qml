@@ -1,7 +1,8 @@
 // One option of a question in the answer window: its key in a cap, its label, and its description below. The look
 // tells what the option does, with a shape and not only a colour: an option that approves this one thing has a full
 // cap in the accent; an option that approves more than this one thing ("always allow", "don't ask again", "auto
-// mode") has an empty cap and a bar in the warning colour, so that it never looks like the plain "Yes"; an option
+// mode") has an empty cap, a bar in the warning colour and the words "Standing permission" (the same words for each
+// such option, so that the look never rests on a colour alone), so that it never looks like the plain "Yes"; an option
 // that declines, and an answer to a question, have an empty cap in the colour of the text. Enter, Return and Space
 // press the option that has the keyboard. Only theme tokens.
 import QtQuick
@@ -25,6 +26,8 @@ Rectangle {
                                 : look === "decline" ? theme.dimColor : theme.textColor
     readonly property bool hovered: pointer.containsMouse && enabled
     readonly property string effectWord: accepts ? "approves" : declines ? "declines" : "answers"
+    // The words of an option that approves more than this one thing.
+    readonly property string wideWords: "Standing permission"
     signal activated()
 
     implicitHeight: Math.max(theme.fit(36), texts.height + 14)
@@ -36,7 +39,8 @@ Rectangle {
     opacity: enabled ? 1 : 0.4
     activeFocusOnTab: true
     Accessible.role: Accessible.Button
-    Accessible.name: "Option " + key + ", " + choice.label + ", " + effectWord + (enabled ? "" : ", not available")
+    Accessible.name: "Option " + key + ", " + choice.label + ", " + effectWord
+                     + (wide ? ", " + wideWords.toLowerCase() : "") + (enabled ? "" : ", not available")
     Accessible.focusable: enabled
     Accessible.onPressAction: if (enabled) activated()
     Keys.onReturnPressed: activated()
@@ -92,6 +96,19 @@ Rectangle {
             text: button.choice.label
             color: button.look === "decline" ? button.theme.dimColor : button.theme.textColor
             font { family: button.theme.fontFamily; pixelSize: button.theme.bodySize; weight: Font.Medium }
+        }
+        Text {
+            readonly property bool isWideTag: true
+            visible: button.wide
+            width: parent.width
+            textFormat: Text.PlainText
+            text: button.wideWords
+            color: button.warnColor
+            font {
+                family: button.theme.fontFamily; pixelSize: button.theme.smallSize; weight: Font.DemiBold
+                letterSpacing: button.theme.letterSpacing
+                capitalization: button.theme.uppercaseTitles ? Font.AllUppercase : Font.MixedCase
+            }
         }
         Text {
             readonly property bool isOptionDescription: true
