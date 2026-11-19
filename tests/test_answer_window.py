@@ -5,8 +5,8 @@ import re
 import threading
 
 import pytest
-from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, qInstallMessageHandler
-from PySide6.QtGui import QColor, QGuiApplication, QWheelEvent, QWindow
+from PySide6.QtCore import Q_ARG, QCoreApplication, QEvent, QMetaObject, QPoint, QPointF, QRectF, Qt, qInstallMessageHandler
+from PySide6.QtGui import QAccessible, QColor, QGuiApplication, QKeyEvent, QWheelEvent, QWindow
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtTest import QTest
 
@@ -1374,3 +1374,330 @@ def test_the_next_question_after_an_own_answer_that_failed_first_is_locked(app, 
     key(app, window, Qt.Key.Key_3)
     assert d.client.pressed == [("t1", ["4"])]
     assert_locked(d, window)
+
+
+# ----- fix round 3: a press from before a change never moves the new detail; the top in view, then the end -----
+
+def flickable(view):
+    return next(i for i in walk(view) if i.inherits("QQuickFlickable"))
+
+
+def repeat(app, window, which, times):
+    """A key held down: the presses that the keyboard repeats (no release between them)."""
+    for _ in range(times):
+        QCoreApplication.sendEvent(window, QKeyEvent(QEvent.Type.KeyPress, which, NONE, "", True))
+        settle(app)
+
+
+def test_a_thumb_drag_held_across_a_change_moves_nothing_of_the_new_command_and_it_is_not_seen(app, desk):
+    """I1 of re-review 2: the person drags the thumb of a long command to its end; a different long command comes
+    during the drag; the drag goes on. Only a new press of the thumb moves the new command."""
+    d = desk(screens=[LONG])
+    window = d.answer_for("t1")
+    d.arm()
+    view = d.one("isDetail")
+    start = centre(next(i for i in walk(view) if i.property("isScrollThumb")))
+    QTest.mousePress(window, LEFT, NONE, start)
+    for dy in range(0, 400, 20):
+        QTest.mouseMove(window, start + QPoint(0, dy))
+        settle(app)
+    assert view.property("atEnd") is True and d.backend.prompt["seen"] is True
+    tick_to(d, OTHER_START)
+    view = d.one("isDetail")
+    assert view.property("above") == 0
+    for dy in (401, 200, 420):  # the same press goes on
+        QTest.mouseMove(window, start + QPoint(0, dy))
+        settle(app)
+        assert view.property("above") == 0 and view.property("atEnd") is False, dy
+    pause(app, 700)
+    QTest.mouseRelease(window, LEFT, NONE, start + QPoint(0, 420))
+    settle(app)
+    assert d.backend.prompt["seen"] is False and view.property("above") == 0
+    start = centre(next(i for i in walk(view) if i.property("isScrollThumb")))
+    QTest.mousePress(window, LEFT, NONE, start)  # a new press: it moves the view
+    for dy in range(0, 400, 20):
+        QTest.mouseMove(window, start + QPoint(0, dy))
+        settle(app)
+    QTest.mouseRelease(window, LEFT, NONE, start + QPoint(0, 380))
+    assert view.property("atEnd") is True and wait_for(app, lambda: d.backend.prompt["seen"] is True)
+
+
+def test_a_text_drag_held_across_a_change_moves_nothing_of_the_new_command_and_it_is_not_seen(app, desk):
+    d = desk(screens=[LONG])
+    window = d.answer_for("t1")
+    d.arm()
+    view = d.one("isDetail")
+    flick = flickable(view)
+    start = centre(flick)
+    QTest.mousePress(window, LEFT, NONE, start)
+    for dy in range(0, 160, 20):
+        QTest.mouseMove(window, start - QPoint(0, dy))
+        settle(app)
+    assert flick.property("contentY") > 50
+    tick_to(d, OTHER_START)
+    view = d.one("isDetail")
+    assert flick.property("contentY") == 0
+    for dy in range(160, 400, 20):  # the same press goes on, far
+        QTest.mouseMove(window, start - QPoint(0, dy))
+        settle(app)
+        assert flick.property("contentY") == 0 and view.property("above") == 0, dy
+    pause(app, 700)
+    QTest.mouseRelease(window, LEFT, NONE, start - QPoint(0, 380))
+    settle(app)
+    assert d.backend.prompt["seen"] is False and flick.property("contentY") == 0
+
+
+def test_a_flick_that_moves_by_itself_across_a_change_stops_at_the_top_of_the_new_command(app, desk):
+    d = desk(screens=[LONG])
+    window = d.answer_for("t1")
+    d.arm()
+    flick = flickable(d.one("isDetail"))
+    QMetaObject.invokeMethod(flick, "flick", Q_ARG(float, 0.0), Q_ARG(float, -2500.0))  # a fast flick, let go
+    app.processEvents()
+    assert flick.property("flicking") is True
+    tick_to(d, OTHER_START)
+    pause(app, 800)
+    assert flick.property("contentY") == 0 and flick.property("flicking") is False
+    assert d.backend.prompt["seen"] is False
+
+
+def test_a_scroll_key_held_across_a_change_moves_nothing_of_the_new_command_until_a_new_press(app, desk):
+    d = desk(screens=[LONG])
+    window = d.answer_for("t1")
+    d.arm()
+    view = d.one("isDetail")
+    QTest.keyPress(window, Qt.Key.Key_PageDown)
+    settle(app)
+    repeat(app, window, Qt.Key.Key_PageDown, 30)
+    assert view.property("atEnd") is True and wait_for(app, lambda: d.backend.prompt["seen"] is True)
+    tick_to(d, OTHER_START)
+    view = d.one("isDetail")
+    repeat(app, window, Qt.Key.Key_PageDown, 30)  # still held
+    QTest.keyRelease(window, Qt.Key.Key_PageDown)
+    settle(app)
+    assert view.property("above") == 0
+    pause(app, 700)
+    assert d.backend.prompt["seen"] is False
+    key(app, window, Qt.Key.Key_PageDown)  # a new press moves it
+    assert view.property("above") > 0
+
+
+def test_the_end_counts_only_after_the_top_of_the_new_detail_was_in_view_after_the_guard(app, desk):
+    """The rule that closes the class of I1: the window reports the end of a detail seen only when, after the reset of
+    that question, it observed first the top of the detail in view and then its end. The top counts when it is in
+    view at a moment the pointer guard is over (at the end of the guard, or at a later move): a move of the view while
+    the guard runs (a press that started before the change, or a program) is not the person's own scroll."""
+    d = desk(screens=[LONG])
+    window = d.answer_for("t1")
+    d.arm()
+    window.setProperty("guardMs", 1500)
+    tick_to(d, OTHER_START)
+    view = d.one("isDetail")
+    flick = flickable(view)
+    flick.setProperty("contentY", flick.property("contentHeight") - flick.height())  # off the top, by code, at once
+    settle(app)
+    assert window.property("armed") is False and view.property("atEnd") is True
+    window.setProperty("guardMs", 400)
+    d.arm()
+    pause(app, 300)
+    assert d.backend.prompt["seen"] is False  # the end was in view after the guard, the top never
+    key(app, window, Qt.Key.Key_Tab)  # the detail takes the keyboard: its arrow keys move it by 40 px
+    key(app, window, Qt.Key.Key_Up)
+    assert view.property("atTop") is False
+    key(app, window, Qt.Key.Key_End)
+    assert not wait_for(app, lambda: d.backend.prompt["seen"] is True, 0.3)
+    key(app, window, Qt.Key.Key_Home)  # the top in view, after the guard
+    assert d.backend.prompt["seen"] is False
+    key(app, window, Qt.Key.Key_End)  # then the end
+    assert wait_for(app, lambda: d.backend.prompt["seen"] is True)
+
+
+def test_on_a_low_window_the_top_of_the_detail_must_be_in_the_window_before_its_end_counts(app, desk):
+    d = desk(screens=[EDIT])
+    d.open_group("blocked")
+    click(app, d.root, d.control("t1"))
+    d.window.setProperty("roomHeight", 300)
+    assert wait_for(app, lambda: d.state() == "ready" and not d.backend._session.busy)
+    d.window.setProperty("guardMs", 1500)
+    tick_to(d, CREATE)
+    scroller = d.one("isScroller")
+    scroller.setProperty("contentY", scroller.property("contentHeight") - scroller.height())  # by code, at once
+    settle(app)
+    assert d.window.property("detailAtEnd") is True and d.window.property("detailAtTop") is False
+    d.arm()
+    pause(app, 300)
+    assert d.backend.prompt["seen"] is False
+    scroller.setProperty("contentY", 0)  # the person scrolls the window up: the top of the detail is in view
+    settle(app)
+    assert d.window.property("detailAtTop") is True and d.backend.prompt["seen"] is False
+    scroller.setProperty("contentY", scroller.property("contentHeight") - scroller.height())  # then down to the end
+    assert wait_for(app, lambda: d.backend.prompt["seen"] is True)
+
+
+# ----- fix round 3: the lines of the number-key rule that only rarer transitions reach -----
+
+def screen_reader_press(item):
+    """The "Press" action of a screen reader on an item: no pointer press, no key."""
+    actions = QAccessible.queryAccessibleInterface(item).actionInterface()
+    assert actions is not None and "Press" in actions.actionNames()
+    actions.doAction("Press")
+
+
+def test_a_lock_is_sticky_through_an_answer_by_a_screen_reader(app, desk):
+    """m1 (mutant K1): a screen reader presses "No" while the keys are locked (no pointer press, no key in the
+    window); the next question of that answer stays locked."""
+    d = desk()
+    window = d.answer_for("t1")
+    d.arm()
+    tick_to(d, CREATE)
+    d.arm()
+    assert_locked(d, window)
+    d.client.on_press = lambda: d.client.screens.__setitem__(slice(None), [EDIT])
+    screen_reader_press(d.button("3"))
+    assert wait_for(app, lambda: d.backend.prompt["title"] == "Edit file" and d.state() == "ready")
+    d.client.on_press = None
+    settle(app)
+    assert d.client.pressed == [("t1", ["3"])]
+    d.arm()
+    key(app, window, Qt.Key.Key_3)
+    pause(app, 300)
+    assert d.client.pressed == [("t1", ["3"])]
+    assert_locked(d, window)
+
+
+def test_after_the_next_question_of_an_own_answer_a_second_change_with_no_key_locks(app, desk):
+    """m1 (mutant K2): the change of the next question uses up the answer; a tick then brings a third question with
+    no key between: it is locked."""
+    d = desk()
+    window = d.answer_for("t1")
+    d.arm()
+    d.client.on_press = lambda: d.client.screens.__setitem__(slice(None), [EDIT])
+    key(app, window, Qt.Key.Key_4)
+    assert wait_for(app, lambda: d.backend.prompt["title"] == "Edit file" and d.state() == "ready")
+    d.client.on_press = None
+    settle(app)
+    assert window.property("digitsLocked") is False and window.property("answerSent") is False
+    tick_to(d, CREATE)
+    d.arm()
+    key(app, window, Qt.Key.Key_3)
+    pause(app, 300)
+    assert d.client.pressed == [("t1", ["4"])]
+    assert_locked(d, window)
+
+
+def test_on_a_low_window_a_change_puts_the_content_of_the_window_back_at_its_top(app, desk):
+    """m1 (mutant K3): the person scrolls the window content to its end (the detail is seen); a new question comes:
+    the content of the window goes back to its top, and the new detail is not seen."""
+    d = desk(screens=[EDIT])
+    d.open_group("blocked")
+    click(app, d.root, d.control("t1"))
+    d.window.setProperty("roomHeight", 300)
+    assert wait_for(app, lambda: d.state() == "ready" and not d.backend._session.busy)
+    d.arm()
+    scroller = d.one("isScroller")
+    scroller.setProperty("contentY", scroller.property("contentHeight") - scroller.height())
+    assert wait_for(app, lambda: d.backend.prompt["seen"] is True)
+    assert scroller.property("contentY") > 0
+    tick_to(d, CREATE)
+    assert scroller.property("contentY") == 0
+    d.arm()
+    pause(app, 300)
+    assert d.backend.prompt["seen"] is False
+
+
+def test_a_next_question_with_a_note_other_than_held_is_locked(app, desk):
+    """m2 (mutant K4): a text answer; the key of the text option went, then the screen showed an other question
+    (the text did not go: reason "text_key_only"). That is not the plain next question of the answer: locked."""
+    d = desk(screens=[ASK])
+    window = d.answer_for("t1")
+    to_the_field(d, app, window)
+    d.client.on_press = lambda: d.client.screens.__setitem__(slice(None), [EDIT])
+    key(app, window, Qt.Key.Key_Return)
+    assert wait_for(app, lambda: d.backend.prompt["title"] == "Edit file" and d.state() == "ready")
+    d.client.on_press = None
+    settle(app)
+    assert d.backend.prompt["reason"] == "text_key_only" and d.client.sent == []
+    d.arm()
+    key(app, window, Qt.Key.Key_3)
+    pause(app, 300)
+    assert d.client.pressed == [("t1", ["3"])]
+    assert_locked(d, window)
+
+
+def edit_prompt():
+    from bellwether.prompts import parse
+    return parse("claude-code", EDIT.text)
+
+
+def test_a_new_question_that_shows_while_an_answer_is_on_its_way_is_locked(app, desk):
+    """m2 (mutant K5): the rule of the window counts a change as the next question only when the engine is "ready"
+    at the change. The engine of today shows a new question during an answer only as "pending" with the reason
+    "earlier" (which the reason check refuses too); this test sets the state of the engine itself, as an engine
+    that shows a new question while it is still "answering" would."""
+    d = desk()
+    window = d.answer_for("t1")
+    d.arm()
+    held_answer(d, app, window)
+    session = d.backend._session
+    session._end_workers()  # the result of the held key changes nothing now
+    session._set("answering", prompt=edit_prompt())
+    settle(app)
+    assert d.backend.prompt["shown"] == 2 and window.property("digitsLocked") is True
+    session._set("ready", prompt=session.prompt)  # the same question: no change
+    settle(app)
+    d.client.press_gate.set()
+    assert wait_for(app, lambda: not session._marks)
+    d.client.press_gate = None
+    d.arm()
+    key(app, window, Qt.Key.Key_3)
+    pause(app, 300)
+    assert d.client.pressed == [("t1", ["4"])]
+    assert_locked(d, window)
+
+
+def test_an_answer_that_ends_ready_on_the_same_question_does_not_unlock_a_later_change(app, desk):
+    """m2 (mutant K6): an answer ends with the same question ready again (no next question came of it); a tick then
+    brings a new question with no key between: it is locked. The engine of today ends such an answer as "failed";
+    this test sets the state of the engine itself."""
+    d = desk()
+    window = d.answer_for("t1")
+    d.arm()
+    held_answer(d, app, window)
+    session = d.backend._session
+    session._end_workers()
+    session._set("ready", prompt=session.prompt)  # the answered question, ready again
+    settle(app)
+    assert window.property("answerSent") is False
+    d.client.press_gate.set()
+    assert wait_for(app, lambda: not session._marks)
+    d.client.press_gate = None
+    d.client.on_press = None
+    tick_to(d, CREATE)
+    assert window.isActive()
+    d.arm()
+    key(app, window, Qt.Key.Key_3)
+    pause(app, 300)
+    assert d.client.pressed == [("t1", ["4"])]
+    assert_locked(d, window)
+
+
+def test_answer_on_an_other_agent_while_the_window_is_open_acts_as_an_open(app, desk):
+    """m3: the keys are locked on t1; the person clicks "Answer" of t7 in the panel. That is an open: the lock ends,
+    and both guards start."""
+    d = desk()
+    window = d.answer_for("t1")
+    d.arm()
+    tick_to(d, EDIT)
+    assert window.property("digitsLocked") is True
+    d.client.screens[:] = [CODEX]
+    click(app, d.root, d.control("t7"))
+    d.until("ready")
+    assert d.backend.prompt["key"] == "t7" and window.property("digitsLocked") is False
+    assert window.property("armed") is False and window.property("keysArmed") is False
+    assert not d.shows("isNewMark") and not d.shows("isDigitsOff")
+    key(app, window, Qt.Key.Key_3)  # in the guard: nothing
+    assert d.client.pressed == []
+    d.arm()
+    key(app, window, Qt.Key.Key_3)
+    d.until("failed", "sent", "ready")
+    assert d.client.pressed == [("t7", ["3"])]

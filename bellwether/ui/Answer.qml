@@ -118,10 +118,13 @@ Window {
         lastKey = prompt.key
         startGuard()
         // The new detail shows from its first line (else a new command could show at the end of the one before,
-        // and be seen to its end with no scroll), and the content from its top. Nothing is reported seen before
-        // the guard that starts here is over.
+        // and be seen to its end with no scroll), and the content from its top. A drag, a flick or a held key of
+        // before ends here. Nothing is reported seen before the guard that starts here is over, and only after the
+        // top of the new detail was in view (`topSeen`).
+        topSeen = 0
         if (detailView)
-            detailView.toEnd(false)
+            detailView.restart()
+        scroller.cancelFlick()
         scroller.contentY = 0
         if (fresh)
             changeFlash.restart()
@@ -178,10 +181,19 @@ Window {
     // ----- the end of the detail -----
 
     // An option that approves needs the end of the detail seen (the engine refuses it before). The window tells the
-    // engine when the last line of the detail was in view after the guard of the question: at once when the whole
-    // detail is in view, or when the person scrolls to its end. The values are read from the backend, not from the
-    // bindings of the window, so that a report never goes for a question that the window does not show yet.
+    // engine when it saw, for the question that shows, first the top of the detail in view and then its end, both
+    // at moments when the pointer guard of that question is over: at once when the whole detail is in view, or when
+    // the person scrolls to its end. A move of the view while the guard runs (a press of before the change, the
+    // program) is not a scroll of the person: a detail that is not at its top when the guard ends is not seen until
+    // the person scrolls back to its top. The values are read from the backend, not from the bindings of the window,
+    // so that a report never goes for a question that the window does not show yet.
     readonly property Item detailView: detailLoader.item
+    // The number of the question for which the top of the detail was in view after the guard (0: none yet).
+    property int topSeen: 0
+    // The first line of the detail is in its view, and the top of its view is in the window.
+    readonly property bool detailAtTop: detailView === null || (detailView.atTop
+        && column.y + detailLoader.y >= scroller.contentY - 1
+        && column.y + detailLoader.y < scroller.contentY + scroller.height)
     // The last line of the detail is in its view, and its view is in the window (the content of the window can
     // scroll too, on a low screen).
     readonly property bool detailAtEnd: detailView === null || (detailView.atEnd
@@ -200,10 +212,14 @@ Window {
                                         && !detailAtEnd
     // Later, not inside the change: the report changes the prompt, and the prompt the place of the detail.
     onDetailAtEndChanged: Qt.callLater(reportSeen)
+    onDetailAtTopChanged: Qt.callLater(reportSeen)
     function reportSeen() {
         var current = backend.prompt
-        if (current.state === "ready" && current.shown !== 0 && current.shown === pointerPassed && !current.seen
-                && detailAtEnd)
+        if (current.state !== "ready" || current.shown === 0 || current.shown !== pointerPassed || current.seen)
+            return
+        if (detailAtTop)
+            topSeen = current.shown
+        if (topSeen === current.shown && detailAtEnd)
             backend.detailSeen(current.shown)
     }
 
@@ -324,11 +340,9 @@ Window {
             } else if (plain && event.key >= Qt.Key_1 && event.key <= Qt.Key_9) {
                 answer.digit(String(event.key - Qt.Key_0))
                 event.accepted = true
-            } else if (plain && view && (event.key === Qt.Key_PageDown || event.key === Qt.Key_PageUp)) {
-                view.page(event.key === Qt.Key_PageDown)
-                event.accepted = true
-            } else if (plain && view && (event.key === Qt.Key_End || event.key === Qt.Key_Home)) {
-                view.toEnd(event.key === Qt.Key_End)
+            } else if (plain && view
+                       && [Qt.Key_PageDown, Qt.Key_PageUp, Qt.Key_End, Qt.Key_Home].indexOf(event.key) >= 0) {
+                view.keyScroll(event.key, event.isAutoRepeat)
                 event.accepted = true
             }
         }

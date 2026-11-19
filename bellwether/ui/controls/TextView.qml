@@ -3,9 +3,11 @@
 // left. A line that is wider than the view goes on in the next row (at a space, or inside a long word) with no new
 // mark: nothing of a command is hidden at the side, and a wrapped line cannot be taken for two lines. A view that is
 // taller than `maxHeight` scrolls: with the wheel, a drag of the text or of its thumb, and Page Up, Page Down, Home,
-// End and the arrows when it has the keyboard (or from the window: page, toEnd). While lines are out of view, a
-// note at its foot says how many ("12 more lines below"), in the colours of the text. `atEnd`: the last line is in
-// view. The text is plain text, never formatted. The view keeps no copy: it shows `lines` of its caller.
+// End and the arrows when it has the keyboard (or from the window: keyScroll). While lines are out of view, a
+// note at its foot says how many ("12 more lines below"), in the colours of the text. `atTop`: the first line is in
+// view; `atEnd`: the last line is in view. `restart()`: new lines show from their first one, and a press that began
+// before it moves nothing more. The text is plain text, never formatted. The view keeps no copy: it shows `lines` of
+// its caller.
 import QtQuick
 import "../skins/fonts.js" as Fonts
 
@@ -22,6 +24,12 @@ Rectangle {
     readonly property bool scrolls: rows.height + 16 > maxHeight + 0.5
     // The last line is in view (always, when the view does not scroll).
     readonly property bool atEnd: !scrolls || scroller.contentY >= scroller.contentHeight - scroller.height - 1
+    // The first line is in view (always, when the view does not scroll).
+    readonly property bool atTop: !scrolls || scroller.contentY <= 1
+    // The number of restarts, and the restart at the last key press that was not a repeat of a held key (the
+    // thumb keeps its own, of its press).
+    property int restarts: 0
+    property int keyRestarts: -1
     // The lines of the screen that are below or above the view, in whole or in part.
     readonly property int below: outside(true)
     readonly property int above: outside(false)
@@ -57,6 +65,34 @@ Rectangle {
     function page(down) {
         scrollBy(down ? scroller.height - 30 : 30 - scroller.height)
     }
+    // New lines: the view goes to its first line, and what moves it now ends: a flick, a drag of the text (the
+    // text loses the pointer), a drag of the thumb and a held key (their moves count only after a new press). Only
+    // a new press moves the view again.
+    function restart() {
+        restarts += 1
+        scroller.cancelFlick()
+        scroller.enabled = false
+        scroller.enabled = true
+        scroller.contentY = 0
+    }
+    // A key that moves the view: Home, End, Page Up, Page Down, the arrows (`repeat`: a repeat of a held key). True
+    // for these keys. The repeats of a key that was pressed before the last restart move nothing.
+    function keyScroll(key, repeat) {
+        var keys = [Qt.Key_Home, Qt.Key_End, Qt.Key_PageUp, Qt.Key_PageDown, Qt.Key_Up, Qt.Key_Down]
+        if (keys.indexOf(key) < 0)
+            return false
+        if (!repeat)
+            keyRestarts = restarts
+        else if (keyRestarts !== restarts)
+            return true
+        if (key === Qt.Key_End || key === Qt.Key_Home)
+            toEnd(key === Qt.Key_End)
+        else if (key === Qt.Key_PageDown || key === Qt.Key_PageUp)
+            page(key === Qt.Key_PageDown)
+        else
+            scrollBy(key === Qt.Key_Down ? 40 : -40)
+        return true
+    }
 
     implicitHeight: scrolls ? maxHeight : rows.height + 16
     height: implicitHeight
@@ -70,17 +106,8 @@ Rectangle {
     Accessible.name: name + (moreText !== "" ? ", " + moreText : "")
     Accessible.focusable: scrolls
     Keys.onPressed: (event) => {
-        if (event.modifiers !== Qt.NoModifier)
-            return
-        event.accepted = true
-        if (event.key === Qt.Key_End || event.key === Qt.Key_Home)
-            toEnd(event.key === Qt.Key_End)
-        else if (event.key === Qt.Key_PageDown || event.key === Qt.Key_PageUp)
-            page(event.key === Qt.Key_PageDown)
-        else if (event.key === Qt.Key_Down || event.key === Qt.Key_Up)
-            scrollBy(event.key === Qt.Key_Down ? 40 : -40)
-        else
-            event.accepted = false
+        if (event.modifiers === Qt.NoModifier)
+            event.accepted = keyScroll(event.key, event.isAutoRepeat)
     }
 
     Flickable {
@@ -156,11 +183,18 @@ Rectangle {
             id: thumbArea
             property real startY: 0
             property real startContentY: 0
+            property int pressRestarts: -1
             x: -6
             width: parent.width + 8
             height: parent.height
-            onPressed: (mouse) => { startY = mapToItem(view, 0, mouse.y).y; startContentY = scroller.contentY }
+            onPressed: (mouse) => {
+                startY = mapToItem(view, 0, mouse.y).y
+                startContentY = scroller.contentY
+                pressRestarts = view.restarts
+            }
             onPositionChanged: (mouse) => {
+                if (pressRestarts !== view.restarts)
+                    return  // a press of before the last restart
                 var moved = mapToItem(view, 0, mouse.y).y - startY
                 var scale = (scroller.contentHeight - scroller.height) / Math.max(1, thumb.room)
                 scroller.contentY = Math.max(0, Math.min(startContentY + moved * scale,
