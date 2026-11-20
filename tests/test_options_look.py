@@ -7,7 +7,7 @@ import time
 import pytest
 import shiboken6
 from PySide6.QtCore import QPoint, QPointF, Qt, qInstallMessageHandler
-from PySide6.QtGui import QColor, QWheelEvent
+from PySide6.QtGui import QAccessible, QColor, QWheelEvent
 from PySide6.QtQml import QQmlApplicationEngine, QQmlExpression, qmlContext
 from PySide6.QtTest import QTest
 
@@ -608,7 +608,7 @@ DEFAULT_ORDER = [
     "Blocked colour, default, #f28b82", "Done colour, default, #fdd663", "Working colour, default, #8ab4f8",
     "Idle colour, default, #81c995", "Background colour, default, #0b0e11, 94 percent opacity",
     "Text colour, default, #e3e9ee", "Frame colour, default, #2b333b", "Accent colour, default, #8ab4f8",
-    "Close", "Layout A, Refined list", "Layout B, Tiles"]
+    "Close", "Show model and session time", "Layout A, Refined list", "Layout B, Tiles"]
 
 
 def test_the_tab_key_reaches_every_control_in_the_order_of_the_window(app, shown):
@@ -638,7 +638,7 @@ def test_the_tab_key_reaches_every_control_with_every_value_custom_and_the_edito
         *colours,
         "Presets for the Background colour, #f28b82", "Background colour as hex, #282a36",
         "Background opacity, 90 percent", "Close the colour editor",
-        "Reset to defaults", "Close", "Layout A, Refined list", "Layout B, Tiles"]
+        "Reset to defaults", "Close", "Show model and session time", "Layout A, Refined list", "Layout B, Tiles"]
     find(window, "isFontButton").forceActiveFocus()
     key(app, window, Qt.Key.Key_Return)  # the list of fonts opens (and the editor closes): its field is the next stop
     assert focused(window) == "Filter the fonts, 4 of 4" and not editor(window).isVisible()
@@ -1107,7 +1107,7 @@ SIZE_FORMS = [rf"{SIZE}", rf"Math\.min\({SIZE},\s*{SIZE}\)", rf"\w+\.\w+\s*\?\s*
 
 
 def test_no_control_file_has_a_text_size_or_a_look_of_qt_quick_controls():
-    assert len(CONTROL_FILES) == 15
+    assert len(CONTROL_FILES) == 16
     for file in CONTROL_FILES:
         text = file.read_text()
         assert "QtQuick.Controls" not in text, file.name
@@ -1152,3 +1152,66 @@ def test_no_control_file_has_a_colour_of_its_own_except_the_presets_and_the_docu
         for red, green, blue in re.findall(r"Qt\.rgba\(([^,]+),([^,]+),([^,]+),", text):  # a token with an opacity
             assert [red.strip()[-2:], green.strip()[-2:], blue.strip()[-2:]] == [".r", ".g", ".b"], (file.name, red)
         assert not re.search(r"Qt\.(hsla|hsva|hsl|hsv)\(", text), file.name
+
+
+# ----- task 26: the setting "Show model and session time" -----
+
+def meta_row(window):
+    return find(window, "isCheckRow")
+
+
+def check_state(item):
+    """What a screen reader gets of a check row: (role, name, checked, the actions)."""
+    interface = QAccessible.queryAccessibleInterface(item)
+    return (interface.role(), interface.text(QAccessible.Text.Name), bool(interface.state().checked),
+            bool(interface.state().checkable), bool(interface.state().focusable))
+
+
+def test_the_setting_of_the_model_line_is_in_the_layout_section_and_a_click_changes_and_saves_it(app, shown, state_path):
+    window, backend, messages = shown
+    row = meta_row(window)
+    title = next(i for i in walk(window.contentItem()) if i.property("text") == "Layout" and i.isVisible())
+    assert row.isVisible() and row.property("name") == "showMeta" and row.property("checked") is True
+    middle = row.mapToScene(QPointF(0, row.height() / 2)).y()
+    assert abs(middle - title.mapToScene(QPointF(0, title.height() / 2)).y()) <= 1  # in the line of the title
+    assert check_state(row) == (QAccessible.Role.CheckBox, "Show model and session time", True, True, True)
+    assert text_findings(window) == []
+    click(app, window, row)
+    assert backend.showMeta is False and row.property("checked") is False
+    assert check_state(row)[2] is False and focused(window) == "Show model and session time"
+    assert json.loads(state_path.read_text()).get("showMeta") is False
+    for which in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter):  # the keys change it too
+        before = backend.showMeta
+        key(app, window, which)
+        assert backend.showMeta is (not before) and row.property("checked") is backend.showMeta
+    assert backend.showMeta is True and "showMeta" not in json.loads(state_path.read_text())
+    actions = QAccessible.queryAccessibleInterface(row).actionInterface()
+    assert "Toggle" in actions.actionNames()
+    actions.doAction("Toggle")  # a screen reader changes it
+    settle(app)
+    assert backend.showMeta is False and json.loads(state_path.read_text())["showMeta"] is False
+
+
+def test_the_setting_of_the_model_line_shows_the_saved_value_when_the_window_opens(app, shown):
+    window, backend, messages = shown
+    backend.setShowMeta(False)
+    settle(app)
+    assert meta_row(window).property("checked") is False and check_state(meta_row(window))[2] is False
+    backend.setShowMeta(True)
+    settle(app)
+    assert meta_row(window).property("checked") is True
+
+
+@pytest.mark.parametrize("letter", LETTERS)
+@pytest.mark.parametrize("scale", [0.8, 1.4])
+def test_the_setting_of_the_model_line_has_its_room_in_each_theme_and_text_size(app, shown, letter, scale):
+    window, backend, messages = shown
+    backend.setLayout(letter)
+    backend.setFontScale(scale)
+    settle(app)
+    row = meta_row(window)
+    assert text_findings(window) == []
+    right = row.mapToScene(QPointF(row.width(), 0)).x()
+    assert right <= window.width() - 20 and row.mapToScene(QPointF(0, 0)).y() >= 44  # below the header
+    box = next(i for i in walk(row) if i.property("isCheckBox"))
+    assert box.width() == box.height() >= 16

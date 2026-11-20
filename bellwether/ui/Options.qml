@@ -271,6 +271,19 @@ Window {
                     text: "Layout"
                 }
 
+                // In the line of the title, at the right: the second line of the agent rows of every layout (the
+                // model and the age of the session).
+                Controls.CheckRow {
+                    id: metaRow
+                    theme: options.theme
+                    x: options.pad + options.innerWidth - width
+                    y: layoutTitle.y + (layoutTitle.height - height) / 2
+                    name: "showMeta"
+                    label: "Show model and session time"
+                    checked: backend.showMeta
+                    onToggled: (value) => backend.setShowMeta(value)
+                }
+
                 Row {
                     id: cardsRow
                     x: options.pad
