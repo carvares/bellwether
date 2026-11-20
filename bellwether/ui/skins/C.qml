@@ -12,6 +12,8 @@ Item {
     // The rows grow with a larger font (theme.fit).
     readonly property int statusRowHeight: theme.fit(32)
     readonly property int agentRowHeight: theme.fit(28)
+    // What the model and session-time line adds to the height of an agent row.
+    readonly property int metaLineHeight: theme.fit(13)
     readonly property int inset: 14
     // The colour of the top status: the corner brackets and the tag in the header. Neutral with no agents
     // and when Herdr is offline.
@@ -259,6 +261,7 @@ Item {
                             panel: skin.panel
                             stateName: groupItem.group.state
                             rowHeight: skin.agentRowHeight
+                            metaHeight: skin.metaLineHeight
                             width: parent.width
 
                             delegate: AgentRow {
@@ -275,10 +278,14 @@ Item {
                                 // Tree lines from the status marker to each agent.
                                 Rectangle {
                                     x: 5; width: 1
-                                    height: agentRow.last ? parent.height / 2 : parent.height
+                                    // To the first line of the row: the label of the agent.
+                                    height: agentRow.last ? parent.height / 2 + agentRow.lineShift : parent.height
                                     color: theme.guideColor
                                 }
-                                Rectangle { x: 5; y: parent.height / 2; width: 9; height: 1; color: theme.guideColor }
+                                Rectangle {
+                                    x: 5; y: parent.height / 2 + agentRow.lineShift; width: 9; height: 1
+                                    color: theme.guideColor
+                                }
                                 // The icon that the Herdr app shows for the program of the agent.
                                 Image {
                                     id: programIcon
@@ -299,6 +306,7 @@ Item {
                                     width: Math.min(implicitWidth, detail.x - 8 - x
                                         - (address.visible ? address.width + 6 : 0))
                                     anchors.verticalCenter: parent.verticalCenter
+                                    anchors.verticalCenterOffset: agentRow.lineShift
                                     text: agentRow.modelData.label
                                     color: skin.ink
                                     elide: Text.ElideRight
@@ -334,6 +342,7 @@ Item {
                                     anchors.right: parent.right
                                     anchors.rightMargin: (agentList.longer ? 10 : 0) + answer.reserve
                                     anchors.verticalCenter: parent.verticalCenter
+                                    anchors.verticalCenterOffset: agentRow.lineShift
                                     width: Math.min(implicitWidth, answer.detailRoom(200, 120))
                                     elide: Text.ElideRight
                                     text: (agentRow.note === "failed" ? "! " : agentRow.note === "opening" ? "> " : "")
@@ -341,6 +350,16 @@ Item {
                                     color: agentRow.note === "failed" ? skin.panel.failedColor
                                         : agentRow.note === "opening" ? skin.panel.openingColor : skin.dim
                                     font { family: skin.mono; pixelSize: theme.detailSize }
+                                }
+                                // The model that the agent runs and the age of its session, below the label.
+                                MetaLine {
+                                    row: agentRow
+                                    tokens: theme
+                                    family: skin.mono
+                                    ink: skin.dim
+                                    x: label.x
+                                    anchors.top: label.bottom
+                                    width: (answer.visible ? answer.x - answer.gap : parent.width - (agentList.longer ? 10 : 0)) - x
                                 }
                             }
 

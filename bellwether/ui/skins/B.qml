@@ -11,6 +11,8 @@ Item {
 
     // The rows, the tiles and the header of the card grow with a larger font (theme.fit).
     readonly property int agentRowHeight: theme.fit(30)
+    // What the model and session-time line adds to the height of an agent row.
+    readonly property int metaLineHeight: theme.fit(14)
     readonly property int headHeight: theme.fit(30)
     readonly property int pad: 10
     readonly property int gap: 8
@@ -166,6 +168,7 @@ Item {
                     id: agentList
                     panel: skin.panel
                     rowHeight: skin.agentRowHeight
+                    metaHeight: skin.metaLineHeight
                     y: skin.headHeight
                     width: parent.width
 
@@ -203,6 +206,7 @@ Item {
                             x: programIcon.visible ? 36 : 12
                             width: Math.min(implicitWidth, detail.x - 10 - x - (address.visible ? address.width + 6 : 0))
                             anchors.verticalCenter: parent.verticalCenter
+                            anchors.verticalCenterOffset: agentRow.lineShift
                             text: agentRow.modelData.label
                             color: theme.textColor
                             elide: Text.ElideRight
@@ -236,6 +240,7 @@ Item {
                             anchors.right: parent.right
                             anchors.rightMargin: (agentList.longer ? 16 : 12) + answer.reserve
                             anchors.verticalCenter: parent.verticalCenter
+                            anchors.verticalCenterOffset: agentRow.lineShift
                             width: Math.min(implicitWidth, answer.detailRoom(180, 116))
                             elide: Text.ElideRight
                             text: agentRow.noteText
@@ -245,6 +250,14 @@ Item {
                                 family: skin.sans; pixelSize: theme.smallSize
                                 weight: agentRow.note !== "" ? Font.Medium : Font.Normal
                             }
+                        }
+                        // The model that the agent runs and the age of its session, below the label.
+                        MetaLine {
+                            row: agentRow
+                            tokens: theme
+                            x: label.x
+                            anchors.top: label.bottom
+                            width: (answer.visible ? answer.x - answer.gap : parent.width - (agentList.longer ? 16 : 12)) - x
                         }
                     }
 

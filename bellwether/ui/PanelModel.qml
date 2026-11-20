@@ -18,7 +18,8 @@ QtObject {
     //   alert      attention, and the state has an agent
     //   share      count / total, from 0 to 1 (0 with no agents)
     //   start      the sum of the shares of the states before this one: where its part of a ring or strip starts
-    //   agents     the rows of the group in their order: {key, icon, label, detail, address, spoken, canAnswer}
+    //   agents     the rows of the group in their order: {key, icon, label, detail, address, spoken, canAnswer,
+    //              model, sessionAge, metaText}
     // Offline, every count is 0.
     readonly property var groups: {
         var source = backend.groups
@@ -86,6 +87,14 @@ QtObject {
     readonly property color openColor: openGroup ? openGroup.color : stateColors["none"]
     // The rows of the open group. Empty with no open group.
     readonly property var agents: openGroup ? openGroup.agents : []
+    // A row of the open group has its second line (the model and the session time): the rows of the list are
+    // taller then (AgentList.pitch).
+    readonly property bool metaRows: {
+        for (var i = 0; i < agents.length; i++)
+            if (agents[i].metaText)
+                return true
+        return false
+    }
     // A list shows this many rows at the most. A longer group scrolls. rowsFor() is the one place that
     // applies it. Read-only: a skin cannot change it (a test makes a controller with a different cap through an
     // initial property). It is rowLimit (8), or less when 8 rows make the panel taller than its screen at a

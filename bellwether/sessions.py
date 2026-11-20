@@ -72,7 +72,7 @@ def short_model(raw: object) -> str:
         text = text[:window.start()]
     text = text.rsplit("/", 1)[-1]  # "anthropic/claude-…"
     text = re.sub(r"^(?:[a-z]{2,6}\.)?anthropic\.", "", text)  # "us.anthropic.claude-…"
-    text = re.sub(r"(?:-v\d+(?::\d+)?|@\d{8})$", "", text)  # "…-v1:0", "…@20250514"
+    text = re.sub(r"(?:-v\d+:\d+|@\d{8})$", "", text)  # "…-v1:0", "…@20250514"
     name = text
     found = _FAMILY.fullmatch(text.lower())
     if found:

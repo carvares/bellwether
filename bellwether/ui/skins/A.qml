@@ -12,6 +12,8 @@ Item {
     // The rows grow with a larger font (theme.fit).
     readonly property int statusRowHeight: theme.fit(38)
     readonly property int agentRowHeight: theme.fit(30)
+    // What the model and session-time line adds to the height of an agent row.
+    readonly property int metaLineHeight: theme.fit(14)
     readonly property string sans: theme.fontFamily
     // The frame has the colour of the top status. Neutral with no agents and when Herdr is offline.
     readonly property color signalColor: panel.quiet ? theme.frameColor : panel.topColor
@@ -138,6 +140,7 @@ Item {
                             panel: skin.panel
                             stateName: groupItem.group.state
                             rowHeight: skin.agentRowHeight
+                            metaHeight: skin.metaLineHeight
                             y: 3
                             width: parent.width
 
@@ -170,6 +173,7 @@ Item {
                                     x: programIcon.visible ? 50 : 26
                                     width: Math.min(implicitWidth, detail.x - 10 - x - (address.visible ? address.width + 6 : 0))
                                     anchors.verticalCenter: parent.verticalCenter
+                                    anchors.verticalCenterOffset: agentRow.lineShift
                                     text: agentRow.modelData.label
                                     color: theme.textColor
                                     elide: Text.ElideRight
@@ -203,6 +207,7 @@ Item {
                                     anchors.right: parent.right
                                     anchors.rightMargin: (agentList.longer ? 14 : 10) + answer.reserve
                                     anchors.verticalCenter: parent.verticalCenter
+                                    anchors.verticalCenterOffset: agentRow.lineShift
                                     width: Math.min(implicitWidth, answer.detailRoom(180, 116))
                                     elide: Text.ElideRight
                                     text: agentRow.noteText
@@ -212,6 +217,14 @@ Item {
                                         family: skin.sans; pixelSize: theme.smallSize
                                         weight: agentRow.note !== "" ? Font.Medium : Font.Normal
                                     }
+                                }
+                                // The model that the agent runs and the age of its session, below the label.
+                                MetaLine {
+                                    row: agentRow
+                                    tokens: theme
+                                    x: label.x
+                                    anchors.top: label.bottom
+                                    width: (answer.visible ? answer.x - answer.gap : parent.width - (agentList.longer ? 14 : 10)) - x
                                 }
                             }
 

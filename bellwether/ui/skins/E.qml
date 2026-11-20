@@ -13,6 +13,8 @@ Item {
     // The rows grow with a larger font (theme.fit). The ring grows half as much: its numeral must stay inside it,
     // and the legend at its right keeps its room.
     readonly property int agentRowHeight: theme.fit(30)
+    // What the model and session-time line adds to the height of an agent row.
+    readonly property int metaLineHeight: theme.fit(14)
     readonly property int legendRowHeight: theme.fit(25)
     readonly property int ringSize: (100 + theme.fit(100)) / 2
     // The total gets smaller above 99 and above 999: three digits and more must stay inside the ring.
@@ -219,6 +221,7 @@ Item {
                     id: agentList
                     panel: skin.panel
                     rowHeight: skin.agentRowHeight
+                    metaHeight: skin.metaLineHeight
                     y: 6
                     width: parent.width
 
@@ -251,6 +254,7 @@ Item {
                             x: programIcon.visible ? 44 : 18
                             width: Math.min(implicitWidth, detail.x - 10 - x - (address.visible ? address.width + 6 : 0))
                             anchors.verticalCenter: parent.verticalCenter
+                            anchors.verticalCenterOffset: agentRow.lineShift
                             text: agentRow.modelData.label
                             color: theme.textColor
                             elide: Text.ElideRight
@@ -284,6 +288,7 @@ Item {
                             anchors.right: parent.right
                             anchors.rightMargin: (20) + answer.reserve
                             anchors.verticalCenter: parent.verticalCenter
+                            anchors.verticalCenterOffset: agentRow.lineShift
                             width: Math.min(implicitWidth, answer.detailRoom(180, 120))
                             elide: Text.ElideRight
                             text: agentRow.noteText
@@ -293,6 +298,14 @@ Item {
                                 family: skin.sans; pixelSize: theme.smallSize
                                 weight: agentRow.note !== "" ? Font.Medium : Font.Normal
                             }
+                        }
+                        // The model that the agent runs and the age of its session, below the label.
+                        MetaLine {
+                            row: agentRow
+                            tokens: theme
+                            x: label.x
+                            anchors.top: label.bottom
+                            width: (answer.visible ? answer.x - answer.gap : parent.width - 20) - x
                         }
                     }
 

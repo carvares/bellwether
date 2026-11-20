@@ -6,7 +6,7 @@ import QtQuick
 Item {
     id: row
 
-    // The row from the backend: {key, icon, label, detail, address, spoken, canAnswer}.
+    // The row from the backend: {key, icon, label, detail, address, spoken, canAnswer, model, sessionAge, metaText}.
     required property var modelData
     required property int index
     // The AgentList that holds this row.
@@ -31,9 +31,19 @@ Item {
     readonly property bool canAnswer: modelData.canAnswer === true
     // The last row of the group.
     readonly property bool last: index === view.count - 1
+    // The second line of the row (MetaLine.qml): the model that the agent runs ("Opus 5.5") and the age of its
+    // session ("2h 14m"). "": that part is not known. The row has the line when it has one of the two. The one
+    // place of this rule for every skin; the backend gives the texts.
+    readonly property string model: modelData.model || ""
+    readonly property string sessionAge: modelData.sessionAge || ""
+    readonly property bool hasMeta: model !== "" || sessionAge !== ""
+    // Where the first line of the row is (the label, the address, the detail), from the middle of the row: a skin
+    // adds it to `anchors.verticalCenter`. A row with the second line has its first line above the middle. A row
+    // without it keeps its one line in the middle, also in a list whose other rows have two lines.
+    readonly property real lineShift: hasMeta ? -(height - view.rowHeight) / 2 : 0
 
     width: view.width
-    height: view.rowHeight
+    height: view.pitch
     Accessible.role: Accessible.Button
     Accessible.name: modelData.spoken
     Accessible.onPressAction: view.panel.jump(key)

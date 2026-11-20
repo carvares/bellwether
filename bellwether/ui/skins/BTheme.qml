@@ -31,6 +31,8 @@ ThemeBase {
     readonly property int titleSize: size(13)
     readonly property int bodySize: size(13)
     readonly property int smallSize: size(12)
+    // The second line of an agent row: the model and the session time.
+    readonly property int metaSize: size(11)
     // The text sizes that only this design has.
     // The count of a tile.
     readonly property int numeralSize: size(34)
