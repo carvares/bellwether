@@ -7,6 +7,7 @@ import logging
 import os
 import plistlib
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -326,6 +327,21 @@ def window_facts(window, *, appkit=None) -> dict:
         "activation_policy": int(app.activationPolicy()),
         "app_active": bool(app.isActive()),
     }
+
+
+# ----- the event child, which ends with this process: through the watcher (macOS has no parent-death signal) -----
+
+# The folder that holds the package of the program: the watcher runs as `python -m bellwether.platform.guard` there.
+PROGRAM_ROOT = Path(__file__).resolve().parents[2]
+
+
+def spawn_child(argv: list[str], *, popen=subprocess.Popen) -> subprocess.Popen:
+    """Start the child through the watcher (`platform/guard.py`): it checks this process once a second and ends the
+    child when this process is gone, also after a SIGKILL. The child writes into the pipe itself (stdin /dev/null,
+    stdout a pipe, stderr dropped, unbuffered). A SIGTERM to the returned process ends the watcher and the child."""
+    return popen([sys.executable, "-m", "bellwether.platform.guard", str(os.getpid()), *argv],
+                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0,
+                 cwd=PROGRAM_ROOT)
 
 
 # ----- the process host: psutil (a dependency only where there is no /proc to read) -----
