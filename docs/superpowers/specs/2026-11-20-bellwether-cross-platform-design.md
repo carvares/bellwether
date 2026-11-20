@@ -209,7 +209,18 @@ it can). The plan below is kept; where the two differ, this is right.
   Runner run 1 (Windows Server 2025): the program works (smoke run and self-test pass; Qt alone gives the panel
   `WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE`); psutil lists a file that a process holds
   open with a lock (so a Codex row can have a model, if Codex holds its thread lock open there as on Linux). Seen, not
-  fixed: the options window is wider than a 1024 px screen.
+  fixed then: the options window is wider than a 1024 px screen.
+- The options window on a narrow screen (decision of the user, 2026-11-20, after run 1): before each show
+  `options.py` gives it the width of the free part of its screen (`roomWidth`); the window is never wider than that
+  less 32 px (and never narrower than 320). The five cards wrap (`Flow`): 4 + 1 at a free width of 1024, 3 + 2 at 800,
+  2 + 2 + 1 at 640; Size and Text are side by side only when each column has room for its label, value, reset mark
+  and 180 px of slider (at 1024: up to a text size below 140 %); the two groups of colours are one below the other
+  below 1076, and a group has fewer colours in a row when it is wider than the window; the colour editor has a
+  narrow form (the title and "Done" in a line, the palette in rows, the field, then the opacity) below the width of
+  its wide form. Tab still goes in the order on the screen. After each show the options and the answer window are
+  moved inside the free part of their screen when the system put them partly outside (Windows places a new window
+  at a default place); no move when inside (Wayland). At the width of today: 0 different pixels. The answer window
+  (600 px) fits a 640 px screen. The self-test checks that the options window is inside the free part of its screen.
 - With monitors of different scales (Windows, macOS) Qt 6 leaves gaps between the areas of the screens in its
   coordinates. The plain shell gives `desktopPoint(item, x, y)` (Qt's `mapToGlobal`, which maps a point by the screen
   under it); a drag keeps the point of the press under that pointer, so the panel crosses to the other monitor.
