@@ -272,7 +272,7 @@ The keys of the settings file are in the [reference](docs/reference.md#files).
 ## Limits
 
 - The answer window reads Claude Code and Codex. For a different program it shows the screen as text.
-- The model shows for Claude Code. For Codex it is not yet checked with a real session; a Codex row can show the time only.
+- The model shows for Claude Code and Codex (checked with Codex 0.170). A different program shows the time only.
 - A new terminal title shows at the next status change of the agent, or after 5 minutes at the most.
 - The jump to an agent on a different virtual desktop is not tested.
 - An agent that reports "error" is counted as blocked, as in the agent list of the app.
