@@ -1,0 +1,16 @@
+#!/bin/sh
+# A made-up herdr-core for the CI runners: `ls --json` and `get` give made-up terminals, `events --json` is a slow
+# stream of heartbeats (one now, then one each 2 seconds) that lives until it is ended.
+case "$1" in
+  ls)
+    echo '{"terminals": [{"address": "t1", "agent": "claude-code", "state": "live", "status": "blocked", "turn": 1}]}'
+    ;;
+  get) printf '{"address": "%s", "state": "live", "pid": 0, "created_ms": 0, "title": ""}\n' "$2" ;;
+  events)
+    while :; do
+      echo '{"jsonrpc":"2.0","method":"heartbeat","params":{}}'
+      sleep 2
+    done
+    ;;
+  *) echo '{"error": {"kind": "unknown"}}' >&2; exit 1 ;;
+esac

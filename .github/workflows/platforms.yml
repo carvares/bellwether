@@ -1,0 +1,91 @@
+# The proof of the other systems on real machines (see docs/superpowers/specs/2026-11-20-bellwether-cross-platform-design.md,
+# "Proof"). The repository is private: a macOS minute counts 10 times, so the job runs a selected fast test set, the
+# smoke run, the self-test and the screen pictures, in under 6 minutes. Started by hand, or by a push to the branch
+# of the port that changes code.
+name: platforms
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [cross-platform]
+    paths:
+      - "bellwether/**"
+      - "tests/**"
+      - "scripts/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/platforms.yml"
+
+concurrency:
+  group: platforms-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 8
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          python-version: "3.14"
+
+      - name: The runner
+        run: |
+          sw_vers
+          uname -m
+          sysctl -n hw.ncpu
+
+      - name: Install
+        run: |
+          SECONDS=0; trap 'echo "wall time: ${SECONDS} s"' EXIT
+          uv sync --locked
+          uv pip list | grep -i -E "pyside6|pyobjc|psutil"
+
+      - name: Selected tests
+        run: |
+          SECONDS=0; trap 'echo "wall time: ${SECONDS} s"' EXIT
+          status=0
+          # The platform package, the macOS module, the watcher, the client, the state, the sessions, the settings,
+          # the start script, the events and the self-test in this process (no Qt window of a system).
+          uv run --locked pytest -q -p no:cacheprovider --durations=10 \
+            tests/test_platform.py tests/test_macos.py tests/test_guard.py tests/test_client.py \
+            tests/test_client_screen.py tests/test_state.py tests/test_sessions.py tests/test_settings.py \
+            tests/test_start_script.py tests/test_events.py tests/test_selftest.py \
+            -k "not the_command_prints_one_json_object" || status=1
+          # The behaviour of the panel in the plain shell (off screen, as on Linux).
+          uv run --locked pytest -q -p no:cacheprovider --durations=5 \
+            tests/test_qml.py tests/test_skins.py tests/test_answer_control.py -k plain || status=1
+          exit $status
+
+      - name: Smoke run against a made-up Herdr
+        if: always()
+        run: |
+          SECONDS=0; trap 'echo "wall time: ${SECONDS} s"' EXIT
+          uv run --locked python scripts/ci/smoke.py ci-out/smoke 25
+
+      - name: Self-test and pictures of the screen
+        if: always()
+        run: |
+          SECONDS=0; trap 'echo "wall time: ${SECONDS} s"' EXIT
+          uv run --locked python scripts/ci/selftest.py ci-out
+
+      - name: Upload the facts, the logs and the pictures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-run
+          path: ci-out
+          retention-days: 3
+          if-no-files-found: warn
+
+  # The job of Windows comes with task P4.
