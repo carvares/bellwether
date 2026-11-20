@@ -1,7 +1,6 @@
 """Start the Bellwether widget."""
 from __future__ import annotations
 
-import fcntl
 import logging
 import os
 import signal
@@ -13,6 +12,7 @@ from PySide6.QtCore import QObject
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
+from . import platform
 from .answer import Answer
 from .backend import Backend
 from .client import HerdrClient, find_executables
@@ -41,11 +41,9 @@ def take_single_instance_lock():
     is taken too: an old herdr-float widget and a new one never run together."""
     handles = []
     for name in (NAME, OLD_NAME):
-        handle = open(runtime_dir() / f"{name}.lock", "w")
-        try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            for opened in [*handles, handle]:
+        handle = platform.lock(runtime_dir() / f"{name}.lock")
+        if handle is None:
+            for opened in handles:
                 opened.close()
             return None
         handles.append(handle)

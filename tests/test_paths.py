@@ -1,6 +1,7 @@
 import fcntl
 import json
 import logging
+from pathlib import Path
 
 import pytest
 
@@ -33,7 +34,7 @@ def test_the_folders_follow_the_xdg_variables_with_the_standard_defaults(tmp_pat
         monkeypatch.delenv(variable, raising=False)
     home = tmp_path / "home"
     assert (paths.config_home(), paths.state_home(), paths.cache_home(), paths.runtime_dir()) == (
-        home / ".config", home / ".local" / "state", home / ".cache", paths.Path("/tmp"))
+        home / ".config", home / ".local" / "state", home / ".cache", Path("/tmp"))
     # A relative or empty value is not valid (XDG Base Directory Specification): the default is used.
     monkeypatch.setenv("XDG_CONFIG_HOME", "relative/config")
     monkeypatch.setenv("XDG_STATE_HOME", "")
