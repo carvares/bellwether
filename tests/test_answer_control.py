@@ -20,7 +20,7 @@ from bellwether.icons import Icons
 from bellwether.state import Agent
 from tests.audit import text_findings
 from tests.test_backend_prompt import ScreenClient, wait_for
-from tests.test_qml import LAYER_QML, LAYERSHELL_QMLDIR, OFFSCREEN_NOTE, click, rows, settle, use_screens, visible_texts, walk
+from tests.test_qml import LAYERSHELL_QMLDIR, SHELLS, both_shells, release, OFFSCREEN_NOTE, click, rows, settle, use_screens, visible_texts, walk
 from tests.test_skins import spoken, wait_jump
 
 pytestmark = pytest.mark.skipif(not LAYERSHELL_QMLDIR.is_file(), reason="org.kde.layershell is not installed")
@@ -38,9 +38,9 @@ AGENTS = [
 
 
 class Panel:
-    """The panel (shells/Layer.qml) with a real backend and a client of made-up screens."""
+    """The panel (in the layer shell, or the shell named) with a real backend and a client of made-up screens."""
 
-    def __init__(self, app, tmp_path, agents=AGENTS, **more):
+    def __init__(self, app, tmp_path, agents=AGENTS, shell="layer", **more):
         self.app = app
         self.client = ScreenClient()
         self.backend = Backend(self.client, settings_path=tmp_path / "state.json",
@@ -54,7 +54,7 @@ class Panel:
         self.engine.warnings.connect(lambda errors: self.messages.extend(e.toString() for e in errors))
         self.engine.rootContext().setContextProperty("backend", self.backend)
         self.engine.addImportPath(str(IMPORT_PATH))
-        self.engine.load(LAYER_QML)
+        self.engine.load(SHELLS[shell])
         assert self.engine.rootObjects(), self.messages
         self.root: QQuickWindow = self.engine.rootObjects()[0]
         self.opener = Answer(self.engine, self.backend)  # as the program does it: the answer window
@@ -98,9 +98,9 @@ class Panel:
 
 
 @pytest.fixture(params=[(letter, scale) for scale in (1.0, 1.5) for letter in LETTERS], ids=lambda p: f"{p[0]}-{p[1]}")
-def panel(request, app, tmp_path):
+def panel(request, app, tmp_path, shell):
     letter, scale = request.param
-    made = Panel(app, tmp_path)
+    made = Panel(app, tmp_path, shell=shell)
     made.backend.setLayout(letter)
     assert made.backend.setScale(scale) is True
     settle(app)
@@ -125,6 +125,7 @@ def test_only_the_rows_of_blocked_agents_with_a_terminal_have_the_control(app, p
         assert panel.controls() == [] and len(rows(panel.root, "agent")) == 1
 
 
+@both_shells
 def test_a_click_on_the_control_opens_the_prompt_of_that_agent_and_does_not_jump(app, panel):
     panel.open_group("blocked")
     click(app, panel.root, panel.control("t1"))
@@ -143,6 +144,7 @@ def test_a_click_on_the_control_opens_the_prompt_of_that_agent_and_does_not_jump
     assert panel.client.focused == [] and panel.client.pressed == []
 
 
+@both_shells
 def test_a_click_on_the_rest_of_the_row_jumps_and_does_not_open(app, panel):
     panel.open_group("blocked")
     row, control = panel.row("t1"), panel.control("t1")
@@ -158,6 +160,7 @@ def test_a_click_on_the_rest_of_the_row_jumps_and_does_not_open(app, panel):
     assert panel.client.focused[-1] == "box-pane" and panel.asked == []
 
 
+@both_shells
 def test_a_drag_from_the_control_moves_the_panel_and_does_nothing_else(app, panel):
     panel.open_group("blocked")
     root = panel.root
@@ -165,10 +168,11 @@ def test_a_drag_from_the_control_moves_the_panel_and_does_nothing_else(app, pane
     start = centre(panel.control("t1"))
     QTest.mousePress(root, LEFT, NONE, start)
     settle(app)
-    for step in (QPoint(-10, 5), QPoint(-20, 12)):
+    for step in (QPoint(-10, 5), QPoint(-20, 12)):  # the steps add up (tests/test_qml.py, drag_by)
+        at = root.position()
         QTest.mouseMove(root, start + step)
         settle(app)
-    QTest.mouseRelease(root, LEFT, NONE, start + QPoint(-20, 12))
+    release(root, start + QPoint(-20, 12), at)
     settle(app)
     assert (root.property("posX"), root.property("posY")) == (before[0] - 30, before[1] + 17)
     assert panel.asked == [] and panel.state() == "closed" and panel.client.focused == []

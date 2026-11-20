@@ -120,6 +120,20 @@ def click(app, root, item):
     settle(app)
 
 
+# The tests whose result can depend on the window shell run on both. (The layer shell is the default of the window
+# fixture; a test about the layer protocol itself stays on it.)
+both_shells = pytest.mark.parametrize("shell", ["layer", "plain"], indirect=True)
+
+
+def release(root, point, at):
+    """Let the left button go where the pointer is: `point` was its place in the window when the window was at `at`
+    (QPoint, the place of the window before the last move). The plain shell moves the window with the panel, so the
+    pointer is now at `point` less that move; a release at a different place of the desktop would be one more move.
+    The layer shell off screen: no compositor moves the window, the place is `point`."""
+    QTest.mouseRelease(root, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+                       point - (root.position() - at))
+
+
 AGENTS = [
     Agent("t1", "blocked", "rev", "Main"),
     Agent("t2", "working", "ana", "api / 1"),
@@ -127,6 +141,7 @@ AGENTS = [
 ]
 
 
+@both_shells
 def test_main_qml_shows_four_status_rows_and_opens_one_group_at_a_time(app, window):
     root, backend, messages = window
     backend.apply(AGENTS)
@@ -154,6 +169,7 @@ def test_main_qml_shows_four_status_rows_and_opens_one_group_at_a_time(app, wind
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
+@both_shells
 def test_a_click_on_an_agent_row_jumps_one_time(app, window):
     root, backend, messages = window
     backend.apply(AGENTS)
@@ -239,6 +255,7 @@ def test_a_failure_message_opens_its_group_one_time_and_then_follows_only_a_stat
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
+@both_shells
 def test_the_scroll_indicator_does_not_take_clicks_or_the_wheel(app, window):
     root, backend, messages = window
     backend.apply([Agent(f"i{n:02d}", "idle", f"helper {n:02d}", "pool") for n in range(12)])
@@ -479,6 +496,7 @@ def test_with_no_agents_the_bar_is_one_empty_track(app, window, agents):
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
+@both_shells
 def test_a_drag_from_a_row_moves_the_widget_and_does_not_click(app, window):
     root, backend, messages = window
     backend.apply(AGENTS)
@@ -491,10 +509,13 @@ def test_a_drag_from_a_row_moves_the_widget_and_does_not_click(app, window):
         start = item.mapToScene(QPointF(item.width() / 2, item.height() / 2)).toPoint()
         QTest.mousePress(root, left, none, start)
         settle(app)
-        for step in (QPoint(-10, 5), QPoint(-20, 12)):  # each move is from the start: the window stays off screen
+        # Each event is at the start point in the window, plus the step: with the layer shell off screen the window
+        # stays, so the steps add up; the plain shell moves the window, as under a pointer that moves by each step.
+        for step in (QPoint(-10, 5), QPoint(-20, 12)):
+            at = root.position()
             QTest.mouseMove(root, start + step)
             settle(app)
-        QTest.mouseRelease(root, left, none, start + QPoint(-20, 12))
+        release(root, start + QPoint(-20, 12), at)
         settle(app)
         after = (root.property("posX"), root.property("posY"))
         assert after == (before[0] - 30, before[1] + 17)
@@ -689,6 +710,7 @@ def pointer_area(root):
     return next(i for i in walk(root.contentItem()) if i.property("lastMoveMs") is not None)
 
 
+@both_shells
 def test_a_move_counts_only_when_one_step_passed_after_the_last_move(app, window):
     root, backend, messages = window
     backend.apply(AGENTS)
@@ -711,9 +733,10 @@ def test_a_move_counts_only_when_one_step_passed_after_the_last_move(app, window
     QTest.mouseMove(root, start + QPoint(-12, 0), 0)  # the compositor did not move the window yet: no move
     assert root.property("posX") == before[0] - 10
     area.setProperty("lastMoveMs", time.time() * 1000 - 21)  # one step passed
+    at = root.position()
     QTest.mouseMove(root, start + QPoint(-11, 0), 0)
     assert root.property("posX") == before[0] - 21
-    QTest.mouseRelease(root, left, none, start + QPoint(-11, 0))
+    release(root, start + QPoint(-11, 0), at)
     settle(app)
     assert backend.saves == [(before[0] - 21, before[1])]
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
@@ -793,6 +816,7 @@ def test_a_drag_goes_across_an_edge_that_two_screens_share_and_stops_at_an_outer
     assert (found["x"], found["y"]) == result
 
 
+@both_shells
 def test_the_panel_is_kept_on_the_screen_that_holds_it(app, window):
     root, backend, messages = window
     assert root.property("screenName") == root.screen().name()  # at start: the screen of the window
@@ -823,6 +847,7 @@ def test_the_panel_is_kept_on_the_screen_that_holds_it(app, window):
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
+@both_shells
 def test_move_to_next_screen_keeps_the_distance_to_the_nearer_edges(app, window):
     root, backend, messages = window
     use_screens(root, OFFSET, "A", 2200, 40)  # 40 px from the right edge of A and 40 px from its top
@@ -851,6 +876,7 @@ def test_move_to_next_screen_keeps_the_distance_to_the_nearer_edges(app, window)
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
+@both_shells
 def test_move_to_next_screen_keeps_the_default_corner_and_saves_only_the_screen(app, window, tmp_path):
     root, backend, messages = window
     (tmp_path / "state.json").write_text('{"x": 9, "y": 9, "screen": "A", "layout": "C"}')
@@ -871,20 +897,24 @@ def test_move_to_next_screen_keeps_the_default_corner_and_saves_only_the_screen(
 
 
 def drag_by(app, root, steps):
-    """Press in the middle of the header and move to each step from there. The window stays off screen, so the
-    steps add up. Return the function that releases the button."""
+    """Press in the middle of the header and move to each step from there. The steps add up: with the layer shell
+    off screen the window stays; the plain shell moves the window, as under a pointer that moves by each step.
+    Return the function that releases the button."""
     left, none = Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier
     start = QPoint(160, 20)
     QTest.mouseMove(root, start)  # the pointer is there before the press
     settle(app)
     QTest.mousePress(root, left, none, start)
     settle(app)
+    at = root.position()
     for step in steps:
+        at = root.position()
         QTest.mouseMove(root, start + step)
         settle(app)
-    return lambda: (QTest.mouseRelease(root, left, none, start + steps[-1]), settle(app))
+    return lambda: (release(root, start + steps[-1], at), settle(app))
 
 
+@both_shells
 def test_a_drag_to_the_other_screen_leaves_the_panel_there(app, window):
     root, backend, messages = window
     use_screens(root, OFFSET, "A", 2100, 600)
@@ -907,6 +937,7 @@ def test_a_drag_to_the_other_screen_leaves_the_panel_there(app, window):
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
+@both_shells
 def test_a_drag_stops_at_an_edge_with_no_screen_behind_it(app, window):
     root, backend, messages = window
     use_screens(root, OFFSET, "A", 2100, 50)  # at this height nothing is at the right of A
@@ -918,6 +949,7 @@ def test_a_drag_stops_at_an_edge_with_no_screen_behind_it(app, window):
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
+@both_shells
 def test_a_group_that_changes_size_does_not_pull_a_drag_back_to_its_screen(app, window):
     root, backend, messages = window
     backend.apply(AGENTS)
@@ -941,6 +973,7 @@ def wait_until(app, condition, timeout=2.0):
     return condition()
 
 
+@both_shells
 def test_a_monitor_that_goes_away_leaves_the_panel_on_a_screen_that_stays(app, window):
     root, backend, messages = window
     backend.apply([])
@@ -960,6 +993,7 @@ def test_a_monitor_that_goes_away_leaves_the_panel_on_a_screen_that_stays(app, w
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
+@both_shells
 def test_a_panel_that_the_compositor_closes_shows_again_and_a_hidden_panel_stays_hidden(app, window):
     root, backend, messages = window
     settle(app)
@@ -977,6 +1011,7 @@ def test_a_panel_that_the_compositor_closes_shows_again_and_a_hidden_panel_stays
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
+@both_shells
 @pytest.mark.parametrize(
     "saved, at_default, x, y",
     [
@@ -987,7 +1022,7 @@ def test_a_panel_that_the_compositor_closes_shows_again_and_a_hidden_panel_stays
         ('{"screen": "%s", "layout": "C"}', True, None, 16),  # only the screen: the default corner of that screen
     ],
 )
-def test_the_start_uses_the_saved_screen_and_place(app, tmp_path, request, saved, at_default, x, y):
+def test_the_start_uses_the_saved_screen_and_place(app, tmp_path, request, shell, saved, at_default, x, y):
     name = app.primaryScreen().name()
     (tmp_path / "state.json").write_text(saved % name if "%s" in saved else saved)
     root, backend, messages = request.getfixturevalue("window")
@@ -1002,6 +1037,7 @@ def test_the_start_uses_the_saved_screen_and_place(app, tmp_path, request, saved
 
 # ----- layouts: the skin changes, the window and its state stay -----
 
+@both_shells
 def test_a_different_layout_shows_in_the_same_window_and_keeps_the_place_the_screen_and_the_open_group(app, window, tmp_path):
     root, backend, messages = window
     backend.apply(many(blocked=1, working=2, idle=12))
@@ -1072,6 +1108,7 @@ def test_the_window_finds_the_rows_of_a_second_skin_by_their_role(app, window):
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
+@both_shells
 def test_a_bigger_skin_is_kept_on_the_screen_and_the_default_corner_follows_the_width(app, window):
     root, backend, messages = window
     backend.setLayout("T")
@@ -1124,6 +1161,7 @@ def test_a_start_with_a_saved_skin_that_does_not_load_shows_the_default_layout(a
     assert json.loads((tmp_path / "state.json").read_text()) == {"layout": "X"}
 
 
+@both_shells
 def test_a_skin_that_reports_the_size_0_does_not_change_the_size_of_the_window(app, window):
     """A layer surface must never get the size 0."""
     root, backend, messages = window
