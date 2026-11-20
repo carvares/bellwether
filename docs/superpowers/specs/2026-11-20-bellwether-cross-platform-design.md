@@ -202,6 +202,14 @@ it can). The plan below is kept; where the two differ, this is right.
 - The start path, all systems: the reads of session files open with `O_BINARY` where it exists and read with
   `os.pread` or, without it (Windows), a seek and a read; the settings and the log are UTF-8; the log rotation that
   fails (Windows: a file that an other process has open cannot be renamed) keeps the file and writes the line.
+- The answer and options windows draw an opaque body with the plain shell (`Backend.opaqueDialogs`, set by
+  `__main__.start_panel` from the shell): runner run 1 showed the text of a console window through them (the panel
+  colour has 94 % opacity). The panel keeps the opacity the person chose; the layer shell is as before (0 different
+  pixels). Every text read and write names UTF-8 (a static test for the program): Windows uses cp1252 otherwise.
+  Runner run 1 (Windows Server 2025): the program works (smoke run and self-test pass; Qt alone gives the panel
+  `WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE`); psutil lists a file that a process holds
+  open with a lock (so a Codex row can have a model, if Codex holds its thread lock open there as on Linux). Seen, not
+  fixed: the options window is wider than a 1024 px screen.
 - With monitors of different scales (Windows, macOS) Qt 6 leaves gaps between the areas of the screens in its
   coordinates. The plain shell gives `desktopPoint(item, x, y)` (Qt's `mapToGlobal`, which maps a point by the screen
   under it); a drag keeps the point of the press under that pointer, so the panel crosses to the other monitor.
