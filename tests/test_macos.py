@@ -263,3 +263,162 @@ def test_a_text_is_sent_with_the_environment_of_the_platform(mac_client, monkeyp
     (argv, options), = desk.calls
     assert argv == ["/made/up/herdr-core", "send", "--force", "--", "t1", "made-up text"]
     assert "HC_TERMINAL_ID" not in options["env"] and options["env"]["PATH"] == macos.os.environ["PATH"]
+
+
+# ----- the windows -----
+
+class Signal:
+    def __init__(self):
+        self.slots = []
+
+    def connect(self, slot):
+        self.slots.append(slot)
+
+    def emit(self, *args):
+        for slot in self.slots:
+            slot(*args)
+
+
+class QtWindow:
+    """A made-up QWindow: what prepare_window and window_facts use of it, with each call recorded."""
+
+    def __init__(self, visible=True):
+        self.visible, self.properties, self.calls = visible, {}, []
+        self.visibleChanged = Signal()
+
+    def winId(self):
+        return 0x7f00
+
+    def setProperty(self, name, value):
+        self.calls.append(("setProperty", name, value))
+        self.properties[name] = value
+
+    def property(self, name):
+        return self.properties.get(name)
+
+    def isVisible(self):
+        return self.visible
+
+    def hide(self):
+        self.calls.append(("hide",))
+        self.visible = False
+
+    def destroy(self):
+        self.calls.append(("destroy",))
+
+    def show(self):
+        self.calls.append(("show",))
+        self.visible = True
+        self.visibleChanged.emit(True)
+
+    def raise_(self):
+        self.calls.append(("raise_",))
+
+
+PANEL_CALLS = [("objc_object", 0x7f00), ("setLevel_", 25), ("setCollectionBehavior_", 1 | 16 | 64 | 256),
+               ("setStyleMask_", 16 | 128), ("_setPreventsActivation_", True), ("setBecomesKeyOnlyIfNeeded_", True),
+               ("setHidesOnDeactivate_", False), ("setHasShadow_", False), ("setMovable_", False)]
+
+
+def test_the_panel_is_a_non_activating_panel_at_the_status_level_on_every_space(caplog):
+    caplog.set_level(logging.INFO, logger="bellwether")
+    kit, window = make_kit(), QtWindow()
+    macos.prepare_window(window, "panel", appkit=lambda: kit)
+    assert kit.calls == PANEL_CALLS
+    # The property that Qt reads when it makes a native window again; the window is not made again here.
+    assert window.calls == [("setProperty", "_q_macAlwaysShowToolWindow", True)]
+    assert kit.window.state["hidesOnDeactivate"] is False and records(caplog) == []
+
+
+def test_a_window_without_the_private_call_or_not_a_panel_gets_the_rest(caplog):
+    from tests.fake_appkit import Window
+    kit = make_kit(window=Window([], class_name="QNSWindow", private=False))
+    macos.prepare_window(QtWindow(), "panel", appkit=lambda: kit)
+    assert [call[0] for call in kit.calls] == [call[0] for call in PANEL_CALLS if call[0] not in (
+        "_setPreventsActivation_", "setBecomesKeyOnlyIfNeeded_")]
+
+
+def test_without_pyobjc_the_panel_is_made_again_so_that_qt_reads_the_property():
+    window = QtWindow()
+    macos.prepare_window(window, "panel", appkit=lambda: None)
+    assert window.calls == [("setProperty", "_q_macAlwaysShowToolWindow", True), ("hide",), ("destroy",), ("show",)]
+    hidden = QtWindow(visible=False)
+    macos.prepare_window(hidden, "panel", appkit=lambda: None)
+    assert hidden.calls[-2:] == [("hide",), ("destroy",)] and not hidden.visible  # a hidden panel stays hidden
+
+
+def test_when_appkit_fails_the_panel_is_made_again_with_one_log_line(caplog):
+    caplog.set_level(logging.INFO, logger="bellwether")
+    kit, window = make_kit(), QtWindow()
+    kit.objc.objc_object = lambda c_void_p: (_ for _ in ()).throw(ValueError("made-up"))
+    macos.prepare_window(window, "panel", appkit=lambda: kit)
+    assert window.calls[-3:] == [("hide",), ("destroy",), ("show",)]
+    assert records(caplog) == [(logging.WARNING, "the panel could not get the behaviour of a macOS panel (ValueError): "
+                                                 "a plain window above the others")]
+
+
+@pytest.mark.parametrize("role", ["answer", "options"])
+def test_the_answer_and_the_options_window_activate_the_app_at_each_show(role):
+    kit, window = make_kit(), QtWindow(visible=False)
+    macos.prepare_window(window, role, appkit=lambda: kit)
+    assert kit.calls == [] and window.calls == []  # nothing until it shows; no change of the native window
+    window.show()
+    window.hide()
+    window.visibleChanged.emit(False)
+    window.show()
+    assert kit.calls == [("activate",), ("activate",)]
+
+
+def test_an_older_macos_activates_the_app_the_old_way_and_without_pyobjc_qt_raises_the_window():
+    kit, window = make_kit(has_activate=False), QtWindow(visible=True)
+    macos.prepare_window(window, "options", appkit=lambda: kit)  # already shown: activated at once
+    assert kit.calls == [("activateIgnoringOtherApps_", True)]
+    plain = QtWindow(visible=False)
+    macos.prepare_window(plain, "answer", appkit=lambda: None)
+    plain.show()
+    assert plain.calls == [("show",), ("raise_",)]
+
+
+def test_the_app_is_an_accessory_app_and_without_pyobjc_one_log_line(caplog):
+    caplog.set_level(logging.INFO, logger="bellwether")
+    kit = make_kit()
+    macos.prepare_app(object(), appkit=lambda: kit)
+    assert kit.calls == [("setActivationPolicy_", 1)] and records(caplog) == []
+    macos.prepare_app(object(), appkit=lambda: None)
+    assert records(caplog) == [(logging.WARNING, "pyobjc (AppKit) cannot be imported: the panel is a plain window above "
+                                                 "the others on the current Space only, and the program has a Dock icon")]
+
+
+def test_the_facts_of_the_native_window_for_the_self_test():
+    kit, window = make_kit(), QtWindow()
+    macos.prepare_app(object(), appkit=lambda: kit)
+    macos.prepare_window(window, "panel", appkit=lambda: kit)
+    assert macos.window_facts(window, appkit=lambda: kit) == {
+        "pyobjc": True, "class": "QNSPanel", "panel": True, "level": 25, "collection_behavior": 337,
+        "style_mask": 144, "can_become_key": False, "key": False, "hides_on_deactivate": False, "has_shadow": False,
+        "movable": False, "visible": True, "on_active_space": True, "always_show_property": True,
+        "activation_policy": 1, "app_active": False}
+    assert macos.window_facts(QtWindow(), appkit=lambda: None) == {"pyobjc": False, "always_show_property": False}
+
+
+def test_the_panel_of_the_program_is_made_again_and_shows_as_before(app, tmp_path):
+    """The way of the program without pyobjc, on the real panel (off screen): hide, destroy, show."""
+    from PySide6.QtQml import QQmlApplicationEngine
+    from bellwether.__main__ import load_panel
+    from bellwether.backend import Backend
+    from bellwether.icons import Icons
+    from tests.conftest import FakeClient
+    backend = Backend(FakeClient(), settings_path=tmp_path / "state.json", icons=Icons(tmp_path / "a", tmp_path / "c"))
+    engine = QQmlApplicationEngine()
+    engine.rootContext().setContextProperty("backend", backend)
+    try:
+        assert load_panel(engine) == "plain"
+        window = engine.rootObjects()[0]
+        before = (window.isVisible(), window.geometry(), window.flags())
+        macos.prepare_window(window, "panel", appkit=lambda: None)
+        app.processEvents()
+        assert (window.isVisible(), window.geometry(), window.flags()) == before
+        assert window.property("_q_macAlwaysShowToolWindow") is True and window.property("panel") is not None
+    finally:
+        del engine
+        app.processEvents()

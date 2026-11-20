@@ -191,3 +191,135 @@ def clean_environment(argv: list[str], names, commands: dict[str, str]) -> tuple
     is, and the environment is the one of this process without them (no `env` program is needed)."""
     names = set(names)
     return list(argv), {key: value for key, value in os.environ.items() if key not in names}
+
+
+# ----- the windows: the panel is a non-activating panel on every Space; the other windows activate the app -----
+# Qt 6.12 (cocoa plugin) makes a Qt::Tool window a QNSPanel (an NSPanel) at the floating level. When it makes the
+# native window it sets hidesOnDeactivate unless the QWindow has the property _q_macAlwaysShowToolWindow: an
+# accessory app is almost never active, so the panel would almost never show. Qt reads the property only when it makes
+# the native window (QCocoaWindow::createNSWindow), and the panel exists already when the program gets it (the QML
+# shows it during its load): so the property is set for a later native window, and the panel gets its behaviour here
+# through AppKit. Qt sets the level again only at a change of the flags or of the full screen state of this window
+# (QCocoaWindow::setWindowFlags), which the panel does not have.
+
+# A property of the QWindow that Qt's cocoa plugin reads (qt_mac_resolveOption in QCocoaWindow::alwaysShowToolWindow).
+ALWAYS_SHOW = "_q_macAlwaysShowToolWindow"
+
+
+def _panel_behaviour(appkit) -> int:
+    """On every Space, also beside an app in full screen, not in the window cycle and not moved by Mission Control."""
+    return (appkit.NSWindowCollectionBehaviorCanJoinAllSpaces | appkit.NSWindowCollectionBehaviorFullScreenAuxiliary
+            | appkit.NSWindowCollectionBehaviorStationary | appkit.NSWindowCollectionBehaviorIgnoresCycle)
+
+
+def native_window(window, kit):
+    """The NSWindow of a QWindow: its winId is the NSView of Qt."""
+    return kit.objc.objc_object(c_void_p=int(window.winId())).window()
+
+
+def prepare_app(app, *, appkit=None) -> None:
+    """After the QApplication: an accessory app (no Dock icon, no menu bar of its own; the tray item stays). Without
+    pyobjc: one log line, and the program runs with a Dock icon and a plain panel."""
+    kit = (appkit or load_appkit)()
+    if kit is None:
+        log.warning("pyobjc (AppKit) cannot be imported: the panel is a plain window above the others on the current "
+                    "Space only, and the program has a Dock icon")
+        return
+    try:
+        kit.AppKit.NSApplication.sharedApplication().setActivationPolicy_(
+            kit.AppKit.NSApplicationActivationPolicyAccessory)
+    except Exception as error:
+        log.warning("the program could not be an accessory app (%s): it has a Dock icon", type(error).__name__)
+
+
+def _make_again(window) -> None:
+    """Make the native window again: Qt then reads ALWAYS_SHOW (the panel does not hide when the app is not active)."""
+    shown = window.isVisible()
+    window.hide()
+    window.destroy()
+    if shown:
+        window.show()
+
+
+def _prepare_panel(window, kit) -> None:
+    window.setProperty(ALWAYS_SHOW, True)
+    if kit is None:
+        _make_again(window)
+        return
+    try:
+        appkit = kit.AppKit
+        panel = native_window(window, kit)
+        panel.setLevel_(appkit.NSStatusWindowLevel)  # above the floating windows of other apps, under the menu bar
+        panel.setCollectionBehavior_(_panel_behaviour(appkit))
+        # A click does not activate the app (the keyboard stays where the person types). The style mask alone is not
+        # enough after the window exists (AppKit, as found by Wine): the private call is used when it is there.
+        panel.setStyleMask_(panel.styleMask() | appkit.NSWindowStyleMaskNonactivatingPanel)
+        if panel.respondsToSelector_("_setPreventsActivation:"):
+            panel._setPreventsActivation_(True)
+        if panel.respondsToSelector_("setBecomesKeyOnlyIfNeeded:"):
+            panel.setBecomesKeyOnlyIfNeeded_(True)
+        panel.setHidesOnDeactivate_(False)
+        panel.setHasShadow_(False)
+        panel.setMovable_(False)  # only the drag of the panel moves it
+    except Exception as error:
+        log.warning("the panel could not get the behaviour of a macOS panel (%s): a plain window above the others",
+                    type(error).__name__)
+        _make_again(window)
+
+
+def activate_app(window, kit) -> None:
+    """Make this app the active app, so that the keyboard goes to `window`: AppKit's `activate` (macOS 14) or
+    `activateIgnoringOtherApps:`; without pyobjc Qt's raise, which also activates the app."""
+    if kit is None:
+        window.raise_()
+        return
+    try:
+        app = kit.AppKit.NSApplication.sharedApplication()
+        if app.respondsToSelector_("activate"):
+            app.activate()
+        else:
+            app.activateIgnoringOtherApps_(True)
+    except Exception as error:
+        log.info("the program could not activate itself (%s)", type(error).__name__)
+        window.raise_()
+
+
+def prepare_window(window, role: str, *, appkit=None) -> None:
+    """After a window of the program exists. "panel": a non-activating panel at the status level on every Space,
+    that does not hide when the app is not active. "answer" and "options": the app is activated at each show of the
+    window (an accessory app is not active, and only the active app gets the keyboard)."""
+    kit = (appkit or load_appkit)()
+    if role == "panel":
+        _prepare_panel(window, kit)
+        return
+    window.visibleChanged.connect(lambda visible: activate_app(window, kit) if visible else None)
+    if window.isVisible():
+        activate_app(window, kit)
+
+
+def window_facts(window, *, appkit=None) -> dict:
+    """The facts of the native window and of the app, for the self-test. Each value as AppKit gives it."""
+    kit = (appkit or load_appkit)()
+    if kit is None:
+        return {"pyobjc": False, "always_show_property": bool(window.property(ALWAYS_SHOW))}
+    appkit_ = kit.AppKit
+    native = native_window(window, kit)
+    app = appkit_.NSApplication.sharedApplication()
+    return {
+        "pyobjc": True,
+        "class": str(native.className()),
+        "panel": bool(native.isKindOfClass_(appkit_.NSPanel)),
+        "level": int(native.level()),
+        "collection_behavior": int(native.collectionBehavior()),
+        "style_mask": int(native.styleMask()),
+        "can_become_key": bool(native.canBecomeKeyWindow()),
+        "key": bool(native.isKeyWindow()),
+        "hides_on_deactivate": bool(native.hidesOnDeactivate()),
+        "has_shadow": bool(native.hasShadow()),
+        "movable": bool(native.isMovable()),
+        "visible": bool(native.isVisible()),
+        "on_active_space": bool(native.isOnActiveSpace()),
+        "always_show_property": bool(window.property(ALWAYS_SHOW)),
+        "activation_policy": int(app.activationPolicy()),
+        "app_active": bool(app.isActive()),
+    }

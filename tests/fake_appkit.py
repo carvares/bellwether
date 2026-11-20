@@ -40,33 +40,41 @@ class RunningApp(Recorder):
 
 
 class Window(Recorder):
-    """A made-up NSPanel as Qt makes it for a Qt::Tool window (QNSPanel), with its state."""
+    """A made-up NSPanel as Qt makes it for a Qt::Tool window (QNSPanel), with its state: the getter of each property
+    gives it, the setter records the call and changes it."""
+
+    SETTERS = {"setLevel_": "level", "setCollectionBehavior_": "collectionBehavior", "setStyleMask_": "styleMask",
+               "setHidesOnDeactivate_": "hidesOnDeactivate", "setHasShadow_": "hasShadow", "setMovable_": "isMovable",
+               "setBecomesKeyOnlyIfNeeded_": "becomesKeyOnlyIfNeeded", "_setPreventsActivation_": "preventsActivation"}
 
     def __init__(self, calls, class_name="QNSPanel", private=True):
         super().__init__(calls)
         self.class_name = class_name
         self.private = private  # whether it answers the private _setPreventsActivation:
+        # As Qt 6.12 leaves a frameless Qt::Tool window: floating level, its own collection behaviour, a utility
+        # window, hidden when the app is not active.
         self.state = {"level": 3, "collectionBehavior": (1 << 1) | (1 << 7), "styleMask": 1 << 4,
-                      "hidesOnDeactivate": True, "hasShadow": False, "movable": True, "becomesKeyOnlyIfNeeded": False,
-                      "canBecomeKeyWindow": False, "isKeyWindow": False, "isVisible": True}
+                      "hidesOnDeactivate": True, "hasShadow": False, "isMovable": True, "becomesKeyOnlyIfNeeded": False,
+                      "canBecomeKeyWindow": False, "isKeyWindow": False, "isVisible": True, "isOnActiveSpace": True,
+                      "preventsActivation": False}
 
     def className(self):
         return self.class_name
 
+    def isKindOfClass_(self, cls):
+        return cls == "NSPanel" and self.class_name.endswith("Panel")
+
     def respondsToSelector_(self, name):
-        return name == "setBecomesKeyOnlyIfNeeded:" and self.class_name.endswith("Panel") or (
-            name == "_setPreventsActivation:" and self.private)
+        if name == "setBecomesKeyOnlyIfNeeded:":
+            return self.class_name.endswith("Panel")
+        return name == "_setPreventsActivation:" and self.private
 
     def __getattr__(self, name):
-        if name.startswith("set") and name.endswith("_"):
-            key = name[3].lower() + name[4:-1]
-
+        if name in self.SETTERS:
             def setter(value):
                 self.calls.append((name, value))
-                self.state[key] = value
+                self.state[self.SETTERS[name]] = value
             return setter
-        if name == "_setPreventsActivation_":
-            return lambda value: self.calls.append((name, value))
         if name in self.__dict__.get("state", {}):
             return lambda: self.state[name]
         raise AttributeError(name)
@@ -131,6 +139,6 @@ def make_kit(running=(True,), window=None, has_activate=True):
 
     appkit = SimpleNamespace(**CONSTANTS,
                              NSRunningApplication=SimpleNamespace(runningApplicationsWithBundleIdentifier_=running_apps),
-                             NSApplication=SimpleNamespace(sharedApplication=lambda: app))
+                             NSApplication=SimpleNamespace(sharedApplication=lambda: app), NSPanel="NSPanel")
     return SimpleNamespace(AppKit=appkit, objc=SimpleNamespace(objc_object=objc_object), calls=calls, app=app,
                            window=window)
