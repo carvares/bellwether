@@ -17,11 +17,12 @@ from bellwether.__main__ import UI_PATH
 from bellwether.platform.linux import IMPORT_PATH
 from bellwether.backend import Backend
 from bellwether.state import STATE_COLORS, Agent
+from tests.conftest import needs_layershell
 from tests.test_qml import (  # noqa: F401  (window is a fixture)
-    LAYERSHELL_QMLDIR, OFFSCREEN_NOTE, OFFSET, both_shells, click, js, many, place, release, rows, settle, use_screens,
+    OFFSCREEN_NOTE, OFFSET, both_shells, click, js, many, place, release, rows, settle, use_screens,
     visible_texts, walk, window)
 
-pytestmark = pytest.mark.skipif(not LAYERSHELL_QMLDIR.is_file(), reason="org.kde.layershell is not installed")
+# Without the system module of the layer shell only its cases are skipped (tests/conftest.py, `shell`).
 
 LETTERS = [letter for letter, _, _ in layouts.LAYOUTS]
 ORDER = ["blocked", "done", "working", "idle"]
@@ -889,6 +890,7 @@ def font_of(item):
     return item.property("font").pixelSize(), item.property("color").name()
 
 
+@needs_layershell
 @pytest.mark.parametrize("letter", LETTERS)
 def test_the_texts_of_each_layout_take_their_size_and_colour_from_its_theme_tokens(app, fake_client, tmp_path, letter):
     """A copy of the interface with other token values in the theme of the layout: the status title, the agent label

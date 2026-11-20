@@ -20,10 +20,12 @@ from bellwether.icons import Icons
 from bellwether.state import Agent
 from tests.audit import text_findings
 from tests.test_backend_prompt import ScreenClient, wait_for
-from tests.test_qml import LAYERSHELL_QMLDIR, SHELLS, both_shells, release, OFFSCREEN_NOTE, click, rows, settle, use_screens, visible_texts, walk
+from tests.conftest import needs_layershell
+from tests.test_qml import (
+    OFFSCREEN_NOTE, SHELLS, both_shells, click, release, rows, settle, use_screens, visible_texts, walk)
 from tests.test_skins import spoken, wait_jump
 
-pytestmark = pytest.mark.skipif(not LAYERSHELL_QMLDIR.is_file(), reason="org.kde.layershell is not installed")
+# Without the system module of the layer shell only its cases are skipped (tests/conftest.py, `shell`).
 
 LETTERS = [letter for letter, _, _ in layouts.LAYOUTS]
 LEFT, NONE = Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier
@@ -236,6 +238,7 @@ def test_the_control_has_the_accent_of_the_custom_look(app, panel):
     assert QColor(word.property("color")).name() in ("#202124", "#f1f3f4")  # the ink that can be read on the plate
 
 
+@needs_layershell
 @pytest.mark.parametrize("letter", LETTERS)
 def test_at_large_text_the_label_of_a_blocked_row_has_room_before_its_workspace(app, tmp_path, letter):
     """Text size 140 %: the label of the agent shows in full, and the workspace text at its right gives way first
