@@ -1,6 +1,6 @@
 # The proof of the other systems on real machines (see docs/superpowers/specs/2026-11-20-bellwether-cross-platform-design.md,
 # "Proof"). The repository is private: a macOS minute counts 10 times, so the job runs a selected fast test set, the
-# smoke run, the self-test and the screen pictures, in under 6 minutes. Started by hand, or by a push to the branch
+# smoke run, the self-test and the screen pictures, in under 4 minutes. Started by hand, or by a push to the branch
 # of the port that changes code.
 name: platforms
 
@@ -26,7 +26,7 @@ permissions:
 jobs:
   macos:
     runs-on: macos-latest
-    timeout-minutes: 8
+    timeout-minutes: 6
     defaults:
       run:
         shell: bash
@@ -62,9 +62,10 @@ jobs:
             tests/test_client_screen.py tests/test_state.py tests/test_sessions.py tests/test_settings.py \
             tests/test_start_script.py tests/test_events.py tests/test_selftest.py \
             -k "not the_command_prints_one_json_object" || status=1
-          # The behaviour of the panel in the plain shell (off screen, as on Linux).
-          uv run --locked pytest -q -p no:cacheprovider --durations=5 \
-            tests/test_qml.py tests/test_skins.py tests/test_answer_control.py -k plain || status=1
+          # The plain shell on the Qt of macOS (off screen): the cases marked `runner` (tests/conftest.py). All plain
+          # cases take 5 minutes here, over the budget.
+          uv run --locked pytest -q -p no:cacheprovider --durations=5 -m runner \
+            tests/test_qml.py tests/test_skins.py tests/test_answer_control.py || status=1
           exit $status
 
       - name: Smoke run against a made-up Herdr
