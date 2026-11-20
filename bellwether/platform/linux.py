@@ -1,10 +1,12 @@
 """The Linux part of the program: KDE Plasma on Wayland."""
 from __future__ import annotations
 
+import ctypes
 import fcntl
 import json
 import os
 import shutil
+import signal
 import subprocess
 from pathlib import Path
 
@@ -124,3 +126,28 @@ def find_executables() -> tuple[str | None, str | None]:
     local_core = Path.home() / ".local" / "bin" / "herdr-core"
     core = shutil.which("herdr-core") or (str(local_core) if local_core.is_file() else None)
     return shutil.which("herdr-app"), core
+
+
+# ----- the event child, which ends with this process -----
+
+_PR_SET_PDEATHSIG = 1
+# The function is found and its types are set here and not in the child: between fork and exec the child
+# must not load a library or look for a symbol.
+_prctl = ctypes.CDLL(None).prctl
+_prctl.argtypes = [ctypes.c_int, ctypes.c_ulong]
+_prctl.restype = ctypes.c_int
+
+
+def spawn_child(argv: list[str]) -> subprocess.Popen:
+    """Start the child. The kernel ends it when this process ends, also when this process is killed."""
+    parent = os.getpid()
+
+    def die_with_parent() -> None:
+        # No child without the signal. And the parent can end before the call: then the child ends here.
+        if _prctl(_PR_SET_PDEATHSIG, signal.SIGTERM) != 0 or os.getppid() != parent:
+            os._exit(1)
+
+    return subprocess.Popen(
+        argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0,
+        preexec_fn=die_with_parent,
+    )

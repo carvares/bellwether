@@ -386,8 +386,8 @@ def test_the_real_child_reads_no_input_and_ends_when_its_parent_is_killed(tmp_pa
 
     program = (
         "import sys, time\n"
-        "from bellwether.events import _spawn\n"
-        "child = _spawn([sys.executable, '-c', 'import sys, time; print(repr(sys.stdin.read()), flush=True); "
+        "from bellwether.platform import spawn_child\n"
+        "child = spawn_child([sys.executable, '-c', 'import sys, time; print(repr(sys.stdin.read()), flush=True); "
         "time.sleep(30)'])\n"
         "print(child.pid, child.stdout.readline().decode().strip(), flush=True)\n"
         "time.sleep(30)\n"

@@ -34,3 +34,4 @@ raise_app = _system.raise_app
 start_app = _system.start_app
 clean_environment = _system.clean_environment
 find_executables = _system.find_executables
+spawn_child = _system.spawn_child
