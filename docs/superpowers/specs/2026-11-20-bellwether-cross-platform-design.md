@@ -38,18 +38,31 @@ Portable already: the Herdr commands (`herdr-app ls`, `do agent.focus`, `herdr-c
 
 `bellwether/platform/`: `__init__.py` picks one module from `sys.platform` one time (`linux.py`, `macos.py`, `windows.py`) and gives its members. The rest of the program calls only this interface. No `sys.platform` test and no system-specific import outside the package.
 
-The interface (functions take an injected `run` or paths where a test needs it):
+The interface **as built in P1** (Linux only). `tests/test_platform.py` holds the same table (member → kind and parameter names): it is the contract that `macos.py` and `windows.py` implement. `load(name)` takes a value of `sys.platform`; a system with no module is an `ImportError` ("bellwether does not run on this system ('darwin'): it runs on linux"), so the program stops at the import of the package with a clear message. A function takes an injected `run` or folders where a test needs them.
 
-- `config_home()`, `state_home()`, `cache_home()`, `runtime_dir()`.
-- `lock(path)` → the single-instance lock: an object that holds the lock, or None when a different process holds it.
-- `shell()` → the name of the window shell to load (`"layer"` or `"plain"`), and `prepare_engine(engine)` (the import path that the shell needs).
-- `prepare_app(app)` → set-up before the first window; `prepare_window(window, role)` → native set-up after a window exists (`role`: `"panel"`, `"answer"`, `"options"`).
-- `raise_app(run, …)` → bring the Herdr window to the front; `start_app(run, …)` → start a closed Herdr app outside our process tree.
-- `clean_environment(argv)` or an `env` mapping → a command that runs without the caller variables of Herdr.
-- `spawn_child(argv)` → the event child, which ends when we end.
-- `process_host()` → the `Host` of `sessions.py` for this system.
-- `app_icon_file()` → the icon file of the Herdr app, or None.
-- `find_executables()` → where `herdr-app` and `herdr-core` are.
+| Member | Signature | What it gives |
+|---|---|---|
+| `config_home` | `config_home() -> Path` | The base folder of the settings (Linux: `$XDG_CONFIG_HOME`, else `~/.config`). |
+| `state_home` | `state_home() -> Path` | The base folder of the log (Linux: `$XDG_STATE_HOME`, else `~/.local/state`). |
+| `cache_home` | `cache_home() -> Path` | The base folder of the icon cache (Linux: `$XDG_CACHE_HOME`, else `~/.cache`). |
+| `runtime_dir` | `runtime_dir() -> Path` | The folder of the lock files (Linux: `$XDG_RUNTIME_DIR`, else `/tmp`). |
+| `lock` | `lock(path) -> handle \| None` | Takes the lock of the file at `path`: the open file that holds it, or None when another process holds it. Close it to give the lock back (Linux: `fcntl.flock`). |
+| `COMMANDS` | `dict[str, str]` | The system programs that the client runs, by name → default program. `HerdrClient(..., **commands)` takes fakes by these names; another name is a `TypeError` (Linux: `busctl`, `systemd_run`, `env`). |
+| `raise_app` | `raise_app(run, commands) -> bool` | Brings the Herdr window to the front; False when that did not occur (Linux: the KWin window runner through `busctl`). |
+| `start_app` | `start_app(run, app, commands) -> int` | Starts `app` outside our process tree; the exit code of the launcher, 0 = accepted; errors of `run` go to the caller (Linux: `systemd-run --user --quiet --collect --slice=app.slice -- <app>`). |
+| `clean_environment` | `clean_environment(argv, names, commands) -> list[str]` | The command `argv`, run without the environment variables `names` (Linux: `env -u <name> … <argv>`). The names (`HC_TERMINAL_ID`, `HC_SCOPE`, `HC_TERMINAL_SOCKET`) stay in `client.py`: they are Herdr facts, not system facts. |
+| `find_executables` | `find_executables() -> (str \| None, str \| None)` | The paths of `herdr-app` and `herdr-core` (Linux: `PATH`, and `~/.local/bin/herdr-core`). |
+| `spawn_child` | `spawn_child(argv) -> subprocess.Popen` | The event child (stdin `/dev/null`, stdout a pipe, stderr dropped, unbuffered), which ends when we end (Linux: `prctl(PR_SET_PDEATHSIG)`). |
+| `process_host` | `process_host() -> Host` | The process host of `sessions.py`: `home`, `bytes_read`, `start_ticks(pid)`, `family(*pids)`, `open_files(pid)` (Linux: `Host(home, proc)` on `/proc`, in `linux.py` with `MAX_PROCESSES` and `MAX_TASKS`). |
+| `app_icon_file` | `app_icon_file(desktop_dirs=None, icon_dirs=None) -> Path \| None` | The icon file of the Herdr app. The folders are for a test; None = the places of the system (Linux: `herdr-app.desktop` and the hicolor theme, then pixmaps). |
+| `SHELL_NEEDS` | `str` | What the window shell needs, for the log line when the QML interface does not load. |
+| `prepare_environment` | `prepare_environment() -> None` | Before the `QApplication` (Linux: `QT_QPA_PLATFORM=wayland` unless set). |
+| `prepare_app` | `prepare_app(app) -> None` | After the `QApplication` (Linux: a warning when the Qt platform is not wayland). |
+| `prepare_engine` | `prepare_engine(engine) -> bool` | Gives the QML engine the import path of the shell; True when the shell can load, and only then `__main__` loads `Main.qml` (Linux: `ui/imports`, the check of `org.kde.layershell`). |
+
+Not in P1, for later tasks: `shell()` (P2: `"layer"` or `"plain"`), and `prepare_window(window, role)` (P3/P4: native set-up after a window exists; `role`: `"panel"`, `"answer"`, `"options"`).
+
+Kept outside the package: `paths.py` keeps `NAME`, `OLD_NAME` and `move_old_folders()` (the move of the `herdr-float` folders is plain file work on the platform folders: on a new system it finds nothing to move) and gives the four folders again for its callers. `appicon.py` keeps the image work (load, mark, tint).
 
 `platform/linux.py` gets the code that exists today, **moved, not rewritten**.
 
@@ -103,7 +116,7 @@ With the plain shell the panel runs on X11 and on Wayland desktops with no layer
 
 ## Tasks (each: one implementer, a task review, fix rounds)
 
-- **P1 — the platform package, pure move.** `platform/{__init__,linux}.py`; paths, lock, raise, start, clean environment, child spawn, process host, app icon, executables behind the interface; a static test that no module outside the package tests `sys.platform` or imports `fcntl`, `ctypes`, or names `/proc`, `busctl`, `systemd-run`. Linux identical.
+- **P1 — the platform package, pure move.** `platform/{__init__,linux}.py`; paths, lock, raise, start, clean environment, child spawn, process host, app icon, executables behind the interface; a static test that no module outside the package tests `sys.platform` or imports `fcntl`, `ctypes`, or names `prctl`, `/proc`, `busctl`, `systemd-run`, `XDG_`, `.desktop` (`tests/test_platform.py`, no exception); the Qt set-up of `__main__.py` behind `prepare_environment`, `prepare_app`, `prepare_engine`. Linux identical.
 - **P2 — the shell split.** `PanelShell.qml`, `shells/Layer.qml`, `shells/Plain.qml`; the shell rule; the behaviour tests of the panel parametrized over both shells; the layer shell identical (pixels, protocol trace); a short real run of the plain shell on Linux (XWayland).
 - **P3 — macOS.** `platform/macos.py`, the watcher, the start script, the font lists, `psutil`, `pyobjc`; the self-test mode; the workflow on a macOS runner; fix what the runner shows.
 - **P4 — Windows.** `platform/windows.py`, `scripts/start.cmd`, the lock, the log rotation; the workflow on a Windows runner; fix what the runner shows.
