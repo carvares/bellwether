@@ -54,11 +54,12 @@ def on_a_runner(environ=None) -> bool:
     return "true" in (environ.get("CI", "").lower(), environ.get("GITHUB_ACTIONS", "").lower())
 
 
-def shot_command(system: str, path: Path) -> list[str] | None:
-    """The command that takes a picture of the whole screen into `path`, or None when this system has none."""
-    if system == "darwin" and shutil.which("screencapture"):
+def shot_command(system: str, path: Path, which=shutil.which) -> list[str] | None:
+    """The command that takes a picture of the whole screen into `path`, or None when this system has none (or the
+    program is not there: `which`, a test gives its own)."""
+    if system == "darwin" and which("screencapture"):
         return ["screencapture", "-x", str(path)]
-    if system == "win32" and shutil.which("powershell"):
+    if system == "win32" and which("powershell"):
         return ["powershell", "-NoProfile", "-NonInteractive", "-Command",
                 WINDOWS_SHOT.replace("{path}", str(path).replace("'", "''"))]
     return None
@@ -112,10 +113,14 @@ def checks(facts: dict, system: str | None = None) -> list[tuple[str, str, objec
     tray = facts.get("tray", {})
     check("the tray item is there", tray.get("visible") is True, tray, soft=True)
     check("the program made one tray item at most", tray.get("items", 0) <= 1, tray.get("items"))
-    frame, area = panel.get("frame") or [0, 0, 0, 0], (panel.get("screen") or {}).get("available") or [0, 0, 0, 0]
+    def inside(window):
+        frame, area = window.get("frame") or [0, 0, 0, 0], (window.get("screen") or {}).get("available") or [0, 0, 0, 0]
+        return (area[0] <= frame[0] and area[1] <= frame[1] and frame[0] + frame[2] <= area[0] + area[2]
+                and frame[1] + frame[3] <= area[1] + area[3]), {"frame": frame, "available": area}
+
     check("the panel is inside the available area of its screen (not under a menu bar, a Dock or a panel)",
-          area[0] <= frame[0] and area[1] <= frame[1] and frame[0] + frame[2] <= area[0] + area[2]
-          and frame[1] + frame[3] <= area[1] + area[3], {"frame": frame, "available": area})
+          *inside(panel))
+    check("the options window is inside the available area of its screen (a narrow screen too)", *inside(options))
     if system == "darwin":
         native = facts.get("native", {})
         check("Qt uses its cocoa plugin", facts.get("qt_platform") == "cocoa", facts.get("qt_platform"))

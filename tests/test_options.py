@@ -14,8 +14,7 @@ from PySide6.QtTest import QTest
 from bellwether.backend import Backend
 from bellwether import layouts
 from bellwether.layouts import built_skins
-from bellwether.options import Options
-from tests.conftest import FakeClient
+from tests.conftest import FakeClient, wide_options
 
 # Layout C of the program, and the test skin in the place of design B: a second layout that can be chosen.
 # A, D and E have no skin here: the window must show a design that is not built as "coming next".
@@ -49,7 +48,7 @@ def opened(app, fake_client, tmp_path):
     engine.warnings.connect(lambda errors: messages.extend(e.toString() for e in errors))
     engine.rootContext().setContextProperty("backend", backend)
     try:
-        yield Options(engine), engine, backend, messages
+        yield wide_options(engine), engine, backend, messages
     finally:
         # The engine goes before the backend that its bindings read. Not `del`: the options object of the test
         # holds the engine too.
@@ -198,7 +197,7 @@ def test_an_options_file_that_does_not_load_gives_one_log_line_and_no_window(app
     engine = QQmlApplicationEngine()
     previous = qInstallMessageHandler(lambda mode, context, text: None)
     try:
-        options = Options(engine, tmp_path / "not-there.qml")
+        options = wide_options(engine, tmp_path / "not-there.qml")
         options.open()
         options.open()
     finally:
@@ -309,7 +308,7 @@ def real_options(app, fake_client, tmp_path):
     engine.warnings.connect(lambda errors: messages.extend(e.toString() for e in errors))
     engine.rootContext().setContextProperty("backend", backend)
     try:
-        options = Options(engine)
+        options = wide_options(engine)
         options.open()
         settle(app)
         yield engine.rootObjects()[0], backend, messages

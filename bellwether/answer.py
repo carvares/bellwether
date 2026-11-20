@@ -9,6 +9,7 @@ from PySide6.QtCore import QEvent, QObject
 
 from . import platform
 from .layouts import UI_PATH
+from .options import keep_on_screen
 
 log = logging.getLogger("bellwether")
 
@@ -59,4 +60,5 @@ class Answer:
             self._window.setProperty("raising", False)
         else:
             self._window.show()
+        keep_on_screen(self._window)  # inside the free part of its screen (a narrow screen: 600 px fit in 640)
         self._window.requestActivate()

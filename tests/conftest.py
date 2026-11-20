@@ -29,6 +29,22 @@ def font_that_exists(app):
         app.setFont(QFont(QFontInfo(font).family(), font.pointSize()))
 
 
+# The width of the screen that the options window gets in the tests: the screen of the off-screen platform is 800 px
+# wide, narrower than the window of five cards in one row (1076). A test of a narrow screen gives its own width.
+ROOM_WIDTH = 1920
+
+
+def wide_options(engine, *args):
+    """The options object of the program, whose window gets a screen of ROOM_WIDTH before each show."""
+    from bellwether.options import Options
+
+    class WideOptions(Options):
+        def fit_screen(self) -> None:
+            self._window.setProperty("roomWidth", ROOM_WIDTH)
+
+    return WideOptions(engine, *args)
+
+
 class FakeClient:
     def __init__(self):
         self.result = []

@@ -25,11 +25,17 @@ Window {
     readonly property int tagHeight: theme.fit(18)
     readonly property int cardHeight: 8 + 124 + nameHeight + 6 + descriptionHeight + 8 + tagHeight + 8
     readonly property int cardGap: 12
+    // The cards in one row, or as many as fit in a row (a narrow screen): 5, then 3 + 2, 2 + 2 + 1, …
+    readonly property int cardsPerRow: Math.max(1, Math.floor((innerWidth + cardGap) / (cardWidth + cardGap)))
     // The custom look: two columns (Size at the left, Text at the right), each a label, a control, a value and
-    // a reset mark; then the eight colours in one row of two groups.
+    // a reset mark; then the eight colours in one row of two groups. On a narrow screen the columns are one below
+    // the other, and the groups of colours too (and a group in two rows when it is narrower still).
     readonly property int innerWidth: fixedWidth - 2 * pad
     readonly property int columnGap: 24
-    readonly property int columnWidth: (innerWidth - columnGap) / 2
+    // The narrowest column that holds a row of the custom look (its texts grow with the text size).
+    readonly property int minColumnWidth: labelWidth + valueWidth + resetWidth + 180
+    readonly property bool twoColumns: innerWidth >= 2 * minColumnWidth + columnGap
+    readonly property int columnWidth: twoColumns ? (innerWidth - columnGap) / 2 : innerWidth
     // The widths of the label, the value and the reset mark of a row: they hold text, so they grow with it.
     readonly property int labelWidth: theme.fit(104)
     readonly property int valueWidth: theme.fit(56)
@@ -39,6 +45,12 @@ Window {
     readonly property int swatchWidth: 120
     readonly property int swatchGap: 8
     readonly property int groupGap: 20
+    // A group of four colours in one row; both groups side by side when there is room, else one below the other;
+    // a group in rows of fewer colours when it is wider than the window.
+    readonly property int groupWidth: 4 * (swatchWidth + swatchGap) - swatchGap
+    readonly property bool groupsSideBySide: innerWidth >= 2 * groupWidth + groupGap
+    readonly property int swatchesPerRow: innerWidth >= groupWidth ? 4
+        : Math.max(1, Math.floor((innerWidth + swatchGap) / (swatchWidth + swatchGap)))
     readonly property var roleNames: ({
         "blocked": "Blocked", "done": "Done", "working": "Working", "idle": "Idle",
         "background": "Background", "text": "Text", "frame": "Frame", "accent": "Accent"})
@@ -67,12 +79,16 @@ Window {
     flags: Qt.Window | Qt.FramelessWindowHint
     // The frame can have round corners: the window itself has no background.
     color: "transparent"
-    // The height of the screen of the window. A test gives its own.
+    // The height of the screen of the window, and the width of its free part (options.py gives it before each show;
+    // with none, no limit). A test gives its own.
     property int roomHeight: Screen.height
-    // The size is fixed, and the width is the same in every theme and at every text size (1076). The height is
-    // the height of the content, or less on a low screen (80 px stay free for a task bar): the sections then
-    // scroll between the header and the footer.
-    readonly property int fixedWidth: 5 * cardWidth + 4 * cardGap + 2 * pad
+    property int roomWidth: 1 << 20
+    // The size is fixed. The width is the same in every theme and at every text size (1076, the five cards in one
+    // row), or the width of a narrower screen less 32 px (the cards wrap, and the sections are one below the other).
+    // The height is the height of the content, or less on a low screen (80 px stay free for a task bar): the
+    // sections then scroll between the header and the footer.
+    readonly property int fullWidth: 5 * cardWidth + 4 * cardGap + 2 * pad
+    readonly property int fixedWidth: Math.max(320, Math.min(fullWidth, roomWidth - 32))
     readonly property int footerHeight: controlHeight + 24
     readonly property int wantedHeight: headerHeight + sections.height + footerHeight
     readonly property int fixedHeight: Math.max(headerHeight + footerHeight + 120, Math.min(wantedHeight, roomHeight - 80))
@@ -274,22 +290,24 @@ Window {
                 }
 
                 // In the line of the title, at the right: the second line of the agent rows of every layout (the
-                // model and the age of the session).
+                // model and the age of the session). Under the title when the line has no room for both.
                 Controls.CheckRow {
                     id: metaRow
+                    readonly property bool below: layoutTitle.implicitWidth + 16 + width > options.innerWidth
                     theme: options.theme
-                    x: options.pad + options.innerWidth - width
-                    y: layoutTitle.y + (layoutTitle.height - height) / 2
+                    x: below ? options.pad : options.pad + options.innerWidth - width
+                    y: below ? layoutTitle.y + layoutTitle.height + 8 : layoutTitle.y + (layoutTitle.height - height) / 2
                     name: "showMeta"
                     label: "Show model and session time"
                     checked: backend.showMeta
                     onToggled: (value) => backend.setShowMeta(value)
                 }
 
-                Row {
+                Flow {
                     id: cardsRow
                     x: options.pad
-                    y: layoutTitle.y + layoutTitle.height + 14
+                    y: (metaRow.below ? metaRow.y + metaRow.height : layoutTitle.y + layoutTitle.height) + 14
+                    width: options.cardsPerRow * (options.cardWidth + options.cardGap) - options.cardGap
                     spacing: options.cardGap
 
                     Repeater {
@@ -316,7 +334,7 @@ Window {
                 Item {
                     id: sizeSection
                     x: options.pad
-                    y: cardsRow.y + options.cardHeight + options.sectionGap
+                    y: cardsRow.y + cardsRow.height + options.sectionGap
                     width: options.columnWidth
                     height: sizeTitle.height + 10 + options.controlHeight
 
@@ -345,8 +363,8 @@ Window {
                 // The section "Text": the size of every text, and the font family.
                 Item {
                     id: textSection
-                    x: options.pad + options.columnWidth + options.columnGap
-                    y: sizeSection.y
+                    x: options.twoColumns ? options.pad + options.columnWidth + options.columnGap : options.pad
+                    y: options.twoColumns ? sizeSection.y : sizeSection.y + sizeSection.height + options.sectionGap
                     width: options.columnWidth
                     height: textTitle.height + 10 + options.controlHeight + 8 + fontChooser.height
 
@@ -412,7 +430,8 @@ Window {
                         id: swatchRow
                         y: coloursTitle.height + 8
                         width: parent.width
-                        height: groups.count > 0 ? groups.itemAt(0).height : 0
+                        height: groups.count < 2 ? 0 : options.groupsSideBySide ? groups.itemAt(0).height
+                            : groups.itemAt(1).y + groups.itemAt(1).height
 
                         Repeater {
                             id: groups
@@ -423,6 +442,9 @@ Window {
                                 required property var modelData
                                 required property int index
                                 readonly property int span: options.swatchWidth + options.swatchGap
+                                readonly property int perRow: options.swatchesPerRow
+                                readonly property int rows: Math.ceil(swatches.count / perRow)
+                                readonly property int swatchHeight: swatches.count > 0 ? swatches.itemAt(0).height : 0
 
                                 function swatchOf(role) {
                                     for (var i = 0; i < swatches.count; i++)
@@ -431,9 +453,11 @@ Window {
                                     return null
                                 }
 
-                                x: index * (4 * span - options.swatchGap + options.groupGap)
-                                width: 4 * span - options.swatchGap
-                                height: groupTitle.height + 6 + (swatches.count > 0 ? swatches.itemAt(0).height : 0)
+                                x: options.groupsSideBySide ? index * (4 * span - options.swatchGap + options.groupGap) : 0
+                                y: options.groupsSideBySide || index === 0 ? 0
+                                    : groups.itemAt(0) ? groups.itemAt(0).height + options.swatchGap * 2 : 0
+                                width: perRow * span - options.swatchGap
+                                height: groupTitle.height + 6 + rows * swatchHeight + (rows - 1) * options.swatchGap
 
                                 Controls.SectionTitle {
                                     id: groupTitle
@@ -450,8 +474,9 @@ Window {
                                         required property string modelData
                                         required property int index
                                         theme: options.theme
-                                        x: index * group.span
-                                        y: groupTitle.height + 6
+                                        x: (index % group.perRow) * group.span
+                                        y: groupTitle.height + 6 + Math.floor(index / group.perRow)
+                                            * (group.swatchHeight + options.swatchGap)
                                         width: options.swatchWidth
                                         role: modelData
                                         name: options.roleNames[modelData] || modelData

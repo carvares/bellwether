@@ -16,9 +16,9 @@ from bellwether.__main__ import UI_PATH
 from bellwether.platform.linux import IMPORT_PATH
 from bellwether.backend import Backend
 from bellwether.layouts import built_skins
-from bellwether.options import Options
 from bellwether.state import Agent
 from tests.audit import text_findings, walk
+from tests.conftest import wide_options
 from tests.test_options import LETTERS, SIZE_HINTS_NOTE, cards, settle, spoken
 from tests.test_qml import LAYER_QML, LAYERSHELL_QMLDIR, OFFSCREEN_NOTE
 
@@ -47,7 +47,7 @@ def make(app, fake_client, path, families=FAMILIES, room=1080):
     engine = QQmlApplicationEngine()
     engine.warnings.connect(lambda errors: messages.extend(e.toString() for e in errors))
     engine.rootContext().setContextProperty("backend", backend)
-    options = Options(engine)
+    options = wide_options(engine)
     options.open()
     settle(app)
     window = engine.rootObjects()[0]
@@ -983,7 +983,7 @@ def both(app, fake_client, state_path):
     try:
         (panel,) = engine.rootObjects()
         backend.apply([Agent("t1", "blocked", "rev", "Main"), Agent("t2", "working", "ana", "api / 1")])
-        options = Options(engine)
+        options = wide_options(engine)
         options.open()
         settle(app)
         window = engine.rootObjects()[1]
@@ -1228,3 +1228,125 @@ def test_the_setting_of_the_model_line_has_its_room_in_each_theme_and_text_size(
     assert right <= window.width() - 20 and row.mapToScene(QPointF(0, 0)).y() >= 44  # below the header
     box = next(i for i in walk(row) if i.property("isCheckBox"))
     assert box.width() == box.height() >= 16
+
+
+# ----- a narrow screen: the window fits, the cards wrap, the sections are one below the other -----
+
+# The free width → the cards in a row, and Size | Text side by side (None: by the text size: they need room for
+# their labels and values, which grow with the text).
+NARROW = {1024: (4, None), 800: (3, False), 640: (2, False)}
+
+
+def right_edges_inside(window):
+    """Each visible item of the window ends inside it (no part is cut at the right)."""
+    found = []
+    for item in walk(window.contentItem()):
+        if not item.isVisible() or item.width() <= 0 or item.property("isScroller") or item.property("isFrame"):
+            continue
+        if item.property("layoutId") or item.property("swatchFor") or item.property("sliderFor") \
+                or item.property("isFontButton") or item.property("isResetAll") or item.property("isColourEditor") \
+                or item.property("isEditorClose") or item.property("isHexField") or item.property("isOpacitySlider"):
+            box = item.mapRectToScene(item.boundingRect())
+            if box.left() < -0.5 or box.right() > window.width() + 0.5:
+                found.append(f"{item.metaObject().className()} {box.left():.0f}..{box.right():.0f}")
+    return found
+
+
+def rows_of_cards(window):
+    rows = {}
+    for card in cards(window):
+        rows.setdefault(round(card.mapToScene(QPointF(0, 0)).y()), []).append(card.property("layoutId"))
+    return [rows[y] for y in sorted(rows)]
+
+
+@pytest.mark.parametrize("scale", [0.8, 1.4])
+@pytest.mark.parametrize("room", NARROW)
+@pytest.mark.parametrize("letter", LETTERS)
+def test_on_a_narrow_screen_the_window_fits_its_cards_wrap_and_every_text_has_its_room(app, shown, letter, room, scale):
+    window, backend, messages = shown
+    window.setProperty("roomWidth", room)
+    window.setProperty("roomHeight", 3000)  # all of it in the window: each control can be clicked (the scroll of a
+    backend.setLayout(letter)               # low screen has tests of its own)
+    backend.setFontScale(scale)
+    settle(app)
+    per_row, two_columns = NARROW[room]
+    assert window.width() == room - 32 and not find(window, "isScroller").property("scrolls")
+    assert [len(row) for row in rows_of_cards(window)] == {4: [4, 1], 3: [3, 2], 2: [2, 2, 1]}[per_row]
+    assert [card for row in rows_of_cards(window) for card in row] == list("ABCDE")
+    size, text = find(window, "sliderFor", "scale"), find(window, "sliderFor", "fontScale")
+    side_by_side = abs(size.mapToScene(QPointF(0, 0)).y() - text.mapToScene(QPointF(0, 0)).y()) < 1
+    assert side_by_side is window.property("twoColumns") is (two_columns if two_columns is not None else scale < 1.4)
+    assert right_edges_inside(window) == [] and text_findings(window) == []
+    # The colour editor of the background (with its opacity), with a message, then the list of fonts.
+    open_everything(app, window, backend)
+    assert editor(window).isVisible() and right_edges_inside(window) == [] and text_findings(window) == []
+    click(app, window, find(window, "isHexField"))
+    replace_text(app, window, "nothing")
+    assert find(window, "isHexMessage").isVisible() and text_findings(window) == []
+    click(app, window, find(window, "isFontButton"))
+    type_text(app, window, "m")
+    assert len(font_rows(window)) == 4 and right_edges_inside(window) == [] and text_findings(window) == []
+    click(app, window, find(window, "isResetAll"))
+    assert window.property("resetArmed") and right_edges_inside(window) == [] and text_findings(window) == []
+
+
+def test_on_a_narrow_screen_the_tab_key_goes_through_the_cards_in_the_order_that_they_show(app, shown):
+    window, backend, messages = shown
+    window.setProperty("roomWidth", 640)
+    settle(app)
+    order = []
+    cards(window)[0].forceActiveFocus()
+    settle(app)
+    for _ in range(5):
+        focused = window.activeFocusItem()
+        order.append((focused.property("layoutId"), focused.mapToScene(QPointF(0, 0))))
+        key(app, window, Qt.Key.Key_Tab)
+    assert [name for name, _ in order] == list("ABCDE")
+    places = [(round(point.y()), point.x()) for _, point in order]
+    assert places == sorted(places)  # row by row, and from the left in a row
+
+
+def test_a_screen_with_room_gives_the_window_of_five_cards_in_one_row(app, shown):
+    window, backend, messages = shown
+    for room in (1920, 1108):
+        window.setProperty("roomWidth", room)
+        settle(app)
+        assert window.width() == 1076 and [len(row) for row in rows_of_cards(window)] == [5]
+    window.setProperty("roomWidth", 1107)
+    settle(app)
+    assert window.width() == 1075 and [len(row) for row in rows_of_cards(window)] == [4, 1]
+
+
+def test_the_window_takes_the_free_width_of_its_screen_before_it_shows_and_stays_inside_it(app, fake_client, state_path):
+    """The program (options.py), not a test: the free part of the screen of the test is 800 px wide."""
+    from bellwether.options import Options
+    backend = Backend(fake_client, settings_path=state_path, skins=built_skins())
+    engine = QQmlApplicationEngine()
+    engine.rootContext().setContextProperty("backend", backend)
+    previous = qInstallMessageHandler(lambda mode, context, text: None)
+    try:
+        Options(engine).open()
+        settle(app)
+        window = engine.rootObjects()[0]
+        free = window.screen().availableGeometry()
+        assert window.property("roomWidth") == free.width() == 800 and window.width() == 768
+        assert free.contains(window.frameGeometry())
+    finally:
+        shiboken6.delete(engine)
+        app.processEvents()
+        qInstallMessageHandler(previous)
+
+
+def test_a_window_that_the_system_put_partly_outside_its_screen_comes_inside_it(app):
+    from PySide6.QtGui import QWindow
+    from bellwether.options import keep_on_screen
+    window = QWindow()
+    window.setGeometry(500, 600, 600, 300)  # the screen of the test is 800 × 800
+    keep_on_screen(window)
+    assert (window.x(), window.y()) == (200, 500)
+    window.setGeometry(10, 20, 600, 300)
+    keep_on_screen(window)
+    assert (window.x(), window.y()) == (10, 20)  # inside: no move
+    window.setGeometry(0, 0, 1000, 300)
+    keep_on_screen(window)
+    assert (window.x(), window.y()) == (0, 0)  # wider than the screen: its left edge stays on it
