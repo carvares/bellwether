@@ -151,3 +151,72 @@ def spawn_child(argv: list[str]) -> subprocess.Popen:
         argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0,
         preexec_fn=die_with_parent,
     )
+
+
+# ----- the process host: the home folder and /proc -----
+
+# The most processes of one terminal that are asked.
+MAX_PROCESSES = 32
+# The most threads of one process whose child processes are read.
+MAX_TASKS = 256
+
+
+class Host:
+    """The home folder of the user and /proc. A test gives its own folders. `bytes_read` counts what was read of
+    transcripts and rollout files."""
+
+    def __init__(self, home: Path | None = None, proc: Path = Path("/proc")) -> None:
+        self.home = Path(os.path.realpath(home if home is not None else Path.home()))
+        self.proc = Path(proc)
+        self.bytes_read = 0
+
+    def start_ticks(self, pid: int) -> str | None:
+        """The start of the process as /proc has it (field 22 of `stat`, in clock ticks since the boot)."""
+        try:
+            text = (self.proc / str(pid) / "stat").read_text(errors="replace")
+        except OSError:
+            return None
+        fields = text.rsplit(")", 1)[-1].split()  # the name of a process can have spaces and brackets
+        return fields[19] if len(fields) > 19 and fields[19].isdigit() else None
+
+    def children(self, pid: int) -> list[int]:
+        found: list[int] = []
+        try:
+            tasks = sorted((self.proc / str(pid) / "task").iterdir())
+        except OSError:
+            return found
+        for task in tasks[:MAX_TASKS]:
+            try:
+                found += [int(word) for word in (task / "children").read_text().split() if word.isdigit()]
+            except OSError:
+                continue
+        return found
+
+    def family(self, *pids: int):
+        """These processes and then their child processes, the nearest first, each one time, at most
+        MAX_PROCESSES. One at a time: the child processes are read only when a reader asks for more."""
+        order = [pid for pid in dict.fromkeys(pids) if pid > 0]
+        at = 0
+        while at < len(order) and at < MAX_PROCESSES:
+            yield order[at]
+            order += [child for child in self.children(order[at]) if child not in order]
+            at += 1
+
+    def open_files(self, pid: int) -> list[str]:
+        """The files that the process has open (the names only)."""
+        found = []
+        try:
+            numbers = list((self.proc / str(pid) / "fd").iterdir())
+        except OSError:
+            return found
+        for number in numbers[:4096]:
+            try:
+                found.append(os.readlink(number))
+            except OSError:
+                continue
+        return found
+
+
+def process_host() -> Host:
+    """The host of this machine: the home folder of the user and the real /proc."""
+    return Host()

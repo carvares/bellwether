@@ -11,8 +11,10 @@ import pytest
 
 from bellwether import sessions
 from bellwether.client import Failure, Terminal
+from bellwether.platform import linux
+from bellwether.platform.linux import Host
 from bellwether.sessions import (
-    BLOCK, SCAN_LIMIT, Host, SessionFacts, SessionWatch, age_text, age_words, read_claude, read_codex, short_model)
+    BLOCK, SCAN_LIMIT, SessionFacts, SessionWatch, age_text, age_words, read_claude, read_codex, short_model)
 from bellwether.state import Agent
 
 MARKER = "MARKER-private-session-text"
@@ -206,7 +208,7 @@ def test_the_child_processes_are_read_only_when_the_first_process_is_not_the_age
 def test_the_family_of_a_process_has_a_limit(machine):
     for pid in range(1, 80):
         machine.process(pid, children=[pid + 1])
-    assert list(machine.host.family(1)) == list(range(1, sessions.MAX_PROCESSES + 1))
+    assert list(machine.host.family(1)) == list(range(1, linux.MAX_PROCESSES + 1))
     machine.process(200, children=[200, 201])  # a process that names itself
     machine.process(201, children=[200])
     assert list(machine.host.family(200, 0, -4)) == [200, 201]

@@ -8,7 +8,8 @@ import pytest
 
 from bellwether.backend import Backend
 from bellwether.client import Failure, Terminal
-from bellwether.sessions import Host, SessionFacts, SessionWatch
+from bellwether.platform.linux import Host
+from bellwether.sessions import SessionFacts, SessionWatch
 from bellwether.state import Agent
 from tests.test_backend import wait_for
 
