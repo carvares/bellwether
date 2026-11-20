@@ -40,7 +40,8 @@ INTERFACE = {
     "shell": ("function", ("engine", "environ", "platform_name", "compositor_globals")),
 }
 # The names of the package that are not members of a system.
-OWN = {"load", "MODULES", "annotations", "importlib", "sys", "ModuleType", "linux"}
+# The modules of the package are names of it too, once imported.
+OWN = {"load", "MODULES", "annotations", "importlib", "sys", "ModuleType", "linux", "host"}
 
 
 def test_on_linux_the_package_gives_the_members_of_the_linux_module():
@@ -68,6 +69,17 @@ def test_each_member_of_the_linux_module_has_its_kind_and_its_parameters(name):
         assert set(member) <= {"layer", "plain"} and "plain" in member and all(f.is_file() for f in member.values())
     else:
         assert isinstance(member, str) and member
+
+
+def test_the_process_host_of_the_linux_module_is_a_process_host_and_shares_its_family_rule(tmp_path):
+    from bellwether.platform.host import MAX_PROCESSES, ProcessHost
+    assert isinstance(linux.process_host(), ProcessHost)
+    assert linux.Host.family is ProcessHost.family and linux.MAX_PROCESSES == MAX_PROCESSES
+    bare = ProcessHost(tmp_path)
+    assert (bare.home, bare.bytes_read) == (tmp_path.resolve(), 0)
+    for read in (bare.start_ticks, bare.children, bare.arguments, bare.open_files):
+        with pytest.raises(NotImplementedError):
+            read(1)
 
 
 @pytest.mark.parametrize("name", ["darwin", "win32", "cygwin", "freebsd14", ""])

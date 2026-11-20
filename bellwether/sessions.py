@@ -35,8 +35,8 @@ from typing import TYPE_CHECKING
 from .client import Failure, Terminal, valid_address
 from .platform import process_host
 
-if TYPE_CHECKING:  # The host of each system has the members of the Linux host.
-    from .platform.linux import Host
+if TYPE_CHECKING:  # The host of each system is a subclass of this one.
+    from .platform.host import ProcessHost as Host
 
 log = logging.getLogger("bellwether")
 

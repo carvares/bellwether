@@ -19,6 +19,7 @@ from PySide6.QtGui import QGuiApplication, QImageReader
 from PySide6.QtQml import QQmlComponent
 
 from ..layouts import UI_PATH
+from .host import MAX_PROCESSES, ProcessHost  # noqa: F401  (MAX_PROCESSES: the limit of family(), for the tests)
 
 
 # ----- the folders: the XDG base folders with the standard defaults -----
@@ -169,20 +170,17 @@ def spawn_child(argv: list[str]) -> subprocess.Popen:
 
 # ----- the process host: the home folder and /proc -----
 
-# The most processes of one terminal that are asked.
-MAX_PROCESSES = 32
 # The most threads of one process whose child processes are read.
 MAX_TASKS = 256
 
 
-class Host:
+class Host(ProcessHost):
     """The home folder of the user and /proc. A test gives its own folders. `bytes_read` counts what was read of
     transcripts and rollout files."""
 
     def __init__(self, home: Path | None = None, proc: Path = Path("/proc")) -> None:
-        self.home = Path(os.path.realpath(home if home is not None else Path.home()))
+        super().__init__(home)
         self.proc = Path(proc)
-        self.bytes_read = 0
 
     def start_ticks(self, pid: int) -> str | None:
         """The start of the process as /proc has it (field 22 of `stat`, in clock ticks since the boot)."""
@@ -205,16 +203,6 @@ class Host:
             except OSError:
                 continue
         return found
-
-    def family(self, *pids: int):
-        """These processes and then their child processes, the nearest first, each one time, at most
-        MAX_PROCESSES. One at a time: the child processes are read only when a reader asks for more."""
-        order = [pid for pid in dict.fromkeys(pids) if pid > 0]
-        at = 0
-        while at < len(order) and at < MAX_PROCESSES:
-            yield order[at]
-            order += [child for child in self.children(order[at]) if child not in order]
-            at += 1
 
     def arguments(self, pid: int) -> list[str]:
         """The words of the command line of the process. Empty when they cannot be read."""
