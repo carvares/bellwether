@@ -61,16 +61,25 @@ Window {
 
     // Keep the panel on its screen. During a drag the panel can be on two screens, so the drag does this itself.
     function clampPosition() {
-        if (pointerArea.pressed && pointerArea.moved)
+        if (dragging())
             return
-        if (atDefault) {
-            posX = home.width - width - edge
-            posY = edge
-        }
-        var maxX = Math.max(0, home.width - width)
-        var maxY = Math.max(0, home.height - height)
-        posX = Math.min(Math.max(0, posX), maxX)
-        posY = Math.min(Math.max(0, posY), maxY)
+        var place = clampedPlace(width, height)
+        posX = place.x
+        posY = place.y
+    }
+
+    // The place of a panel of w × h on its screen: the default corner when the panel has no place of its own, and
+    // kept on the screen.
+    function clampedPlace(w, h) {
+        var px = atDefault ? home.width - w - edge : posX
+        var py = atDefault ? edge : posY
+        return {x: Math.min(Math.max(0, px), Math.max(0, home.width - w)),
+                y: Math.min(Math.max(0, py), Math.max(0, home.height - h))}
+    }
+
+    // True while a drag moves the panel: it can then be on two screens, and nothing pulls it back to its own.
+    function dragging() {
+        return pointerArea.pressed && pointerArea.moved
     }
 
     // The screens as {name, x, y, width, height}, with x and y in the whole desktop.
@@ -261,7 +270,13 @@ Window {
             return
         }
         if (width !== w || height !== h)
-            setGeometry(x, y, w, h)
+            applySize(w, h)
+    }
+
+    // The window gets the size w × h. A shell that places its window gives its own applySize() (one request for the
+    // size and the place).
+    function applySize(w, h) {
+        setGeometry(x, y, w, h)
     }
 
     // The size of a skin can change two times and more in one step (one list closes and a different list opens;

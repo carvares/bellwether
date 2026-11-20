@@ -1,5 +1,6 @@
 """Smoke test of the real panel (the layer shell), loaded the same way as bellwether/__main__.py (off screen)."""
 import json
+import math
 import logging
 import os
 import subprocess
@@ -1338,6 +1339,19 @@ def test_no_shell_asks_for_the_focus(name):
     assert [word for word in ("requestActivate", "forceActiveFocus", "raise()", "focus: true") if word in text] == []
 
 
+def geometry_log(root):
+    """A list that gets the geometry of the window (x, y, width, height) at each change of one of them."""
+    seen = []
+    note = lambda *_: seen.append((root.x(), root.y(), root.width(), root.height()))
+    for signal in (root.xChanged, root.yChanged, root.widthChanged, root.heightChanged):
+        signal.connect(note)
+    return seen
+
+
+def requests(root):
+    return root.property("placeRequests")
+
+
 @plain_only
 def test_the_plain_window_is_at_the_place_of_the_panel_and_a_new_size_keeps_its_top_left_corner(app, window):
     root, backend, messages = window
@@ -1346,33 +1360,105 @@ def test_the_plain_window_is_at_the_place_of_the_panel_and_a_new_size_keeps_its_
     assert root.property("atDefault") is True
     assert (root.x(), root.y()) == (real.x() + real.width() - WIDTH - 16, real.y() + 16)  # the default corner
     use_screens(root, OFFSET, "B", 100, 200)
+    settle(app)
     assert (root.x(), root.y()) == (2560 + 100, 360 + 200)  # the screen of the panel and the place on it
     backend.apply(AGENTS)
     settle(app)
     size = (root.width(), root.height())
+    seen = geometry_log(root)
+    asked = requests(root)
     click(app, root, rows(root, "status")[2])  # a group opens: the window is taller
     assert root.height() > size[1] and root.width() == size[0]
     assert (root.x(), root.y()) == (2660, 560) and place(root) == ("B", 100, 200)
+    assert {s[:2] for s in seen} == {(2660, 560)} and requests(root) == asked + 1  # one request: the size
     click(app, root, rows(root, "status")[2])  # and closes
     assert (root.width(), root.height()) == size and (root.x(), root.y()) == (2660, 560)
-    js(root, "root.moveToNextScreen()")  # from B, the last screen, to A
-    assert place(root) == ("A", 100, 200) and (root.x(), root.y()) == (100, 200)
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
-def test_the_plain_window_goes_to_the_screen_of_the_panel_and_qt_follows_it_during_a_drag(tmp_path):
-    """Two real screens (off screen, in a process of their own): the window is on the screen of the panel; during a
-    drag Qt gives it the screen that holds its centre; at the release the panel belongs to that screen."""
+@plain_only
+def test_a_place_change_of_the_plain_window_is_one_request_with_both_coordinates(app, window):
+    """x and y go to the window system together: the window never stands at a point between the two places (from
+    B to A that point, 100,560, is on A; from A to B, 2660,200 is on no screen)."""
+    root, backend, messages = window
+    use_screens(root, OFFSET, "B", 100, 200)
+    settle(app)
+    for to, wanted in (("A", (100, 200)), ("B", (2660, 560)), ("A", (100, 200))):
+        seen, asked = geometry_log(root), requests(root)
+        js(root, "root.moveToNextScreen()")
+        settle(app)
+        assert place(root)[0] == to and (root.x(), root.y()) == wanted
+        assert requests(root) == asked + 1 and {s[:2] for s in seen} == {wanted}
+    seen, asked = geometry_log(root), requests(root)
+    root.setProperty("posX", 300)  # two changes in one step: one request
+    root.setProperty("posY", 400)
+    settle(app)
+    assert (root.x(), root.y()) == (300, 400) and requests(root) == asked + 1 and {s[:2] for s in seen} == {(300, 400)}
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+@plain_only
+def test_a_new_size_at_the_default_corner_is_one_request_and_never_past_the_right_edge(app, window):
+    root, backend, messages = window
+    use_screens(root, OFFSET, "B", 0, 0)
+    root.setProperty("atDefault", True)
+    js(root, "root.clampPosition()")
+    settle(app)
+    assert (root.x(), root.y()) == (2560 + 1920 - WIDTH - 16, 360 + 16)
+    for scale in (1.5, 2.0, 0.75, 1.0):
+        seen, asked = geometry_log(root), requests(root)
+        assert backend.setScale(scale) is True
+        settle(app)
+        width = root.width()
+        assert width == math.ceil(WIDTH * scale - 0.000001)
+        assert (root.x(), root.y()) == (2560 + 1920 - width - 16, 360 + 16), scale
+        assert requests(root) == asked + 1, scale
+        assert all(x + w <= 2560 + 1920 - 16 for x, y, w, h in seen), (scale, seen)  # no frame past the edge
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+@plain_only
+def test_a_plain_window_that_the_window_system_moves_goes_back_one_time(app, window):
+    root, backend, messages = window
+    use_screens(root, OFFSET, "A", 300, 400)
+    settle(app)
+    assert (root.x(), root.y()) == (300, 400)
+    asked = requests(root)
+    root.setPosition(QPoint(300, 500))  # the window manager keeps the window inside an area
+    settle(app)
+    assert (root.x(), root.y()) == (300, 400) and requests(root) == asked + 1  # asked again, one time
+    root.setPosition(QPoint(300, 500))  # it does it again: the shell leaves it
+    settle(app)
+    assert (root.x(), root.y()) == (300, 500) and requests(root) == asked + 1
+    assert place(root) == ("A", 300, 400)  # the place of the panel stays
+    root.setProperty("posX", 310)  # a new place: asked, and asked again after one more move by the system
+    settle(app)
+    assert (root.x(), root.y()) == (310, 400) and requests(root) == asked + 2
+    root.setPosition(QPoint(0, 0))
+    settle(app)
+    assert (root.x(), root.y()) == (310, 400) and requests(root) == asked + 3
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def run_on_two_screens(tmp_path, module, *arguments):
+    """Run `python -m <module> <arguments>` with two real off-screen screens: LEFT (1920 x 1080 at 0, 0) and RIGHT
+    (1280 x 720 at 1920, 0). Return its JSON lines by their "step"."""
     config = tmp_path / "screens.json"
     config.write_text(json.dumps({"screens": [
         {"name": "LEFT", "x": 0, "y": 0, "width": 1920, "height": 1080, "logicalDpi": 96, "logicalBaseDpi": 96, "dpr": 1},
         {"name": "RIGHT", "x": 1920, "y": 0, "width": 1280, "height": 720, "logicalDpi": 96, "logicalBaseDpi": 96, "dpr": 1},
     ]}))
     done = subprocess.run(
-        [sys.executable, "-m", "tests.plain_screens", str(tmp_path / "state.json")], capture_output=True, text=True,
-        timeout=60, cwd=Path(__file__).parent.parent, env={**os.environ, "QT_QPA_PLATFORM": f"offscreen:configfile={config}"})
+        [sys.executable, "-m", module, *arguments], capture_output=True, text=True, timeout=60,
+        cwd=Path(__file__).parent.parent, env={**os.environ, "QT_QPA_PLATFORM": f"offscreen:configfile={config}"})
     assert done.returncode == 0, done.stderr[-2000:]
-    steps = {s.pop("step"): s for s in map(json.loads, done.stdout.splitlines())}
+    return {s.pop("step"): s for s in map(json.loads, done.stdout.splitlines())}
+
+
+def test_the_plain_window_goes_to_the_screen_of_the_panel_and_qt_follows_it_during_a_drag(tmp_path):
+    """Two real screens (off screen, in a process of their own): the window is on the screen of the panel; during a
+    drag Qt gives it the screen that holds its centre; at the release the panel belongs to that screen."""
+    steps = run_on_two_screens(tmp_path, "tests.plain_screens", str(tmp_path / "state.json"))
     assert steps["start"]["screens"] == ["LEFT", "RIGHT"]
     view = {name: (s["place"], s["window"][:2], s["qtScreen"], s["surfaceScreen"]) for name, s in steps.items()}
     assert view == {
