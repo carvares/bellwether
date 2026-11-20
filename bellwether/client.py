@@ -126,6 +126,14 @@ def valid_text(text: object) -> bool:
     return text_problem(text) == ""
 
 
+@dataclass(frozen=True)
+class Terminal:
+    """What herdr-core knows of one terminal, for the model and session-time line. 0: Herdr gives no such value."""
+    pid: int = 0  # the first process of the terminal (a shell, or the agent program)
+    foreground: int = 0  # the process that has the terminal now
+    created_ms: int = 0  # the creation of the terminal, in milliseconds since 1970
+
+
 class HerdrOffline(Exception):
     """The Herdr app and herdr-core did not answer."""
 
@@ -137,6 +145,11 @@ class HerdrError(Exception):
         super().__init__(f"{code}: {message}")
         self.code = code
         self.message = message
+
+
+def _whole(value: object) -> int:
+    """A positive whole number of an answer of herdr-core, or 0."""
+    return value if type(value) is int and 0 < value < 2 ** 53 else 0
 
 
 def find_executables() -> tuple[str | None, str | None]:
@@ -193,6 +206,31 @@ class HerdrClient:
         self._known = frozenset()
         self._set_source("none")
         raise HerdrOffline("herdr-app and herdr-core did not answer")
+
+    # ----- the processes of one agent -----
+
+    def terminal(self, terminal: str) -> Terminal | Failure:
+        """The processes and the creation time of a terminal of the last list: one `herdr-core get`. Nothing is
+        logged here: the caller logs a reason code when it changes."""
+        if not valid_address(terminal):
+            return Failure("bad_address")
+        if terminal not in self._known:
+            return Failure("unknown_terminal")
+        if self._core is None:
+            return Failure("no_core")
+        found = self._command([self._core, "get", terminal, "--json"], READ_TIMEOUT)
+        if isinstance(found, Failure):
+            return found
+        try:
+            data = json.loads(found.stdout)
+        except ValueError:
+            return Failure("bad_answer")
+        # A terminal can have a NAME that has the form of an address: the answer must be of this address.
+        if not isinstance(data, dict) or data.get("address") != terminal:
+            return Failure("not_this_terminal")
+        foreground = data.get("foreground")
+        return Terminal(_whole(data.get("pid")), _whole(foreground.get("pid") if isinstance(foreground, dict) else 0),
+                        _whole(data.get("created_ms")))
 
     # ----- the screen of one agent -----
 

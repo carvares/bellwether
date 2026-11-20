@@ -562,3 +562,62 @@ def test_a_real_key_process_lives_past_the_deadline_and_is_reaped(tmp_path, monk
     assert client.press("t1", ["1"], late=lambda failure: (ends.append(failure), told.set())) == Failure("timeout")
     assert time.monotonic() - began < 0.7
     assert told.wait(5) and ends == [None] and time.monotonic() - began >= 0.7
+
+
+# ----- the processes of one terminal, for the model and session-time line (task 26) -----
+
+def terminal_client(names=None):
+    runner = Runner(names=names)
+    client = HerdrClient(None, CORE, run=runner)
+    client.list_agents()
+    return client, runner
+
+
+def test_terminal_gives_the_processes_and_the_creation_time_with_one_get(caplog):
+    from bellwether.client import Terminal
+    caplog.set_level(logging.INFO, logger="bellwether")
+    answer = {"address": "t1", "pid": 600, "created_ms": 1795015110521, "title": MARKER, "cwd": MARKER,
+              "foreground": {"pid": 700, "name": "claude", "argv": [MARKER]}}
+    client, runner = terminal_client({"t1": done(answer)})
+    del caplog.records[:]
+    found = client.terminal("t1")
+    assert found == Terminal(600, 700, 1795015110521)
+    assert runner.gets == [([CORE, "get", "t1", "--json"], READ_TIMEOUT)] and runner.calls == []
+    assert caplog.records == [] and MARKER not in repr(found)
+
+
+@pytest.mark.parametrize("answer, expected", [
+    ({"address": "t1"}, (0, 0, 0)),
+    ({"address": "t1", "pid": "600", "created_ms": 1.5, "foreground": {"pid": True}}, (0, 0, 0)),
+    ({"address": "t1", "pid": -4, "created_ms": 2 ** 60, "foreground": [700]}, (0, 0, 0)),
+    ({"address": "t1", "pid": 600, "foreground": None}, (600, 0, 0)),
+])
+def test_terminal_takes_only_positive_whole_numbers(answer, expected):
+    from bellwether.client import Terminal
+    client, _ = terminal_client({"t1": done(answer)})
+    assert client.terminal("t1") == Terminal(*expected)
+
+
+@pytest.mark.parametrize("address, names, code", [
+    ("t1; rm", None, "bad_address"),
+    ("t9", None, "unknown_terminal"),
+    ("t1", {"t1": "t5"}, "not_this_terminal"),
+    ("t1", {"t1": done(b"not json " + MARKER.encode())}, "bad_answer"),
+    ("t1", {"t1": done(b"[1]")}, "not_this_terminal"),
+    ("t1", {"t1": subprocess.TimeoutExpired("x", 2)}, "timeout"),
+    ("t1", {"t1": OSError(MARKER)}, "no_run"),
+    ("t1", {"t1": done(MARKER.encode(), returncode=1, stderr=MARKER.encode())}, "exit_1"),
+])
+def test_terminal_fails_with_a_reason_code_and_no_log_line(caplog, address, names, code):
+    caplog.set_level(logging.INFO, logger="bellwether")
+    client, runner = terminal_client(names)
+    del caplog.records[:]
+    assert client.terminal(address) == Failure(code)
+    assert caplog.records == [] and runner.calls == []
+    assert len(runner.gets) == (0 if code in ("bad_address", "unknown_terminal") else 1)
+
+
+def test_terminal_needs_herdr_core():
+    client = HerdrClient(None, None)
+    client._known = frozenset({"t1"})
+    assert client.terminal("t1") == Failure("no_core")
