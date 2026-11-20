@@ -7,7 +7,7 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath
+from PySide6.QtGui import QColor, QImage, QImageReader, QPainter, QPainterPath
 from PySide6.QtSvg import QSvgRenderer
 
 from . import platform
@@ -93,11 +93,25 @@ def _draw_svg(renderer: QSvgRenderer, clips) -> QImage:
     return image
 
 
+def _largest(path: Path) -> QImage:
+    """The image of the file; of a file with several sizes (the .icns of a macOS app, an .ico), the largest one."""
+    reader = QImageReader(str(path))
+    if reader.imageCount() <= 1:
+        return QImage(str(path))
+    best = QImage()
+    for index in range(reader.imageCount()):
+        if reader.jumpToImage(index):
+            image = reader.read()
+            if not image.isNull() and image.width() * image.height() > best.width() * best.height():
+                best = image
+    return best
+
+
 def load_source(path: Path) -> QImage | None:
     """The icon as a square image with alpha, or None if it cannot be read."""
     if Path(path).suffix.lower() == ".svg":
         return _render_svg(path)
-    picture = QImage(str(path))
+    picture = _largest(path)
     if picture.isNull():
         return None
     if max(picture.width(), picture.height()) > SOURCE_SIZE:

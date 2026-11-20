@@ -561,3 +561,76 @@ def test_on_a_mac_psutil_gives_the_children_the_arguments_and_the_open_files(tmp
     finally:
         child.kill()
         child.wait()
+
+
+# ----- the icon of the Herdr app -----
+
+def png(size, color):
+    from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+    from PySide6.QtGui import QColor, QImage
+    image = QImage(size, size, QImage.Format.Format_ARGB32)
+    image.fill(QColor(color))
+    data = QByteArray()
+    buffer = QBuffer(data)
+    buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+    image.save(buffer, "PNG")
+    return bytes(data)
+
+
+def icns(path, entries):
+    """An .icns file: its header, then each entry (a type of 4 letters, its length, a PNG)."""
+    import struct
+    body = b"".join(kind + struct.pack(">I", 8 + len(data)) + data for kind, data in entries)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"icns" + struct.pack(">I", 8 + len(body)) + body)
+    return path
+
+
+def bundle(folder, icon_name="Herdr", plist=None):
+    import plistlib
+    (folder / "Contents" / "Resources").mkdir(parents=True, exist_ok=True)
+    (folder / "Contents" / "Info.plist").write_bytes(plist if plist is not None else plistlib.dumps(
+        {"CFBundleIdentifier": "dev.herdr.app", "CFBundleIconFile": icon_name}))
+    return folder
+
+
+def test_the_icon_is_the_icns_that_the_info_plist_of_the_bundle_names(tmp_path, app):
+    first, second = tmp_path / "a" / "Herdr.app", tmp_path / "b" / "Herdr.app"
+    assert macos.app_icon_file(bundles=[None, first, second]) is None
+    bundle(first, "Missing")  # names a file that is not there
+    bundle(second, "Herdr")
+    icon = icns(second / "Contents" / "Resources" / "Herdr.icns", [(b"ic07", png(128, "#ff0000"))])
+    assert macos.app_icon_file(bundles=[None, first, second]) == icon
+    bundle(first, "Other.icns")
+    other = icns(first / "Contents" / "Resources" / "Other.icns", [(b"ic07", png(128, "#00ff00"))])
+    assert macos.app_icon_file(bundles=[first, second]) == other
+
+
+@pytest.mark.parametrize("plist", [b"not a plist", None])
+def test_a_bundle_with_a_bad_info_plist_or_icon_name_is_passed_over(tmp_path, app, plist):
+    import plistlib
+    first, second = tmp_path / "a" / "Herdr.app", tmp_path / "b" / "Herdr.app"
+    bundle(first, plist=plist if plist is not None else plistlib.dumps({"CFBundleIconFile": "../../x"}))
+    bundle(second)
+    icon = icns(second / "Contents" / "Resources" / "Herdr.icns", [(b"ic07", png(128, "#ff0000"))])
+    assert macos.app_icon_file(bundles=[first, second]) == icon
+
+
+def test_the_default_bundles_follow_the_link_of_the_installer(tmp_path, monkeypatch, app):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    moved = bundle(tmp_path / "Elsewhere" / "Herdr.app")
+    icon = icns(moved / "Contents" / "Resources" / "Herdr.icns", [(b"ic07", png(128, "#ff0000"))])
+    assert macos.app_icon_file() is None or macos.app_icon_file() != icon  # no link yet (a real /Applications aside)
+    program(moved / "Contents" / "MacOS" / "Herdr")
+    (tmp_path / ".local" / "bin").mkdir(parents=True)
+    (tmp_path / ".local" / "bin" / "herdr-app").symlink_to(moved / "Contents" / "MacOS" / "Herdr")
+    assert macos.app_icon_file() == icon
+
+
+def test_the_tray_takes_the_largest_image_of_an_icns(tmp_path, app):
+    from PySide6.QtGui import QColor
+    from bellwether.appicon import load_source
+    path = icns(tmp_path / "Herdr.icns", [(b"icp6", png(64, "#ff0000")), (b"ic08", png(256, "#0000ff")),
+                                         (b"icp5", png(32, "#00ff00"))])
+    image = load_source(path)
+    assert image.width() == 256 and image.pixelColor(128, 128) == QColor("#0000ff")

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import os
+import plistlib
 import subprocess
 import time
 from pathlib import Path
@@ -410,3 +411,31 @@ def process_host(*, psutil=None) -> Host:
     if module is None:
         log.warning("psutil cannot be imported: the rows show the time of the terminal and no model")
     return Host(None, module)
+
+
+# ----- the icon file of the Herdr app: the .icns of its bundle -----
+
+def app_icon_file(*, bundles=None) -> Path | None:
+    """The .icns file of the Herdr app bundle (its Info.plist names it, CFBundleIconFile), or None. The bundles
+    looked at: the one that ~/.local/bin/herdr-app points to (the Herdr installer makes that link), then Herdr.app
+    in ~/Applications and /Applications. Qt reads .icns (its plugin qicns is in the PySide6 wheel)."""
+    if bundles is None:
+        bundles = [app_bundle(str(Path("~/.local/bin/herdr-app").expanduser())),
+                   *(Path(folder).expanduser() / f"{APP_NAME}.app" for folder in APP_FOLDERS)]
+    for bundle in bundles:
+        if bundle is None:
+            continue
+        try:
+            with open(Path(bundle) / "Contents" / "Info.plist", "rb") as file:
+                name = plistlib.load(file).get("CFBundleIconFile")
+        except (OSError, ValueError, plistlib.InvalidFileException, AttributeError):
+            continue
+        if not isinstance(name, str) or not name or "/" in name:
+            continue
+        path = Path(bundle) / "Contents" / "Resources" / (name if name.endswith(".icns") else f"{name}.icns")
+        try:
+            if path.is_file():
+                return path
+        except OSError:
+            continue
+    return None
