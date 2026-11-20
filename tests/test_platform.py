@@ -1,5 +1,6 @@
 """The platform package: the interface that each system gives, the choice of the module, and the rule that only the
 package has system-specific code."""
+import ast
 import inspect
 import logging
 import re
@@ -74,15 +75,65 @@ def test_a_system_with_no_module_is_a_clear_import_error(name):
 
 # ----- only the package has system-specific code -----
 
-# A text that names a system-specific mechanism. Outside bellwether/platform/ no module has one.
-FORBIDDEN = ("sys.platform", "import fcntl", "from fcntl", "import ctypes", "from ctypes", "prctl", "/proc", "busctl",
-             "systemd-run", "XDG_", ".desktop")
-# path relative to bellwether/ → the forbidden texts that it may have, with the reason. Empty: no exception.
+# The modules whose import is system-specific. `platform` is the module of the standard library (an absolute import);
+# the package of the program is `from . import platform`, a relative import, which the rule does not see.
+SYSTEM_MODULES = ("fcntl", "ctypes", "msvcrt", "winreg", "platform")
+# A module → its attributes that tell the system.
+SYSTEM_ATTRIBUTES = {"sys": ("platform",), "os": ("name",), "platform": ("system", "uname")}
+# A text that names a system-specific mechanism: a call of the kernel, a file system, a program, the XDG rules.
+FORBIDDEN_TEXTS = ("prctl", "/proc", "busctl", "systemd-run", "XDG_", ".desktop")
+# path relative to bellwether/ → the findings that it may have, with the reason. Empty: no exception.
 EXCEPTIONS: dict[str, tuple[str, ...]] = {}
 
 
 def modules_outside_the_package():
     return sorted(path for path in SOURCE.rglob("*.py") if PACKAGE not in path.parents)
+
+
+def named_module(node, aliases):
+    """The module that the expression `node` names: a name that an import gave, `__import__("m")` or
+    `importlib.import_module("m")`. None for anything else."""
+    if isinstance(node, ast.Name):
+        return aliases.get(node.id)
+    if isinstance(node, ast.Call) and node.args and isinstance(node.args[0], ast.Constant):
+        call = node.func
+        if (isinstance(call, ast.Name) and call.id == "__import__") or (
+                isinstance(call, ast.Attribute) and call.attr == "import_module"):
+            return node.args[0].value if isinstance(node.args[0].value, str) else None
+    return None
+
+
+def system_specific(text):
+    """The system-specific parts of the source `text`: "import <module>" for a system module (by an import statement
+    or by a call), "<module>.<attribute>" for an attribute that tells the system (as an attribute, through an alias,
+    `from <module> import <attribute>` or `getattr`), and each forbidden text."""
+    tree = ast.parse(text)
+    found = []
+    aliases = {}  # a name of the module → the module that an absolute import bound to it
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                aliases[alias.asname or alias.name.split(".")[0]] = alias.name if alias.asname else alias.name.split(".")[0]
+                found.append(f"import {alias.name.split('.')[0]}")
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            root = node.module.split(".")[0]
+            found.append(f"import {root}")
+            found += [f"{root}.{a.name}" for a in node.names if a.name in SYSTEM_ATTRIBUTES.get(root, ())]
+    found = [item for item in found if not item.startswith("import ") or item[7:] in SYSTEM_MODULES]
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute):
+            module = named_module(node.value, aliases)
+            if node.attr in SYSTEM_ATTRIBUTES.get(module, ()):
+                found.append(f"{module}.{node.attr}")
+        elif isinstance(node, ast.Call):
+            module = named_module(node, aliases)
+            if module and module.split(".")[0] in SYSTEM_MODULES:
+                found.append(f"import {module.split('.')[0]}")
+            if isinstance(node.func, ast.Name) and node.func.id == "getattr" and len(node.args) >= 2:
+                module, name = named_module(node.args[0], aliases), node.args[1]
+                if isinstance(name, ast.Constant) and name.value in SYSTEM_ATTRIBUTES.get(module, ()):
+                    found.append(f"{module}.{name.value}")
+    return sorted(set(found)) + [word for word in FORBIDDEN_TEXTS if word in text]
 
 
 def test_no_module_outside_the_package_has_system_specific_code():
@@ -91,15 +142,42 @@ def test_no_module_outside_the_package_has_system_specific_code():
     found = []
     for path in modules:
         name = str(path.relative_to(SOURCE))
-        text = path.read_text()
-        found += [f"{name}: {word}" for word in FORBIDDEN if word in text and word not in EXCEPTIONS.get(name, ())]
+        found += [f"{name}: {item}" for item in system_specific(path.read_text()) if item not in EXCEPTIONS.get(name, ())]
     assert found == []
 
 
+@pytest.mark.parametrize("source, found", [
+    # The usual ways.
+    ("import fcntl", ["import fcntl"]),
+    ("from ctypes import CDLL", ["import ctypes"]),
+    ("import sys\nif sys.platform == 'linux':\n    pass", ["sys.platform"]),
+    # The ways a text scan does not see.
+    ("import os, fcntl", ["import fcntl"]),
+    ("import os\nif os.name == 'nt':\n    pass", ["os.name"]),
+    ("x = __import__('sys').platform", ["sys.platform"]),
+    ("import platform\nprint(platform.system())", ["import platform", "platform.system"]),
+    ("import platform as p\np.uname()", ["import platform", "platform.uname"]),
+    ("import sys as s\ns.platform", ["sys.platform"]),
+    ("from sys import platform as where", ["sys.platform"]),
+    ("from os import name", ["os.name"]),
+    ("import sys\ngetattr(sys, 'platform')", ["sys.platform"]),
+    ("import importlib\nimportlib.import_module('msvcrt')", ["import msvcrt"]),
+    ("lock = __import__('fcntl.x')", ["import fcntl"]),
+    ("open('/proc/self/stat')", ["/proc"]),
+    # Not system-specific: the package of the program, and the same words on other things.
+    ("from . import platform\nplatform.shell(None)\nplatform.system", []),
+    ("import os\nos.environ['A']\nos.path.join('a', 'b')", []),
+    ("import sys\nsys.argv\nthing.platform\nperson.name", []),
+])
+def test_the_scan_finds_each_way_to_write_a_system_test(source, found):
+    assert system_specific(source) == found
+
+
 def test_the_scan_finds_each_forbidden_text():
-    """The check of the test above works: each text is found in the Linux module, where it belongs."""
-    text = "\n".join(path.read_text() for path in PACKAGE.rglob("*.py"))
-    assert [word for word in FORBIDDEN if word not in text and not word.startswith("from ")] == []
+    """The check of the test above works on real code: the Linux module has its system code, where it belongs."""
+    found = system_specific((PACKAGE / "linux.py").read_text())
+    assert {"import fcntl", "import ctypes"} <= set(found)
+    assert [word for word in FORBIDDEN_TEXTS if word not in found] == []
 
 
 # ----- the set-up of Qt on Linux -----
