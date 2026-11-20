@@ -65,9 +65,23 @@ def test_the_shell_is_always_plain_and_another_choice_gets_one_log_line(caplog):
 
 def test_qt_gets_no_platform_and_the_engine_no_import_path(monkeypatch):
     monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
-    assert macos.prepare_environment() is None
+    monkeypatch.delenv("QT_MAC_DISABLE_FOREGROUND_APPLICATION_TRANSFORM", raising=False)
+    assert macos.prepare_environment(appkit_found=False) is None
     assert "QT_QPA_PLATFORM" not in macos.os.environ
+    assert "QT_MAC_DISABLE_FOREGROUND_APPLICATION_TRANSFORM" not in macos.os.environ  # no pyobjc: Qt's own way
     assert macos.prepare_engine(object()) is None
+
+
+def test_with_pyobjc_qt_does_not_make_the_program_a_foreground_app_that_it_activates_at_its_start(monkeypatch):
+    monkeypatch.delenv("QT_MAC_DISABLE_FOREGROUND_APPLICATION_TRANSFORM", raising=False)
+    macos.prepare_environment(appkit_found=True)
+    assert macos.os.environ["QT_MAC_DISABLE_FOREGROUND_APPLICATION_TRANSFORM"] == "1"
+    monkeypatch.setenv("QT_MAC_DISABLE_FOREGROUND_APPLICATION_TRANSFORM", "")  # a choice of the person stays
+    macos.prepare_environment(appkit_found=True)
+    assert macos.os.environ["QT_MAC_DISABLE_FOREGROUND_APPLICATION_TRANSFORM"] == ""
+    monkeypatch.delenv("QT_MAC_DISABLE_FOREGROUND_APPLICATION_TRANSFORM")
+    macos.prepare_environment()  # looks for AppKit: there only on a Mac with pyobjc
+    assert ("QT_MAC_DISABLE_FOREGROUND_APPLICATION_TRANSFORM" in macos.os.environ) == (sys.platform == "darwin")
 
 
 # ----- the Herdr programs, the raise and the start of the app -----

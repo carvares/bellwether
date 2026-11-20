@@ -49,9 +49,23 @@ SHELL_NEEDS = "a Wayland compositor with the layer-shell protocol, which macOS d
 SHELL_VARIABLE = "BELLWETHER_SHELL"
 
 
-def prepare_environment() -> None:
-    """Before the QApplication: nothing. Qt takes its cocoa plugin (a person can choose an other one with
-    QT_QPA_PLATFORM, for example offscreen)."""
+# Qt makes a program with no app bundle a foreground app and activates it when it has started (QCocoaIntegration,
+# QCocoaApplicationDelegate.applicationDidFinishLaunching, Qt 6.12): the panel would take the keyboard from the app
+# of the person at each start. This variable of Qt turns both off; prepare_app then makes the program an accessory
+# app.
+NO_FOREGROUND = "QT_MAC_DISABLE_FOREGROUND_APPLICATION_TRANSFORM"
+
+
+def prepare_environment(*, appkit_found=None) -> None:
+    """Before the QApplication: no forced Qt platform (Qt takes its cocoa plugin; a person can choose an other one
+    with QT_QPA_PLATFORM). With pyobjc, Qt does not make the program a foreground app and does not activate it at
+    its start (NO_FOREGROUND). Without pyobjc the program could not become an accessory app, and an app that is
+    neither has no windows: Qt's way stays. `appkit_found`: for a test (None: look for the module AppKit)."""
+    if appkit_found is None:
+        import importlib.util  # noqa: PLC0415
+        appkit_found = importlib.util.find_spec("AppKit") is not None
+    if appkit_found:
+        os.environ.setdefault(NO_FOREGROUND, "1")
 
 
 def prepare_engine(engine) -> None:
