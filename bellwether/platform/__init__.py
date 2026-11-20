@@ -36,3 +36,4 @@ clean_environment = _system.clean_environment
 find_executables = _system.find_executables
 spawn_child = _system.spawn_child
 process_host = _system.process_host
+app_icon_file = _system.app_icon_file

@@ -5,7 +5,8 @@ from PySide6.QtCore import QRect, Qt
 from PySide6.QtGui import QColor, QImage, QPainter
 
 from bellwether import appicon
-from bellwether.appicon import SIZES, SOURCE_SIZE, default_dirs, find_app_icon, load_app_icon, load_source, tinted_icon
+from bellwether.appicon import SIZES, SOURCE_SIZE, load_app_icon, load_source, tinted_icon
+from bellwether.platform.linux import default_dirs, find_app_icon
 from bellwether.tray import TrayIcons, make_icon
 
 PLATE, GLYPH = "#f4f1e9", "#303438"

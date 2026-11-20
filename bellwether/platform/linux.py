@@ -5,10 +5,13 @@ import ctypes
 import fcntl
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
 from pathlib import Path
+
+from PySide6.QtGui import QImageReader
 
 
 # ----- the folders: the XDG base folders with the standard defaults -----
@@ -220,3 +223,81 @@ class Host:
 def process_host() -> Host:
     """The host of this machine: the home folder of the user and the real /proc."""
     return Host()
+
+
+# ----- the icon file of the Herdr app: its desktop entry and the icon theme -----
+
+DESKTOP_FILE = "herdr-app.desktop"
+_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,127}")
+
+
+def default_dirs() -> tuple[list[Path], list[Path]]:
+    """The XDG folders of desktop files and of icons (hicolor theme, then pixmaps)."""
+    home = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    system = os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share"
+    data = [Path(home), *(Path(d) for d in system.split(":") if d)]
+    return [d / "applications" for d in data], [d / "icons" / "hicolor" for d in data] + [d / "pixmaps" for d in data]
+
+
+def _is_file(path: Path) -> bool:
+    try:
+        return path.is_file()
+    except OSError:
+        return False
+
+
+def _icon_entry(desktop_dirs) -> str | None:
+    """The Icon= value of the first herdr-app.desktop (the one the desktop uses)."""
+    for folder in desktop_dirs:
+        try:
+            text = (Path(folder) / DESKTOP_FILE).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        group = None
+        for line in map(str.strip, text.splitlines()):
+            if line.startswith("["):
+                group = line
+            elif group == "[Desktop Entry]" and line.startswith("Icon="):
+                return line[len("Icon="):].strip() or None
+        return None
+    return None
+
+
+def find_app_icon(desktop_dirs, icon_dirs) -> Path | None:
+    """The icon file of the Herdr app: an SVG if one exists, else the largest PNG.
+
+    An absolute Icon= path is taken only when it is an existing .svg or .png file.
+    """
+    entry = _icon_entry(desktop_dirs)
+    if entry is None:
+        return None
+    if entry.startswith("/"):
+        path = Path(entry)
+        return path if path.suffix.lower() in (".svg", ".png") and _is_file(path) else None
+    if not _NAME.fullmatch(entry):
+        return None
+    if entry.lower().endswith((".svg", ".png", ".xpm")):
+        entry = entry[:-4]  # Some desktop files give the name with an extension. The desktop ignores it.
+    svgs, pngs = [], []
+    for folder in map(Path, icon_dirs):
+        svgs.append(folder / "scalable" / "apps" / f"{entry}.svg")
+        try:
+            svgs += sorted(folder.glob(f"*/apps/{entry}.svg"))  # An SVG in a size folder, for example 48x48.
+            pngs += sorted(folder.glob(f"*/apps/{entry}.png"))
+        except OSError:
+            pass
+        svgs.append(folder / f"{entry}.svg")
+        pngs.append(folder / f"{entry}.png")
+    for path in svgs:
+        if _is_file(path):
+            return path
+    sized = [(QImageReader(str(path)).size().width(), path) for path in pngs if _is_file(path)]
+    sized = [item for item in sized if item[0] > 0]
+    return max(sized, key=lambda item: item[0])[1] if sized else None
+
+
+def app_icon_file(desktop_dirs=None, icon_dirs=None) -> Path | None:
+    """The icon file of the Herdr app, or None. The folders are for a test; None: the XDG folders."""
+    if desktop_dirs is None or icon_dirs is None:
+        desktop_dirs, icon_dirs = default_dirs()
+    return find_app_icon(desktop_dirs, icon_dirs)
