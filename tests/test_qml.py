@@ -1,5 +1,8 @@
 """Smoke test of the real panel (the layer shell), loaded the same way as bellwether/__main__.py (off screen)."""
 import json
+import os
+import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -20,8 +23,9 @@ from bellwether.layouts import built_skins
 from bellwether.state import STATE_COLORS, Agent
 
 LAYERSHELL_QMLDIR = Path("/usr/lib/qt6/qml/org/kde/layershell/qmldir")
-# The panel in the layer shell, as the program loads it on KDE Wayland.
+# The panel in each window shell: the layer shell, as the program loads it on KDE Wayland, and the plain shell.
 LAYER_QML = UI_PATH / "shells" / "Layer.qml"
+SHELLS = {"layer": LAYER_QML, "plain": UI_PATH / "shells" / "Plain.qml"}
 # layer-shell-qt says this for every window on a platform that is not Wayland. It is expected off screen.
 OFFSCREEN_NOTE = "is not a wayland window"
 # The sizes of Layout C (design/layouts/c-hud.qml): the panel, a closed panel, an agent row, the space under a list.
@@ -65,8 +69,9 @@ class RecordingBackend(Backend):
 
 
 @pytest.fixture
-def window(app, fake_client, tmp_path):
-    """Yield (root window, backend, Qt messages). The poll thread is not started."""
+def window(app, fake_client, tmp_path, shell):
+    """Yield (root window, backend, Qt messages) of the panel in the shell of the test (the layer shell unless the
+    test gives one). The poll thread is not started."""
     assert app.platformName() == "offscreen"
     # The icons folder is a made-up one in tmp_path. It does not exist until a test makes it.
     icons = Icons(tmp_path / "app", tmp_path / "cache")
@@ -77,7 +82,7 @@ def window(app, fake_client, tmp_path):
     engine.warnings.connect(lambda errors: messages.extend(e.toString() for e in errors))
     engine.rootContext().setContextProperty("backend", backend)
     engine.addImportPath(str(IMPORT_PATH))
-    engine.load(LAYER_QML)
+    engine.load(SHELLS[shell])
     try:
         roots = engine.rootObjects()
         assert roots, f"the panel did not load: {messages}"
@@ -1264,3 +1269,83 @@ def test_a_group_that_opens_again_starts_at_its_first_row(app, window):
         assert flick.property("contentY") == 0, layout
         assert [r.property("key") for r in rows(root, "agent")][:1] == ["i000"]
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+# ----- the plain shell: a frameless window above the others, for the systems with no layer shell -----
+
+plain_only = pytest.mark.parametrize("shell", ["plain"], indirect=True)
+TYPE_MASK = Qt.WindowType.WindowType_Mask
+
+
+@plain_only
+def test_the_plain_shell_is_a_frameless_tool_window_above_the_others_with_a_clear_background(app, window):
+    root, backend, messages = window
+    settle(app)
+    flags = root.flags()
+    assert flags & TYPE_MASK == Qt.WindowType.Tool  # no entry in a taskbar
+    for flag in (Qt.WindowType.FramelessWindowHint, Qt.WindowType.WindowStaysOnTopHint,
+                 Qt.WindowType.WindowDoesNotAcceptFocus, Qt.WindowType.NoDropShadowWindowHint):
+        assert flags & flag == flag, flag
+    assert root.color().alpha() == 0 and root.isVisible()
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+@pytest.mark.parametrize("name", ["Layer.qml", "Plain.qml", "../PanelShell.qml"])
+def test_no_shell_asks_for_the_focus(name):
+    """The panel never takes the keyboard: no QML of the panel window asks for the focus or for the front. (The
+    off-screen platform makes every window that shows the active one, so a test of the active window proves
+    nothing here: the flag WindowDoesNotAcceptFocus and this rule are the test; the real runs show the rest.)"""
+    text = (UI_PATH / "shells" / name).read_text()
+    assert [word for word in ("requestActivate", "forceActiveFocus", "raise()", "focus: true") if word in text] == []
+
+
+@plain_only
+def test_the_plain_window_is_at_the_place_of_the_panel_and_a_new_size_keeps_its_top_left_corner(app, window):
+    root, backend, messages = window
+    settle(app)
+    real = root.screen().geometry()
+    assert root.property("atDefault") is True
+    assert (root.x(), root.y()) == (real.x() + real.width() - WIDTH - 16, real.y() + 16)  # the default corner
+    use_screens(root, OFFSET, "B", 100, 200)
+    assert (root.x(), root.y()) == (2560 + 100, 360 + 200)  # the screen of the panel and the place on it
+    backend.apply(AGENTS)
+    settle(app)
+    size = (root.width(), root.height())
+    click(app, root, rows(root, "status")[2])  # a group opens: the window is taller
+    assert root.height() > size[1] and root.width() == size[0]
+    assert (root.x(), root.y()) == (2660, 560) and place(root) == ("B", 100, 200)
+    click(app, root, rows(root, "status")[2])  # and closes
+    assert (root.width(), root.height()) == size and (root.x(), root.y()) == (2660, 560)
+    js(root, "root.moveToNextScreen()")  # from B, the last screen, to A
+    assert place(root) == ("A", 100, 200) and (root.x(), root.y()) == (100, 200)
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+def test_the_plain_window_goes_to_the_screen_of_the_panel_and_qt_follows_it_during_a_drag(tmp_path):
+    """Two real screens (off screen, in a process of their own): the window is on the screen of the panel; during a
+    drag Qt gives it the screen that holds its centre; at the release the panel belongs to that screen."""
+    config = tmp_path / "screens.json"
+    config.write_text(json.dumps({"screens": [
+        {"name": "LEFT", "x": 0, "y": 0, "width": 1920, "height": 1080, "logicalDpi": 96, "logicalBaseDpi": 96, "dpr": 1},
+        {"name": "RIGHT", "x": 1920, "y": 0, "width": 1280, "height": 720, "logicalDpi": 96, "logicalBaseDpi": 96, "dpr": 1},
+    ]}))
+    done = subprocess.run(
+        [sys.executable, "-m", "tests.plain_screens", str(tmp_path / "state.json")], capture_output=True, text=True,
+        timeout=60, cwd=Path(__file__).parent.parent, env={**os.environ, "QT_QPA_PLATFORM": f"offscreen:configfile={config}"})
+    assert done.returncode == 0, done.stderr[-2000:]
+    steps = {s.pop("step"): s for s in map(json.loads, done.stdout.splitlines())}
+    assert steps["start"]["screens"] == ["LEFT", "RIGHT"]
+    view = {name: (s["place"], s["window"][:2], s["qtScreen"], s["surfaceScreen"]) for name, s in steps.items()}
+    assert view == {
+        "start": (["LEFT", 1920 - WIDTH - 16, 16], [1920 - WIDTH - 16, 16], "LEFT", "LEFT"),
+        "next screen": (["RIGHT", 1280 - WIDTH - 16, 16], [1920 + 1280 - WIDTH - 16, 16], "RIGHT", "RIGHT"),
+        "next screen again": (["LEFT", 1920 - WIDTH - 16, 16], [1920 - WIDTH - 16, 16], "LEFT", "LEFT"),
+        "placed": (["LEFT", 1500, 300], [1500, 300], "LEFT", "LEFT"),
+        # The panel follows the pointer 1:1; it is a panel of LEFT until the release.
+        "drag 100": (["LEFT", 1600, 300], [1600, 300], "LEFT", "LEFT"),
+        "drag 250": (["LEFT", 1750, 300], [1750, 300], "LEFT", "LEFT"),
+        "drag 300": (["LEFT", 1800, 300], [1800, 300], "RIGHT", "LEFT"),  # its centre is on RIGHT: Qt moves it
+        # The centre is on RIGHT: the panel goes there, all of it.
+        "released": (["RIGHT", 0, 300], [1920, 300], "RIGHT", "RIGHT"),
+    }
+    assert all(s["visible"] for s in steps.values())

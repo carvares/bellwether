@@ -37,3 +37,10 @@ class FakeClient:
 @pytest.fixture
 def fake_client():
     return FakeClient()
+
+
+@pytest.fixture
+def shell(request):
+    """The window shell of the panel of a test: "layer" (the default), or the parameter that the test gives
+    (`@pytest.mark.parametrize("shell", [...], indirect=True)`)."""
+    return getattr(request, "param", "layer")
