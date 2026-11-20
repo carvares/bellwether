@@ -76,7 +76,20 @@ The interface **as built in P1** (Linux only). `tests/test_platform.py` holds th
 
 A system module may add parameters after those of the table, only keyword-only with a default (the loaders of AppKit or psutil, a finder): the table test checks that. The package also has `SYSTEM` (= `sys.platform`, for the self-test). `MODULES` is `{"linux": "linux", "darwin": "macos"}`; Windows is still the clear `ImportError` (P4). `platform/linux.py` imports on macOS too (`prctl` is looked up with `getattr`), so the tests of the Linux logic with fakes run on the macOS runner (`tests/test_client.py` and `tests/test_client_screen.py` pin the client to the Linux module).
 
-Not built yet: Windows (P4).
+**Changed in P4** (Linux and macOS command lines and behaviour identical):
+
+| Member | Signature | What changed |
+|---|---|---|
+| `MODULES` | `dict` | `{"linux": "linux", "darwin": "macos", "win32": "windows"}`. Any other system: the clear `ImportError` ("… it runs on linux, darwin, win32"). |
+| `readable` | `readable(descriptors, timeout) -> list[int]` | New. The pipes of `descriptors` that have data or whose writer is gone, after at most `timeout` s. Linux, macOS: `select.select` (`platform/posix.py`, the call `events.py` made before). Windows: `PeekNamedPipe` each 50 ms (`select` takes only sockets there). `events.py` waits through it. |
+| `PROCESS_OPTIONS` | `dict` | New. More `Popen` options for each program that the client runs: `{}` on Linux and macOS (the calls are the same as before), `{"creationflags": CREATE_NO_WINDOW}` on Windows (the program runs under `pythonw`: a console program would get a console window at each call). |
+| `COMMANDS` | `dict[str, str]` | Windows: `{}` (no program to raise, start or clean an environment). The table test allows an empty dict. |
+| `raise_app` (macOS) | | The AppKit calls run on the main thread of Qt (`platform/mainthread.py`, `on_main_thread(function, wait=3.0)`); the reopen with `open` stays on the worker. |
+
+The package also has `platform/mainthread.py` (a call on the main thread of Qt from a worker, with a time limit; a
+late call never runs) and the psutil host moved to `platform/host.py` (`PsutilHost`, `load_psutil`, `MAX_WORDS`,
+`MAX_FILES`; each system gives `start_text(seconds)`). `platform/linux.py` imports on Windows (`fcntl` inside
+`posix.lock`, `ctypes.CDLL(None)` guarded), so the client tests that pin it run on the Windows runner.
 
 Kept outside the package: `paths.py` keeps `NAME`, `OLD_NAME` and `move_old_folders()` (the move of the `herdr-float` folders is plain file work on the platform folders: on a new system it finds nothing to move) and gives the four folders again for its callers. `appicon.py` keeps the image work (load, mark, tint).
 
@@ -119,7 +132,7 @@ New against that design: the process host (`psutil`, for `sys_platform != "linux
 - `prepare_app`: the accessory activation policy (no Dock icon). Without pyobjc: one log line (a Dock icon and a plain panel).
 - The work area (all systems, the plain shell): `__main__.start_panel` gives the panel `reserved` (screen name → the part that the system keeps: the screen less its available geometry) and follows its changes; the default corner, the clamp and the rows that fit use the rest. The layer shell gets none (the compositor keeps its panels free): identical (0 different pixels, the same protocol trace). Runner run 1: the panel was at y 16 under the 31 px menu bar.
 - The panel (`prepare_window(…, "panel")`): Qt 6.12 makes a `Qt::Tool` window a `QNSPanel` at the floating level and sets `hidesOnDeactivate` when it makes the native window, unless the QWindow has the property `_q_macAlwaysShowToolWindow` (`QCocoaWindow::createNSWindow`, `alwaysShowToolWindow()`; read only then). The panel is shown during its QML load, so the property comes too late for that native window: the program sets the property (for a later native window) and, through pyobjc, the level `NSStatusWindowLevel` (25), the collection behaviour `canJoinAllSpaces | fullScreenAuxiliary | stationary | ignoresCycle` (337, set as a whole: Qt's own value has `fullScreenPrimary`), the style mask bit `nonactivatingPanel` plus the private `_setPreventsActivation:` when the window has it (Wine found that the mask alone does not work after the window exists), `becomesKeyOnlyIfNeeded`, `hidesOnDeactivate = NO`, no shadow, not movable by the window server. Qt sets the level again only at a change of the flags or of the full-screen state of that window. With the status level, Qt's activation observer (which puts normal and floating windows to the normal level when the app resigns) leaves the panel alone. Without pyobjc (or when a call fails): the property, then hide, `destroy()`, show: Qt makes the native window again and reads the property (the panel shows when the app is not active; floating level, current Space only, and Qt's observer can lower it after the app was active).
-- The answer and options windows: at each show the program asks for the activation of the app (`NSApp.activate`, else `activateIgnoringOtherApps:`) and makes the window key (`makeKeyAndOrderFront:`); when the app is still not active 300 ms later, `activateIgnoringOtherApps:` asks again; without pyobjc Qt's `raise()`. The calls are a property of the window (`bellwetherActivation`) and a fact of the self-test. macOS 14 and later activate by cooperation: the system gives the activation to an app that asks while the person acts in it (in real use a click in the tray menu or on the panel opens these windows) and can refuse it otherwise. Runner run 2 (macOS 26.7.2): with no input of a person the app was not made active and the options window was not key (`can_become_key` true, so Qt with `QT_MAC_DISABLE_FOREGROUND_APPLICATION_TRANSFORM` and the accessory policy lets a normal window become key). What a runner can prove: that the calls are made and the windows can become key; not that the system gives the activation after a person's click.
+- The answer and options windows: at each show the program asks for the activation of the app (`NSApp.activate`, else `activateIgnoringOtherApps:`) and makes the window key (`makeKeyAndOrderFront:`); when the app is still not active 300 ms later, `activateIgnoringOtherApps:` asks again — only when nothing changed: the same app in front (`NSWorkspace.frontmostApplication`, its pid at the request), the window still shown (P3 review: else the program could take the keyboard from an app the person went to; the fact `second_way_skipped`); without pyobjc Qt's `raise()`. The calls are a property of the window (`bellwetherActivation`) and a fact of the self-test. macOS 14 and later activate by cooperation: the system gives the activation to an app that asks while the person acts in it (in real use a click in the tray menu or on the panel opens these windows) and can refuse it otherwise. Runner run 2 (macOS 26.7.2): with no input of a person the app was not made active and the options window was not key (`can_become_key` true, so Qt with `QT_MAC_DISABLE_FOREGROUND_APPLICATION_TRANSFORM` and the accessory policy lets a normal window become key). What a runner can prove: that the calls are made and the windows can become key; not that the system gives the activation after a person's click.
 - Raise: activate the running app by its bundle identifier (`NSRunningApplication`, `unhide` + `activateWithOptions:`), then always `open -b dev.herdr.app` (Launch Services reopens it: a minimized window shows); True when one worked. Start: `open -a <the .app of herdr-app>`, else `open -b dev.herdr.app`.
 - Programs: `PATH`, then `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/share/mise/shims`, `/run/current-system/sw/bin`, `~/.nix-profile/bin`, `~/.cargo/bin` (the places where the Herdr app looks for herdr-core), and for herdr-app `Herdr.app/Contents/MacOS/Herdr` in `~/Applications`, `/Applications`. One log line says where each was found (a folder, never a path in the home folder).
 - The event child: through the watcher `python -m bellwether.platform.guard <parent pid> <command…>` (`platform/guard.py`): the child inherits stdout; the watcher checks `getppid()` once a second and ends the child (SIGTERM, then SIGKILL after 2 s) and itself when the parent is gone; a SIGTERM to the watcher ends the child; it exits with the code of the child (128 + N for a signal). Linux keeps `prctl`.
@@ -129,9 +142,72 @@ New against that design: the process host (`psutil`, for `sys_platform != "linux
 - Fonts: `"SF Pro", "Helvetica Neue"` and `"SF Mono", "Menlo"` at the end of each list (Linux: 0 different pixels in the five layouts and the options window).
 - Dependencies: `pyobjc-framework-cocoa>=10.3; sys_platform == 'darwin'`, `psutil>=6; sys_platform != 'linux'` (the Linux install has neither).
 - `python -m bellwether --self-test` (`bellwether/selftest.py`): made-up agents, no lock, no log file, settings in a temporary folder; the panel for 3 s, each layout and the options window (a line "self-test: shown <step>" on stderr before each wait), then ONE JSON object: the system, the Qt platform, the shell, the flags, frame, geometry and screen of the panel, whether it is active, the layouts, the options window, the tray, the native facts (`window_facts`) and the Qt warnings.
-- The runner: `.github/workflows/platforms.yml`, job `macos` (by hand, or a push to `cross-platform` that changes code; 6-minute limit, under 4 planned): `uv sync --locked`; the selected tests (the platform, macOS, watcher, client, state, sessions, settings, start script, events, self-test tests, and 23 named plain-shell cases of the panel tests, marker `runner`, `tests/conftest.py`: about 25 s on Linux; all plain cases took 313 s on the runner of run 1, about 5 times their time on Linux, evenly — no one cost); `scripts/ci/smoke.py` (start.sh with the made-up `scripts/ci/fake-herdr`, the log lines, a SIGKILL of the widget, the event child gone 3 s later); `scripts/ci/selftest.py` (the self-test, `screencapture` at each step, the checks of the facts); the facts, logs and pictures as an artifact for 3 days.
+- The runner: `.github/workflows/platforms.yml`, job `macos` (since P4: by hand with the input `system`, or a push to `cross-platform` that changes code with `[ci macos]` or `[ci both]` in its head commit message; 6-minute limit, under 4 planned): `uv sync --locked`; the selected tests (the platform, macOS, watcher, client, state, sessions, settings, start script, events, self-test tests, and 23 named plain-shell cases of the panel tests, marker `runner`, `tests/conftest.py`: about 25 s on Linux; all plain cases took 313 s on the runner of run 1, about 5 times their time on Linux, evenly — no one cost); `scripts/ci/smoke.py` (start.sh with the made-up `scripts/ci/fake-herdr`, the log lines, a SIGKILL of the widget, the event child gone 3 s later); `scripts/ci/selftest.py` (the self-test, `screencapture` at each step, the checks of the facts); the facts, logs and pictures as an artifact for 3 days.
 
 ### 4. Windows
+
+**As built in P4** (`bellwether/platform/windows.py`; nobody has run it on a Windows machine; the runner proves what
+it can). The plan below is kept; where the two differ, this is right.
+
+- Folders: settings `%APPDATA%\bellwether`; the log `%LOCALAPPDATA%\bellwether\Logs\bellwether\bellwether.log`
+  (`state_home()` is `%LOCALAPPDATA%\bellwether\Logs`: Windows has no shared log folder, so the base is in the
+  folder of the program and the program adds its name, as on the other systems); the icon cache in
+  `%LOCALAPPDATA%\bellwether\Cache\bellwether`; the lock files in `%LOCALAPPDATA%\bellwether` (made when not
+  there). An empty or relative variable: the default under the home folder.
+- Lock: `msvcrt.locking(fd, LK_NBLCK, 1)` on the first byte of the lock file, opened without truncation ("a+");
+  Windows gives the lock back when the file is closed or the process ends. Chosen over a named mutex: the same handle
+  and `close()` as the other systems, and the same file a person can see.
+- Qt: no forced platform (the windows plugin, aware of the scale of each monitor); the shell is always `plain`.
+  `prepare_app`: one log line when the plugin is not `windows`; no native call then (off screen).
+- The panel: Qt 6.12 (`qwindowswindow.cpp`: `WindowCreationData::fromWindow`, `initialize`, `show_sys`) gives
+  `Qt::WindowDoesNotAcceptFocus` → `WS_EX_NOACTIVATE`, `Qt::Tool` → `WS_EX_TOOLWINDOW` (no taskbar button),
+  `WindowStaysOnTopHint` → `SetWindowPos(HWND_TOPMOST, … SWP_NOACTIVATE)`, and shows a Tool window with
+  `SW_SHOWNOACTIVATE`. `prepare_window(…, "panel")` reads the extended style and adds only what is missing (with
+  `SetWindowPos(HWND_TOPMOST)`), one log line then; the property `bellwetherAdded` and the fact `added_by_program`.
+- The answer and options windows: `SetForegroundWindow` at each show. Windows allows it to a process that got the last
+  input (a click in the tray menu or on the panel); else it refuses and flashes the taskbar button: the window shows,
+  one log line, the property `bellwetherActivation` = "SetForegroundWindow refused".
+- Raise (on the main thread of Qt, as macOS): `EnumWindows`, the first unowned window that shows or is minimized of a
+  process whose program is `herdr-app.exe` (`QueryFullProcessImageNameW`); `ShowWindow(SW_RESTORE)` when minimized;
+  `SetForegroundWindow`. False with one log line when there is no such window or Windows refused. Start:
+  `Popen([herdr-app], DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB)` (without the
+  breakaway when a job of ours does not allow it), no handles, in the home folder; it returns 1 and starts nothing
+  when a window of the Herdr app is there (a second start is no raise on Windows): so a refused raise shows the
+  failure message of today.
+- Programs: `PATH` (with PATHEXT), then `%LOCALAPPDATA%\Programs\herdr-app\herdr-app.exe`,
+  `%LOCALAPPDATA%\Programs\herdr-core\herdr-core.exe`, `~\.cargo\bin\herdr-core.exe`; one log line with the
+  places (variables, never a path of the person).
+- The command without the caller variables: the argv and `os.environ` without the names (no case).
+- The event child: a job object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK`,
+  made once; the program holds its only handle, so the system ends the child when the program ends, also after a
+  kill. Silent breakaway: a process that the child starts (the server of herdr-core, which runs every terminal) is
+  not in the job and never ends with the panel (only the direct child, as `PR_SET_PDEATHSIG` on Linux). Chosen over
+  the watcher: `terminate()` on Windows is `TerminateProcess`, which runs no handler, so a watcher that the program
+  ends would leave its child; the job is proven on the runner with real processes. The child has no console
+  (`CREATE_NO_WINDOW`). When the job cannot be made: one log line, the child runs.
+- The process host: psutil (`PsutilHost`); `start_text` is the `create_time` of psutil as a text. Claude Code writes
+  `procStartFt` on Windows, not `procStart`, and its form is not known here: no session file is taken, the row shows
+  the time of the terminal, never a model it cannot prove. Codex: `%USERPROFILE%\.codex` (`Path.home()`); whether
+  psutil lists a lock file that a process holds open is a test of the runner.
+- The tray icon: `herdr-app.svg`, which the release archive puts beside `herdr-app.exe`; else the circle.
+- Fonts: `"Segoe UI"` and `"Cascadia Mono", "Consolas"` at the end of each list (Linux: 0 different pixels).
+- `scripts/start.cmd` runs `scripts\start_windows.py` with the `pythonw` of the checkout; that starts
+  `pythonw -m bellwether` with no console, out of the group and the job of the caller (when allowed), with no handle
+  of the caller (a caller that reads the output sees its end at once), and its output in `start.log` of the log
+  folder (emptied above 1 MiB). The single-instance lock is the program's.
+- The mod: not changed. To start the panel on Windows, `mod/main.js` must run `cmd.exe /c <…>\start.cmd` when
+  `window().platform` is `"windows"` (the API has it), and the mod folder needs a way to reach the checkout: `start.sh`
+  is a link that `readlink -f` follows; `%~dp0` of a `.cmd` in a linked folder is the link, not the checkout. Not
+  done: it cannot be checked here (`herdr-app check` and the app on Windows), and Linux must stay identical.
+- The start path, all systems: the reads of session files open with `O_BINARY` where it exists and read with
+  `os.pread` or, without it (Windows), a seek and a read; the settings and the log are UTF-8; the log rotation that
+  fails (Windows: a file that an other process has open cannot be renamed) keeps the file and writes the line.
+- With monitors of different scales (Windows, macOS) Qt 6 leaves gaps between the areas of the screens in its
+  coordinates. The plain shell gives `desktopPoint(item, x, y)` (Qt's `mapToGlobal`, which maps a point by the screen
+  under it); a drag keeps the point of the press under that pointer, so the panel crosses to the other monitor.
+  The layer shell gives null and adds the move of the pointer as before (0 different pixels, the same protocol trace).
+
+The plan before P4:
 
 - The panel: `Plain.qml`; `prepare_window` sets `WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW` and topmost through `ctypes` (`user32`), so a click does not take the focus and the panel has no taskbar entry.
 - Raise: find the top-level window of the Herdr process and call `SetForegroundWindow` (with `ShowWindow(SW_RESTORE)` for a minimized window). Windows can refuse this for a background process: then the failure message of today shows.
@@ -174,6 +250,19 @@ Answers of P3 (2026-11-20), macOS:
 3. **Partly found.** `exec` runs a program "in the user's real environment" (AGENTS.md); a Finder launch of the app loads the login shell's PATH, with the usual install folders as a fallback; an unsigned bundle gets `LSEnvironment` PATH `~/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin` (install.sh). `start.sh` has a `#!/bin/sh` line and the x bit, so `exec` can run it. Not seen on a Mac.
 4. **Found in the program, not seen on a Mac.** The code of Claude Code (the installed Linux build, read around the word `procStart`): on Linux field 22 of `/proc/<pid>/stat`; on the other branch the trimmed output of `LC_ALL=C TZ=UTC ps -o lstart= -p <pid>` (the same text in two helpers); on Windows a different key, `procStartFt`. The macOS host gives that text (`lstart()`); the runner test `test_on_a_mac_the_start_of_a_process_is_what_ps_lstart_prints` compares it with `ps` itself.
 
+Answers of P4 (2026-11-20), Windows:
+
+1. **Found.** The manifest `https://releases.herdr.dev/app/latest.json` (0.1.16) has `windows-x86_64`; the archive holds
+   `herdr-app/herdr-app.exe` and `herdr-app.svg`. `app/install.ps1` puts the folder in
+   `%LOCALAPPDATA%\Programs\herdr-app` (user PATH, Start menu `Herdr.lnk`); `core/install.ps1` puts `herdr-core.exe`
+   (+ `conpty\`, `hc.exe`) in `%LOCALAPPDATA%\Programs\herdr-core` (user PATH). The exe names that folder and
+   `.cargo/bin`, and `~/.config/herdr-app` as its home on every system. The window class of GPUI is `Zed::Window`.
+2. **Not found** (needs the app on Windows).
+3. **Partly found.** `exec` exists on Windows; `window().platform` tells the system to a mod. The mod is not changed
+   (see section 4).
+4. **Not found.** The installed build is the Linux build: the Windows branch of Claude Code is not in it; it writes
+   `procStartFt` there and compares two number forms around 3e17. Windows: no model, the time.
+
 Not verified by a person (P3): everything of section 4 of "Proof", and on macOS: the keyboard in the options and answer windows (the activation of the app after a click in the tray menu or on the panel); that a click on the panel leaves the keyboard in the other app (the style mask after creation, the private call); that `activateWithOptions:` from a background thread of the client is accepted (cooperative activation of macOS 14); that the panel shows over an app in full screen and on every Space; the menu bar item; the reopen of a minimized Herdr window; the watcher on a Mac before the runner run.
 
 ## Tasks (each: one implementer, a task review, fix rounds)
@@ -181,7 +270,7 @@ Not verified by a person (P3): everything of section 4 of "Proof", and on macOS:
 - **P1 — the platform package, pure move.** `platform/{__init__,linux}.py`; paths, lock, raise, start, clean environment, child spawn, process host, app icon, executables behind the interface; a static test that no module outside the package tests `sys.platform` or imports `fcntl`, `ctypes`, or names `prctl`, `/proc`, `busctl`, `systemd-run`, `XDG_`, `.desktop` (`tests/test_platform.py`, no exception); the Qt set-up of `__main__.py` behind `prepare_environment`, `prepare_app`, `prepare_engine`. Linux identical.
 - **P2 — the shell split.** `PanelShell.qml`, `shells/Layer.qml`, `shells/Plain.qml`; the shell rule; the behaviour tests of the panel parametrized over both shells; the layer shell identical (pixels, protocol trace); a short real run of the plain shell on Linux (XWayland).
 - **P3 — macOS.** `platform/macos.py`, the watcher, the start script, the font lists, `psutil`, `pyobjc`; the self-test mode; the workflow on a macOS runner; fix what the runner shows.
-- **P4 — Windows.** `platform/windows.py`, `scripts/start.cmd`, the lock, the log rotation; the workflow on a Windows runner; fix what the runner shows.
+- **P4 — Windows.** `platform/windows.py`, `scripts/start.cmd`, the lock, the log rotation; the workflow on a Windows runner; fix what the runner shows. Also the fix round 1 of the review of P3 (the second activation of macOS only when nothing changed, the AppKit raise on the main thread, the watcher loop, the CI checks).
 - **P5 — documents.** README (the support table, the install for each system, the "not verified by a person" list), the reference page, the notes.
 
 ## Error handling
