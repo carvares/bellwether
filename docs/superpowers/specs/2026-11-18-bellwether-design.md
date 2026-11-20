@@ -688,6 +688,15 @@ The first design had a horizontal pill and one list below it. The section "Chang
 - The widget is always visible after a start. The hidden state is not saved.
 - If the desktop has no system tray, the widget runs without an icon.
 
+## Change on 2026-11-20: the Codex model through the thread lock
+
+Report of the user: "codex model are not being displayed". Measured with Codex 0.170 on a live terminal: the process has no rollout file open (the assumption of Task 26, marked "not verified live" then). It holds `~/.codex/thread-writer-locks/<thread id>.lock` for each thread that it writes, and the rollout file of a thread is `~/.codex/sessions/<year>/<month>/<day>/rollout-<time>-<thread id>.jsonl`. A thread id starts with its creation time (48 bits, milliseconds), so only the folder of that day and the two days beside it are listed.
+
+- `read_codex` (`sessions.py`): the rollout files that a process has open (as before), and the rollout files of the threads that it holds the lock of. Only a rollout file whose first line has `"thread_source":"user"` (in its first 4096 bytes) counts: Codex also writes threads of helpers (`guardian_review`, sub-agents) in the same process. Two or more → `several_rollouts`, as before. The model is the last `turn_context` record, as before.
+- A process with a thread lock and no rollout file of the user (no turn yet): the model is the key `model` of `~/.codex/config.toml` (reason `config_default`), unless an argument of the process starts with `-m`, `--model`, `-c`, `--config`, `-p`, `--profile`, `--oss` or `--local-provider`, or the arguments cannot be read. The session time is then the time of the terminal.
+- `Host.arguments(pid)`: the words of `/proc/<pid>/cmdline`. Only the reader of Codex uses it, and only their first characters.
+- Checked: the live terminal gives `gpt-5.6-terra` (`config_default`); of 30 real rollout files, the 23 threads of the user are found by their id and the 7 helper threads are not. Not checked live: a session with a turn (the test fixtures have that shape).
+
 ## Change on 2026-11-20: the title of the terminal as the name of an agent
 
 Report of the user: the answer window showed only the address ("t3g") as what tells an agent apart. Cause: none of the user's terminals has a `name` in Herdr, so each row had the label "space / tab", and two agents of one tab had the same label. Herdr has a better text: the `title` that the program gives its terminal (Claude Code writes the subject of the session). It is only in `herdr-core get <t> --json`, not in the lists.
