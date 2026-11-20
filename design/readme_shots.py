@@ -30,6 +30,7 @@ from bellwether.state import STATE_COLORS, Agent  # noqa: E402
 from bellwether.tray import TrayIcons  # noqa: E402
 from tests.test_answer_window import Desk  # noqa: E402
 from tests.test_backend_prompt import shown  # noqa: E402
+from tests.test_options_look import click, swatch  # noqa: E402
 from tests.test_qml import settle  # noqa: E402
 
 OUT = ROOT / "docs" / "images"
@@ -73,9 +74,16 @@ class Watch:
         return False
 
 
-def desk(folder: Path, letter: str = "C", **look) -> Desk:
+def cast(**status: str) -> list[Agent]:
+    """The cast, with an other status for some agents (cast(t1="working")); "" takes the agent out."""
+    return [Agent(a.key, status.get(a.key, a.status), a.name, a.workspace, a.app) for a in AGENTS
+            if status.get(a.key, a.status)]
+
+
+def desk(folder: Path, letter: str = "C", agents: list[Agent] | None = None, **look) -> Desk:
     """The panel with the cast, the real program icons and a layout."""
-    one = Desk(app, folder, AGENTS, sessions=Watch(), now=lambda: NOW)
+    agents = AGENTS if agents is None else agents
+    one = Desk(app, folder, agents, sessions=Watch(), now=lambda: NOW)
     one.backend._icons = Icons(cache=folder / "icons")
     one.backend.setLayout(letter)
     for name, value in look.items():
@@ -84,7 +92,7 @@ def desk(folder: Path, letter: str = "C", **look) -> Desk:
                 assert one.backend.setColor(role, colour) is True
         else:
             assert getattr(one.backend, "set" + name[0].upper() + name[1:])(value) is True
-    one.backend.apply(list(AGENTS))
+    one.backend.apply(list(agents))
     one.backend.changed.emit()
     settle(app)
     return one
@@ -149,8 +157,12 @@ def save(image: QImage, name: str) -> None:
     print(f"{name}: {image.width()} x {image.height()}")
 
 
-def panel_shot(folder: Path, letter: str, group: str | None, **look) -> QImage:
-    one = desk(folder, letter, **look)
+def panel_shot(folder: Path, letter: str, group: str | None, agents: list[Agent] | None = None,
+               offline: bool = False, **look) -> QImage:
+    one = desk(folder, letter, agents, **look)
+    if offline:
+        one.backend.apply(None)
+        settle(app)
     if group:
         one.open_group(group)
     image = grab(one.root)
@@ -170,13 +182,18 @@ def answer_shot(folder: Path, fixture: str, key: str = "t1", letter: str = "C") 
     return image
 
 
-def options_shot(folder: Path, letter: str = "C") -> QImage:
+def options_shot(folder: Path, letter: str = "C", edit: str = "") -> QImage:
+    """The options window; `edit`: with the colour editor of that colour open."""
     one = desk(folder, letter)
     options = Options(one.engine)
     options.open()
     settle(app)
     window = one.engine.rootObjects()[-1]
     window.setProperty("roomHeight", 1080)
+    if edit:
+        settle(app)
+        click(app, window, swatch(window, edit))
+        settle(app)
     image = grab(window)
     window.close()
     one.close()
@@ -205,16 +222,32 @@ def main() -> None:
             made.mkdir()
             return made
 
-        save(sheet([("", panel_shot(folder(), "C", "blocked", scale=1.25))], pad=36), "hero.png")
-        save(sheet([(LAYOUT_NAMES[letter], panel_shot(folder(), letter, "working")) for letter in LETTERS]), "layouts.png")
-        save(sheet([("", panel_shot(folder(), "A", "blocked", scale=1.25))], pad=36), "rows.png")
-        save(sheet([("A question", answer_shot(folder(), "claude-ask-3")),
-                    ("A permission", answer_shot(folder(), "claude-bash"))], gap=28), "answer.png")
-        save(sheet([("", answer_shot(folder(), "claude-edit-diff"))], pad=36), "answer-edit.png")
-        save(sheet([("", options_shot(folder()))], pad=36), "options.png")
-        save(tray_shot(), "tray.png")
         custom = {"blocked": "#ff5555", "done": "#f1fa8c", "working": "#8be9fd", "idle": "#50fa7b",
                   "background": "#282a36", "text": "#f8f8f2", "frame": "#6272a4", "accent": "#bd93f9"}
+        quiet = cast(t1="working", t2="working", t3="idle")
+        save(sheet([("", panel_shot(folder(), "C", "blocked", scale=1.25))], pad=36), "hero.png")
+        # What the frame says: the most important status that has an agent.
+        save(sheet([("An agent waits for you", panel_shot(folder(), "C", None)),
+                    ("An agent finished", panel_shot(folder(), "C", None, cast(t1="working", t2="working"))),
+                    ("All agents work or rest", panel_shot(folder(), "C", None, quiet)),
+                    ("Herdr does not answer", panel_shot(folder(), "C", None, offline=True))]), "states.png")
+        save(sheet([("", panel_shot(folder(), "A", "blocked", scale=1.25))], pad=36), "rows.png")
+        # The three steps of an answer.
+        save(sheet([("1 · A blocked agent has an Answer button", panel_shot(folder(), "C", "blocked")),
+                    ("2 · Choose an option", answer_shot(folder(), "claude-ask-3")),
+                    ("3 · The agent works again", panel_shot(folder(), "C", "working", cast(t1="working")))], gap=28),
+             "answer-flow.png")
+        save(sheet([("A permission for a command", answer_shot(folder(), "claude-bash")),
+                    ("A file edit, with its diff", answer_shot(folder(), "claude-edit-diff"))], gap=28), "answer.png")
+        save(sheet([(LAYOUT_NAMES[letter], panel_shot(folder(), letter, None)) for letter in LETTERS]), "layouts.png")
+        for letter in LETTERS:
+            save(sheet([("Closed", panel_shot(folder(), letter, None, scale=1.15)),
+                        ("A status open", panel_shot(folder(), letter, "blocked", scale=1.15)),
+                        ("A different status open", panel_shot(folder(), letter, "working", scale=1.15))]),
+                 f"layout-{letter.lower()}.png")
+        save(sheet([("", options_shot(folder()))], pad=36), "options.png")
+        save(sheet([("", options_shot(folder(), edit="blocked"))], pad=36), "options-colour.png")
+        save(tray_shot(), "tray.png")
         save(sheet([("Layout B, custom colours", panel_shot(folder(), "B", "working", colors=custom)),
                     ("Layout E, custom colours, size 125 %", panel_shot(folder(), "E", "blocked", colors=custom, scale=1.25))]),
              "custom-look.png")

@@ -2,7 +2,7 @@
 
 The full description of how Bellwether works: each rule of the panel, the answer window, the options, the files and the known limits. The [README](../README.md) is the short version with pictures.
 
-Contents: [Use](#use) · [The model and session-time line](#the-model-and-session-time-line) · [Options](#options) · [Custom look](#custom-look) · [When the Herdr app window is closed](#when-the-herdr-app-window-is-closed) · [How the widget opens the app window](#how-the-widget-opens-the-app-window) · [How the data stays fresh](#how-the-data-stays-fresh) · [Answer a blocked agent](#answer-a-blocked-agent) · [Files](#files) · [Limits](#limits)
+Contents: [Use](#use) · [The model and session-time line](#the-model-and-session-time-line) · [Options](#options) · [Custom look](#custom-look) · [When the Herdr app window is closed](#when-the-herdr-app-window-is-closed) · [How the widget opens the app window](#how-the-widget-opens-the-app-window) · [How the data stays fresh](#how-the-data-stays-fresh) · [Answer a blocked agent](#answer-a-blocked-agent) · [Files](#files) · [Limits](#limits) · [The Qt version rule](#the-qt-version-rule) · [Start with the Herdr app: the details](#start-with-the-herdr-app-the-details)
 
 ## Use
 
@@ -258,3 +258,42 @@ The widget had the name herdr-float before 2026-11-18. At its first start with t
 - A person has not yet opened the options window from the tray icon with a real mouse. The checks used the menu of the tray icon over D-Bus, synthesized keys and clicks, and the protocol trace of the compositor.
 - A person has not yet looked at the layouts A, B, D and E, and at the options window in its new look, on the screen. The checks compared pictures of the real panel with the approved design pictures, and used synthesized keys and clicks and the protocol trace of the compositor.
 - When an open row makes the panel longer than the space below it, the panel moves up. It does not move back down when the row closes.
+
+## The Qt version rule
+
+The widget loads the system QML module `org.kde.layershell` into the Qt of the PySide6 wheel.
+This works while the system Qt and the wheel Qt have the same minor version (now 6.12).
+A system upgrade to a new Qt minor version (for example 6.13) can stop the module from loading.
+Then the widget does not show, and the log file names the missing module.
+To fix it, change the pin in `pyproject.toml` to the new minor version (for example `pyside6-essentials==6.13.*`).
+Then run `uv sync`.
+
+
+## Start with the Herdr app: the details
+
+The folder `mod/` is a small Herdr app mod. It runs `scripts/start.sh` each time the app starts a copy of the mod.
+The documentation of the app says when that occurs: at the install, at the start of the app, in each window, after a change of layout, and after a save of a file of the mod.
+So after "Quit" from the tray, the widget can come back before the next start of the app.
+Repeated starts do no harm: only one widget runs at a time.
+The mod runs a program on your machine (`start.sh`). It does not use the network.
+
+Install it. Run this in the repository folder:
+
+    ln -s "$PWD/mod" ~/.config/herdr-app/mods/bellwether
+    herdr-app check ~/.config/herdr-app/mods/bellwether
+
+The link must stay a link: the mod finds the repository through it.
+Do not move the repository after this, or make the link again.
+
+What is known and not known about the mod:
+
+- `herdr-app check` passes for `mod/`.
+- A mod starts only when the app shows it. The documentation of the app says that the app then puts a new mod into the window. `mod.json` asks for a block at the bottom, 1 pixel high. The mod draws nothing in it.
+- A person has not yet installed the mod. These things are not checked: how the block looks, if the app accepts a linked mod folder, and if the app starts the mod again at each start.
+
+Remove the automatic start:
+
+    rm ~/.config/herdr-app/mods/bellwether
+
+If the empty block stays in the window after that, remove it from your layout in the app.
+
