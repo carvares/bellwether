@@ -38,7 +38,7 @@ ThemeBase {
     // Hack, or the first monospace font that this system has.
     readonly property string fontFamily: family(Fonts.first(
         ["Hack", "JetBrains Mono", "DejaVu Sans Mono", "Liberation Mono", "Noto Sans Mono", /* macOS: */ "SF Mono",
-         "Menlo"], "monospace"))
+         "Menlo", /* Windows: */ "Cascadia Mono", "Consolas"], "monospace"))
     readonly property int titleSize: size(12)
     readonly property int bodySize: size(12)
     readonly property int smallSize: size(10)

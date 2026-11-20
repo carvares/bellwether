@@ -765,18 +765,19 @@ def test_the_tray_takes_the_largest_image_of_an_icns(tmp_path, app):
 UI = Path(macos.__file__).parent.parent / "ui"
 
 
-@pytest.mark.parametrize("file, linux, mac", [
-    *[(f"skins/{letter}Theme.qml", ["Adwaita Sans", "Inter", "Noto Sans", "DejaVu Sans"], ["SF Pro", "Helvetica Neue"])
-      for letter in "ABDE"],
-    *[(file, ["Hack", "JetBrains Mono", "DejaVu Sans Mono", "Liberation Mono", "Noto Sans Mono"], ["SF Mono", "Menlo"])
-      for file in ("skins/CTheme.qml", "controls/TextView.qml")],
+@pytest.mark.parametrize("file, linux, mac, windows", [
+    *[(f"skins/{letter}Theme.qml", ["Adwaita Sans", "Inter", "Noto Sans", "DejaVu Sans"], ["SF Pro", "Helvetica Neue"],
+       ["Segoe UI"]) for letter in "ABDE"],
+    *[(file, ["Hack", "JetBrains Mono", "DejaVu Sans Mono", "Liberation Mono", "Noto Sans Mono"], ["SF Mono", "Menlo"],
+       ["Cascadia Mono", "Consolas"]) for file in ("skins/CTheme.qml", "controls/TextView.qml")],
 ])
-def test_each_font_list_has_the_macos_families_at_its_end(file, linux, mac):
+def test_each_font_list_has_the_macos_and_then_the_windows_families_at_its_end(file, linux, mac, windows):
+    """The Linux families first: a Linux desktop picks the same font as before (the same pixels)."""
     import re
     text = (UI / file).read_text()
-    lists = re.findall(r"Fonts\.first\(\s*\[([^\]]*)\]", text)
+    lists = re.findall(r"Fonts\.first\(\s*\[([^\]]*)\]", re.sub(r"/\*.*?\*/", "", text))
     assert len(lists) == 1
-    assert re.findall(r'"([^"]+)"', lists[0]) == linux + mac
+    assert re.findall(r'"([^"]+)"', lists[0]) == linux + mac + windows
 
 
 def test_pyobjc_and_psutil_are_dependencies_only_where_they_are_used():

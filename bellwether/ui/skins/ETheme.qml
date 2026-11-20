@@ -24,7 +24,8 @@ ThemeBase {
     readonly property color ghostColor: tone("#5f6368", 0.35)
     // Adwaita Sans, or the first of these that this system has.
     readonly property string fontFamily: family(Fonts.first(
-        ["Adwaita Sans", "Inter", "Noto Sans", "DejaVu Sans", /* macOS: */ "SF Pro", "Helvetica Neue"],
+        ["Adwaita Sans", "Inter", "Noto Sans", "DejaVu Sans", /* macOS: */ "SF Pro", "Helvetica Neue",
+         /* Windows: */ "Segoe UI"],
         Qt.application.font.family))
     readonly property int titleSize: size(13)
     readonly property int bodySize: size(13)
