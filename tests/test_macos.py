@@ -48,7 +48,9 @@ def test_the_lock_is_the_lock_of_the_posix_systems(tmp_path):
     first = macos.lock(tmp_path / "bellwether.lock")
     assert first is not None and macos.lock(tmp_path / "bellwether.lock") is None
     first.close()
-    assert macos.lock(tmp_path / "bellwether.lock") is not None
+    again = macos.lock(tmp_path / "bellwether.lock")
+    assert again is not None
+    again.close()
 
 
 def test_the_shell_is_always_plain_and_another_choice_gets_one_log_line(caplog):

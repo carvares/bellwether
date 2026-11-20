@@ -61,7 +61,8 @@ def test_the_child_writes_into_the_pipe_itself_and_the_watcher_exits_with_its_co
 
 def test_a_child_ended_by_a_signal_gives_128_and_the_signal():
     watcher = guarded([sys.executable, "-c", "import os, signal; os.kill(os.getpid(), signal.SIGKILL)"])
-    assert watcher.wait(timeout=30) == 128 + signal.SIGKILL
+    watcher.communicate(timeout=30)
+    assert watcher.returncode == 128 + signal.SIGKILL
 
 
 def test_a_sigterm_to_the_watcher_ends_the_child_and_the_watcher():
@@ -74,6 +75,7 @@ def test_a_sigterm_to_the_watcher_ends_the_child_and_the_watcher():
         assert wait_gone([child], 3)
     finally:
         watcher.kill()
+        watcher.communicate(timeout=10)  # closes the pipes
 
 
 def test_a_parent_killed_with_sigkill_leaves_no_child_after_2_seconds(tmp_path):
@@ -94,6 +96,8 @@ def test_a_parent_killed_with_sigkill_leaves_no_child_after_2_seconds(tmp_path):
         assert wait_gone([watcher, child], 2.0), "a process of the event child lives on"
     finally:
         parent.kill()
+        parent.wait(10)
+        parent.stdout.close()
 
 
 def test_a_parent_that_is_gone_before_the_start_starts_no_command(tmp_path):
