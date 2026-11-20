@@ -90,17 +90,41 @@ def _add_terminals(agents: dict[str, Agent], rows: object, where: str, sub_agent
         _add_terminals(agents, row.get("sub_agents"), where, sub_agent=True)
 
 
-def parse_core(terminals: list) -> list[Agent]:
-    """Convert the "terminals" list of `herdr-core ls --json` to sorted agents. Invalid rows are skipped."""
+def parse_core(terminals: list, seen: dict[str, int] | None = None) -> list[Agent]:
+    """Convert the "terminals" list of `herdr-core ls --json` to sorted agents. Invalid rows are skipped.
+
+    The core does not know what the person saw: it says "done" where the app said "idle". `seen` has, for each
+    agent that the app showed as idle, the turn number of that moment: such an agent is idle until its next turn.
+    """
+    live = [row for row in terminals if isinstance(row, dict) and row.get("state") == "live"]
+    tabs: dict[str, set[str]] = {}
+    for row in live:
+        space, _, tab = _text(row.get("where")).partition(" / ")
+        tabs.setdefault(space, set()).add(tab)
     agents = []
-    for row in terminals:
-        if not isinstance(row, dict) or row.get("state") != "live":
-            continue
+    for row in live:
         key = row.get("address")
         status = _status(row.get("status"), sub_agent=bool(row.get("parent")))
-        if isinstance(key, str) and key and status:
-            agents.append(Agent(key, status, "", "", _text(row.get("agent"))))
+        if not (isinstance(key, str) and key and status):
+            continue
+        if status == "done" and seen and key in seen and row.get("turn") == seen[key]:
+            status = "idle"
+        # As the app: the name of the tab only when its space has more tabs.
+        where = _text(row.get("where"))
+        space = where.partition(" / ")[0]
+        agents.append(Agent(key, status, _text(row.get("name")), where if len(tabs[space]) > 1 else space,
+                            _text(row.get("agent"))))
     return _sorted(agents)
+
+
+def seen_turns(terminals: list, idle: frozenset[str]) -> dict[str, int]:
+    """The turn number of each "done" row of the core whose agent is in `idle` (the app showed it as idle)."""
+    return {
+        row["address"]: row["turn"]
+        for row in terminals
+        if isinstance(row, dict) and row.get("status") == "done" and row.get("address") in idle
+        and isinstance(row.get("turn"), int)
+    }
 
 
 def count_states(agents: list[Agent]) -> dict[str, int]:

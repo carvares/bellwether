@@ -170,9 +170,9 @@ def test_core_agent_rows():
         ]
     )
     assert agents == [
-        Agent("t4", "blocked", "", "", "claude-code"),
-        Agent("t3", "done", "", "", ""),
-        Agent("t1", "working", "", "", "claude-code"),
+        Agent("t4", "blocked", "", "x", "claude-code"),  # "x": the place that the row gives
+        Agent("t3", "done", "", "x", ""),
+        Agent("t1", "working", "", "x", "claude-code"),
     ]
 
 
@@ -205,3 +205,31 @@ def test_top_state_is_the_first_state_of_the_priority_that_has_an_agent(counts, 
 
 def test_top_state_is_offline_when_not_online():
     assert top_state(False, dict.fromkeys(STATES, 3)) == "offline"
+
+
+def test_core_rows_keep_the_name_and_the_place():
+    rows = [
+        dict(core_row("t1", "working"), name="builder", where="Main / 1"),
+        dict(core_row("t2", "done"), where="Docs / notes"),
+        dict(core_row("t3", "done"), where="Docs / api"),
+        dict(core_row("t4", "blocked"), where="Solo"),
+    ]
+    assert parse_core(rows) == [
+        Agent("t4", "blocked", "", "Solo", "claude-code"),
+        Agent("t2", "done", "", "Docs / notes", "claude-code"),
+        Agent("t3", "done", "", "Docs / api", "claude-code"),
+        Agent("t1", "working", "builder", "Main", "claude-code"),  # one tab in the space: the space alone, as the app
+    ]
+
+
+def test_a_shell_tab_counts_for_the_place_as_in_the_app():
+    rows = [dict(core_row("t1", "done"), where="Main / 1"), dict(core_row("t2", None, agent="fish"), where="Main / 2")]
+    assert parse_core(rows) == [Agent("t1", "done", "", "Main / 1", "claude-code")]
+
+
+def test_a_done_agent_that_the_app_showed_idle_stays_idle_until_its_next_turn():
+    rows = [dict(core_row("t1", "done"), turn=7), dict(core_row("t2", "done"), turn=3)]
+    assert [a.status for a in parse_core(rows, seen={"t1": 7})] == ["done", "idle"]  # t2 done, t1 idle
+    assert [(a.key, a.status) for a in parse_core(rows, seen={"t1": 6})] == [("t1", "done"), ("t2", "done")]
+    working = [dict(core_row("t1", "working"), turn=7)]
+    assert parse_core(working, seen={"t1": 7})[0].status == "working"

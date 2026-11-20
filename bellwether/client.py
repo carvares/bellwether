@@ -3,6 +3,8 @@
 `herdr-app ls` is the source: it has the status that the app shows. When the app window does not
 answer two times one after the other, `herdr-core ls --json` is the source: herdr-core keeps the terminals
 alive without the window. One read that fails changes nothing: the last list of the app stays.
+The list of the core has the names and the places too. The core says "done" where the app said "idle" (the app
+knows what the person saw), so an agent that the app showed as idle stays idle until its next turn ends.
 The jump shows an agent in the app window. It starts the app first when the window is closed.
 
 The screen calls (`read_screen`, `press`, `send_text`) are for the answer to a blocked agent. They take only an
@@ -22,7 +24,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .state import Agent, parse_app, parse_core
+from .state import Agent, parse_app, parse_core, seen_turns
 from .window import raise_app_window
 
 log = logging.getLogger("bellwether")
@@ -184,12 +186,15 @@ class HerdrClient:
         self._source: str | None = None  # "app", "core" or "none": where the last list came from
         self._app_failures = 0  # reads of the app that failed, one after the other
         self._app_agents: list[Agent] | None = None  # the last list of the app; None before its first answer
+        # Without the app: the turn number of each agent that the app showed as idle. None while the app answers.
+        self._seen: dict[str, int] | None = None
 
     def list_agents(self) -> list[Agent]:
         rows = self._read(self._app, ["ls"], "spaces")
         if rows is not None:
             self._set_source("app")
             self._app_failures = 0
+            self._seen = None
             self._app_agents = parse_app(rows)
             self._known = frozenset(agent.key for agent in self._app_agents)
             return list(self._app_agents)
@@ -200,7 +205,10 @@ class HerdrClient:
         rows = self._read(self._core, ["ls", "--json"], "terminals")
         if rows is not None:
             self._set_source("core")
-            agents = parse_core(rows)
+            if self._seen is None:
+                idle = frozenset(agent.key for agent in self._app_agents or () if agent.status == "idle")
+                self._seen = seen_turns(rows, idle)
+            agents = parse_core(rows, self._seen)
             self._known = frozenset(agent.key for agent in agents)
             return agents
         self._known = frozenset()

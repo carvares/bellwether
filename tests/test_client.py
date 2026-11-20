@@ -613,3 +613,50 @@ def test_find_executables(monkeypatch, tmp_path):
     assert find_executables() == (None, str(local))
     monkeypatch.setattr(client_module.shutil, "which", lambda name: "/usr/bin/" + name)
     assert find_executables() == ("/usr/bin/herdr-app", "/usr/bin/herdr-core")
+
+
+def core_list(status, turn, where="Main / 1"):
+    return {"terminals": [{"address": "t1", "agent": "claude-code", "state": "live", "status": status, "turn": turn,
+                           "name": "reviewer", "where": where}]}
+
+
+def app_list(status):
+    data = json.loads(json.dumps(APP_LIST))
+    data["spaces"][0]["tabs"][0]["terminals"][0]["status"] = status
+    return data
+
+
+def test_without_the_app_an_agent_keeps_its_name_its_place_and_its_idle_status():
+    """The core says "done" for an agent that the app showed as idle (seen by the person)."""
+    client, runner = make(app=reply(app_list("idle")), core=reply(core_list("done", 7)))
+    assert client.list_agents() == [Agent("t1", "idle", "reviewer", "Main", "claude-code")]
+    runner.answers[APP] = APP_DOWN
+    client.list_agents()
+    assert client.list_agents() == [Agent("t1", "idle", "reviewer", "Main", "claude-code")]
+    runner.answers[CORE] = reply(core_list("working", 8))
+    assert client.list_agents()[0].status == "working"
+    runner.answers[CORE] = reply(core_list("done", 8))
+    assert client.list_agents()[0].status == "done"  # a new turn ended: the person did not see it
+    runner.answers[CORE] = reply(core_list("done", 8))
+    assert client.list_agents()[0].status == "done"
+
+
+def test_without_the_app_a_done_agent_that_the_app_showed_done_stays_done():
+    client, runner = make(app=reply(app_list("done")), core=reply(core_list("done", 7)))
+    client.list_agents()
+    runner.answers[APP] = APP_DOWN
+    client.list_agents()
+    assert client.list_agents()[0].status == "done"
+
+
+def test_the_idle_memory_ends_when_the_app_answers_again():
+    client, runner = make(app=reply(app_list("idle")), core=reply(core_list("done", 7)))
+    client.list_agents()
+    runner.answers[APP] = APP_DOWN
+    client.list_agents()
+    assert client.list_agents()[0].status == "idle"
+    runner.answers[APP] = reply(app_list("done"))
+    assert client.list_agents()[0].status == "done"
+    runner.answers[APP] = APP_DOWN
+    client.list_agents()
+    assert client.list_agents()[0].status == "done"
