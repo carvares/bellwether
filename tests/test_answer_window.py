@@ -1490,7 +1490,7 @@ def test_the_end_counts_only_after_the_top_of_the_new_detail_was_in_view_after_t
     d = desk(screens=[LONG])
     window = d.answer_for("t1")
     d.arm()
-    window.setProperty("guardMs", 1500)
+    window.setProperty("guardMs", 600000)  # no wall clock: the guard cannot end during the setup
     tick_to(d, OTHER_START)
     view = d.one("isDetail")
     flick = flickable(view)
@@ -1518,16 +1518,22 @@ def test_on_a_low_window_the_top_of_the_detail_must_be_in_the_window_before_its_
     click(app, d.root, d.control("t1"))
     d.window.setProperty("roomHeight", 300)
     assert wait_for(app, lambda: d.state() == "ready" and not d.backend._session.busy)
-    d.window.setProperty("guardMs", 1500)
+    d.window.setProperty("guardMs", 600000)  # no wall clock: the guard cannot end during the setup
     tick_to(d, CREATE)
     scroller = d.one("isScroller")
     scroller.setProperty("contentY", scroller.property("contentHeight") - scroller.height())  # by code, at once
     settle(app)
     assert d.window.property("detailAtEnd") is True and d.window.property("detailAtTop") is False
+    assert d.window.property("armed") is False
+    d.window.setProperty("guardMs", 400)
     d.arm()
     pause(app, 300)
     assert d.backend.prompt["seen"] is False
-    scroller.setProperty("contentY", 0)  # the person scrolls the window up: the top of the detail is in view
+    view = d.one("isDetail")
+    top = view.mapToItem(scroller, QPointF(0, 0)).y() + scroller.property("contentY")
+    # The person scrolls the window up: the top of the detail and its first row are in view (m-B of task 26: at the
+    # very top of this low window the first row is below the window, and that does not count).
+    scroller.setProperty("contentY", max(0.0, top + view.property("firstRowBottom") - scroller.height()))
     settle(app)
     assert d.window.property("detailAtTop") is True and d.backend.prompt["seen"] is False
     scroller.setProperty("contentY", scroller.property("contentHeight") - scroller.height())  # then down to the end
@@ -1701,3 +1707,110 @@ def test_answer_on_an_other_agent_while_the_window_is_open_acts_as_an_open(app, 
     key(app, window, Qt.Key.Key_3)
     d.until("failed", "sent", "ready")
     assert d.client.pressed == [("t7", ["3"])]
+
+
+# ----- task 26, part 0: the note while the top is missing, the first row in the window, two liveness lines -----
+
+TOP_NOTE = "Scroll to the top, then to the end, to approve."
+
+
+def wheel_detail(app, window, view, notches):
+    point = view.mapToScene(QPointF(view.width() / 2, view.height() / 2))
+    for _ in range(notches):
+        QGuiApplication.sendEvent(window, QWheelEvent(point, window.mapToGlobal(point), QPoint(0, 0), QPoint(0, -120),
+                                                      Qt.MouseButton.NoButton, NONE, Qt.ScrollPhase.NoScrollPhase,
+                                                      False))
+        settle(app)
+
+
+def test_a_scroll_that_began_in_the_guard_leaves_the_reason_in_view_until_the_top_and_the_end_were_seen(app, desk):
+    """m-A: the person wheels the new command while its guard runs and goes on to its end. The top was not in view
+    after the guard, so the options that approve stay off: the line and the footer say what to do."""
+    d = desk(screens=[LONG])
+    window = d.answer_for("t1")
+    d.arm()
+    window.setProperty("guardMs", 600000)
+    tick_to(d, OTHER_START)
+    view = d.one("isDetail")
+    wheel_detail(app, window, view, 1)  # one notch down, in the guard
+    assert window.property("armed") is False and view.property("atTop") is False
+    window.setProperty("guardMs", 400)
+    d.arm()
+    wheel_detail(app, window, view, 30)  # on to the end
+    assert view.property("atEnd") is True
+    assert not wait_for(app, lambda: d.backend.prompt["seen"] is True, 0.3)
+    assert not any(b.property("enabled") for b in d.buttons() if b.property("key") in ("1", "2", "3"))
+    assert d.one("isSeenNote").property("text") == TOP_NOTE
+    assert TOP_NOTE in d.one("isFooterNote").property("text")
+    assert text_findings(window) == []
+    key(app, window, Qt.Key.Key_Home)  # the top in view: only the end is missing now
+    settle(app)
+    assert d.one("isSeenNote").property("text") == SCROLL_NOTE
+    assert SCROLL_NOTE in d.one("isFooterNote").property("text")
+    key(app, window, Qt.Key.Key_End)
+    assert wait_for(app, lambda: d.backend.prompt["seen"] is True)
+    settle(app)
+    assert not d.shows("isSeenNote") and "Scroll" not in d.one("isFooterNote").property("text")
+
+
+def test_on_a_low_window_the_top_counts_only_with_the_first_row_of_the_detail_in_the_window(app, desk):
+    """m-B (and mutant R4): the top edge of the detail view is 3 px inside the foot of the low window, its first row
+    is below the window. That is not "the top in view": the inner End and a jump of the window to the end of the
+    detail do not make it seen. With the first row in the window, then the end, it is."""
+    d = desk(screens=[LONG])
+    d.open_group("blocked")
+    click(app, d.root, d.control("t1"))
+    d.window.setProperty("roomHeight", 300)
+    assert wait_for(app, lambda: d.state() == "ready" and not d.backend._session.busy)
+    window = d.window
+    window.setProperty("guardMs", 600000)
+    tick_to(d, OTHER_START)
+    scroller, view = d.one("isScroller"), d.one("isDetail")
+    top = view.mapToItem(scroller, QPointF(0, 0)).y() + scroller.property("contentY")
+    assert top > scroller.height()  # the detail starts below the low window
+    assert window.property("detailAtTop") is False  # R4: a top below the window is not in view
+    edge = top - scroller.height() + 3
+    scroller.setProperty("contentY", edge)
+    settle(app)
+    first = view.property("firstRowBottom")
+    assert 3 < first < 40
+    window.setProperty("guardMs", 400)
+    d.arm()
+    assert window.property("detailAtTop") is False and window.property("topSeen") != d.backend.prompt["shown"]
+    key(app, window, Qt.Key.Key_End)  # the detail to its end, in its view
+    scroller.setProperty("contentY", scroller.property("contentHeight") - scroller.height())
+    assert not wait_for(app, lambda: d.backend.prompt["seen"] is True, 0.3)
+    assert d.one("isSeenNote").property("text") == TOP_NOTE
+    key(app, window, Qt.Key.Key_Home)
+    scroller.setProperty("contentY", edge + first - 3 - 2)  # the first row is 2 px short of the window
+    settle(app)
+    assert window.property("detailAtTop") is False
+    scroller.setProperty("contentY", edge + first - 3)  # the whole first row is in the window
+    settle(app)
+    assert window.property("detailAtTop") is True and window.property("topSeen") == d.backend.prompt["shown"]
+    key(app, window, Qt.Key.Key_End)
+    scroller.setProperty("contentY", scroller.property("contentHeight") - scroller.height())
+    assert wait_for(app, lambda: d.backend.prompt["seen"] is True)
+
+
+def test_a_move_to_the_top_that_changes_only_the_top_is_counted_and_then_the_end(app, desk):
+    """m-C (mutant R10): the guard ends with the detail in its middle. Page Up to the top changes only "top in
+    view" (the end was not in view before or after): it is counted at once, and End then makes the detail seen."""
+    d = desk(screens=[LONG])
+    window = d.answer_for("t1")
+    d.arm()
+    window.setProperty("guardMs", 600000)
+    tick_to(d, OTHER_START)
+    view = d.one("isDetail")
+    flickable(view).setProperty("contentY", 40)
+    settle(app)
+    assert view.property("atTop") is False and view.property("atEnd") is False
+    window.setProperty("guardMs", 400)
+    d.arm()
+    assert window.property("topSeen") != d.backend.prompt["shown"]
+    for _ in range(3):
+        key(app, window, Qt.Key.Key_PageUp)
+    assert view.property("atTop") is True and view.property("atEnd") is False
+    assert wait_for(app, lambda: window.property("topSeen") == d.backend.prompt["shown"], 1.0)
+    key(app, window, Qt.Key.Key_End)
+    assert wait_for(app, lambda: d.backend.prompt["seen"] is True)

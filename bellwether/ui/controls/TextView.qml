@@ -26,6 +26,8 @@ Rectangle {
     readonly property bool atEnd: !scrolls || scroller.contentY >= scroller.contentHeight - scroller.height - 1
     // The first line is in view (always, when the view does not scroll).
     readonly property bool atTop: !scrolls || scroller.contentY <= 1
+    // The foot of the first row of text, from the top of the view, while the view is at its top.
+    readonly property real firstRowBottom: scroller.y + rows.y + Math.ceil(rowMetrics.height)
     // The number of restarts, and the restart at the last key press that was not a repeat of a held key (the
     // thumb keeps its own, of its press).
     property int restarts: 0
@@ -108,6 +110,11 @@ Rectangle {
     Keys.onPressed: (event) => {
         if (event.modifiers === Qt.NoModifier)
             event.accepted = keyScroll(event.key, event.isAutoRepeat)
+    }
+
+    FontMetrics {
+        id: rowMetrics
+        font { family: view.mono; pixelSize: view.theme.size(12) }
     }
 
     Flickable {

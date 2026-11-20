@@ -190,10 +190,11 @@ Window {
     readonly property Item detailView: detailLoader.item
     // The number of the question for which the top of the detail was in view after the guard (0: none yet).
     property int topSeen: 0
-    // The first line of the detail is in its view, and the top of its view is in the window.
+    // The first line of the detail is in its view, and the top of its view down to the foot of its first row is in
+    // the window (on a low screen the top edge of the view alone can be in the window, with no line of it).
     readonly property bool detailAtTop: detailView === null || (detailView.atTop
         && column.y + detailLoader.y >= scroller.contentY - 1
-        && column.y + detailLoader.y < scroller.contentY + scroller.height)
+        && column.y + detailLoader.y + detailView.firstRowBottom <= scroller.contentY + scroller.height + 1)
     // The last line of the detail is in its view, and its view is in the window (the content of the window can
     // scroll too, on a low screen).
     readonly property bool detailAtEnd: detailView === null || (detailView.atEnd
@@ -204,12 +205,16 @@ Window {
                 return true
         return false
     }
-    // An option that approves is off because the end of the detail was not in view: in its own view, or in the
-    // window (on a low screen the content of the window scrolls too). The line below the detail and the footer
-    // say so, so that an option is never off with no reason in view.
-    readonly property string scrollNote: "Scroll to the end of the text above to approve."
+    // An option that approves is off because the top of the detail and then its end were not in view yet: in its
+    // own view, or in the window (on a low screen the content of the window scrolls too). The line below the detail
+    // and the footer say what is missing, so that an option is never off with no reason in view. The top is
+    // missing when it is not in view now and was not counted for this question (a scroll that began while the
+    // guard ran is not counted).
+    readonly property bool waitsForTop: topSeen !== shown && !detailAtTop
+    readonly property string scrollNote: waitsForTop ? "Scroll to the top, then to the end, to approve."
+                                                     : "Scroll to the end of the text above to approve."
     readonly property bool waitsForEnd: answerable && !blind && hasAccept && !prompt.seen && detailView !== null
-                                        && !detailAtEnd
+                                        && (waitsForTop || !detailAtEnd)
     // Later, not inside the change: the report changes the prompt, and the prompt the place of the detail.
     onDetailAtEndChanged: Qt.callLater(reportSeen)
     onDetailAtTopChanged: Qt.callLater(reportSeen)
