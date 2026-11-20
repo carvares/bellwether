@@ -244,7 +244,7 @@ The widget had the name herdr-float before 2026-11-18. At its first start with t
 - A drag across monitors: the panel goes only across an edge that two monitors share. Where a monitor has no neighbour (for example above a smaller monitor that starts lower), the panel stops at the edge. During the drag the panel can be on two monitors. At the release it goes fully to the monitor that holds its middle, and it can blink one time when it changes its monitor: the compositor needs a new surface for a different monitor.
 - If the monitor of the panel is disconnected while the widget runs, the panel shows on a monitor that stays. This was tested with made-up screens only, not with a real cable. The saved monitor does not change, so after a later start with that monitor the panel is there again.
 - A person has not yet dragged the panel to a different monitor with a real mouse. The checks used the same functions without a pointer, and the protocol trace of the compositor.
-- The widget works on KDE Plasma on Wayland only.
+- The widget is made for KDE Plasma on Wayland (the layer shell, below). On other desktops it uses the plain shell, with the limits named there.
 - The jump was tested on 2026-11-18 on this machine (one virtual desktop): window behind a different window, window minimized, app closed. A window on a different virtual desktop was not tested.
 - The jump needs `systemd-run` (a part of systemd). Without it the widget cannot start a closed app and has no second method to raise the window. `busctl` and KWin are the first method to raise the window; the jump also works without them (see "How the widget opens the app window").
 - Known, not fixed: a failed agent in a group with more than 8 agents is not scrolled into view, so its message can be out of sight.
@@ -259,12 +259,16 @@ The widget had the name herdr-float before 2026-11-18. At its first start with t
 - A person has not yet looked at the layouts A, B, D and E, and at the options window in its new look, on the screen. The checks compared pictures of the real panel with the approved design pictures, and used synthesized keys and clicks and the protocol trace of the compositor.
 - When an open row makes the panel longer than the space below it, the panel moves up. It does not move back down when the row closes.
 
+## The window shell
+
+On KDE Plasma on Wayland the panel is a layer surface (the layer shell): it stays above all windows, it never takes the keyboard, and the widget places it. The widget uses it when the Qt platform is Wayland, the QML module `org.kde.layershell` loads, and the compositor has the layer-shell protocol (`zwlr_layer_shell_v1`). Else it uses the plain shell: a frameless tool window that asks to stay on top and not to take the focus. On X11 the window manager gives that; on a Wayland desktop with no layer shell it is a normal window that the compositor places (it can be under other windows and take the focus at its start, and a drag does not move it). The first lines of the log say `shell: layer` or `shell: plain`. The environment variable `BELLWETHER_SHELL=layer` or `BELLWETHER_SHELL=plain` chooses the shell; another value is ignored with one line in the log. Without a Wayland compositor the widget starts on X11 (`QT_QPA_PLATFORM` is `wayland;xcb` unless you set it).
+
 ## The Qt version rule
 
 The widget loads the system QML module `org.kde.layershell` into the Qt of the PySide6 wheel.
 This works while the system Qt and the wheel Qt have the same minor version (now 6.12).
 A system upgrade to a new Qt minor version (for example 6.13) can stop the module from loading.
-Then the widget does not show, and the log file names the missing module.
+Then the widget shows in the plain shell (see "The window shell"), and the log file names the missing module.
 To fix it, change the pin in `pyproject.toml` to the new minor version (for example `pyside6-essentials==6.13.*`).
 Then run `uv sync`.
 

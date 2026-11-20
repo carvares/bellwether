@@ -55,12 +55,14 @@ The interface **as built in P1** (Linux only). `tests/test_platform.py` holds th
 | `spawn_child` | `spawn_child(argv) -> subprocess.Popen` | The event child (stdin `/dev/null`, stdout a pipe, stderr dropped, unbuffered), which ends when we end (Linux: `prctl(PR_SET_PDEATHSIG)`). |
 | `process_host` | `process_host() -> Host` | The process host of `sessions.py`: `home`, `bytes_read`, `start_ticks(pid)`, `family(*pids)`, `open_files(pid)` (Linux: `Host(home, proc)` on `/proc`, in `linux.py` with `MAX_PROCESSES` and `MAX_TASKS`). |
 | `app_icon_file` | `app_icon_file(desktop_dirs=None, icon_dirs=None) -> Path \| None` | The icon file of the Herdr app. The folders are for a test; None = the places of the system (Linux: `herdr-app.desktop` and the hicolor theme, then pixmaps). |
-| `SHELL_NEEDS` | `str` | What the window shell needs, for the log line when the QML interface does not load. |
-| `prepare_environment` | `prepare_environment() -> None` | Before the `QApplication` (Linux: `QT_QPA_PLATFORM=wayland` unless set). |
+| `SHELL_NEEDS` | `str` | What the layer shell needs, for the log line when the QML interface does not load. |
+| `prepare_environment` | `prepare_environment() -> None` | Before the `QApplication` (Linux: `QT_QPA_PLATFORM=wayland;xcb` unless set — P2; was `wayland`). |
 | `prepare_app` | `prepare_app(app) -> None` | After the `QApplication` (Linux: a warning when the Qt platform is not wayland). |
-| `prepare_engine` | `prepare_engine(engine) -> bool` | Gives the QML engine the import path of the shell; True when the shell can load, and only then `__main__` loads `Main.qml` (Linux: `ui/imports`, the check of `org.kde.layershell`). |
+| `prepare_engine` | `prepare_engine(engine) -> None` | Gives the QML engine the import path of the shell (Linux: `ui/imports`, for `org.kde.layershell`). P2: it no longer decides the load; `shell()` does. |
+| `SHELL_FILES` | `dict[str, Path]` | (P2) The QML file of each shell this system can use: Linux `{"layer": ui/shells/Layer.qml, "plain": ui/shells/Plain.qml}`; macOS and Windows give only `"plain"`. |
+| `shell` | `shell(engine, environ=None, platform_name=None, compositor_globals=None) -> str` | (P2) `"layer"` or `"plain"`, by the rule of section 2. The other arguments are for a test. |
 
-Not in P1, for later tasks: `shell()` (P2: `"layer"` or `"plain"`), and `prepare_window(window, role)` (P3/P4: native set-up after a window exists; `role`: `"panel"`, `"answer"`, `"options"`).
+Not built yet, for later tasks: `prepare_window(window, role)` (P3/P4: native set-up after a window exists; `role`: `"panel"`, `"answer"`, `"options"`).
 
 Kept outside the package: `paths.py` keeps `NAME`, `OLD_NAME` and `move_old_folders()` (the move of the `herdr-float` folders is plain file work on the platform folders: on a new system it finds nothing to move) and gives the four folders again for its callers. `appicon.py` keeps the image work (load, mark, tint).
 
@@ -77,6 +79,14 @@ Kept outside the package: `paths.py` keeps `NAME`, `OLD_NAME` and `move_old_fold
 The shell on Linux: `layer` when the platform is Wayland, the QML module `org.kde.layershell` loads and the compositor has `zwlr_layer_shell_v1`; else `plain`. `BELLWETHER_SHELL=plain|layer` forces one (for tests and for a person).
 
 `Plain.qml` has no system call in it, so every behaviour test of the panel runs on it **on Linux**, off screen, with the same parametrized tests as the layer shell.
+
+**As built in P2.**
+
+- The shell file IS the panel window: `PanelShell.qml` is a `Window` (the place model, the Loader, the pointer handler, the hit test, no import of a window system), and each shell is a QML type derived from it (`PanelShell { … }`). So `engine.rootObjects()[0]` is the panel window for every shell, and every property and function that Python and the tests use stays on it with its name (`panel`, `openState`, `posX`, `posY`, `screenName`, `surfaceScreen`, `atDefault`, `refreshRate`, `screenSource`, `closedByCompositor`, `moveToNextScreen()`, …).
+- One hook: `rehome()` (shared) finds the real screen and calls `showOn(target, x, y, real)` of the shell (`real`: the QScreen when the window must change its screen, else null); the shell calls `setPlace()` (shared: screen name, place, clamp) and does its window work. Layer: hide, `setPlace`, `screen`, `x`/`y` for the output, show (the code of before, in the same order); the margins are bound to the place, `requestUpdate()` on a margin change, anchors top|left, overlay layer, keyboard none, exclusion −1. Plain: `x`/`y` bound to the place in the whole desktop, `screen` set when it changes.
+- The rule (`platform/linux.py`, `shell()`): `BELLWETHER_SHELL=layer|plain` first (another non-empty value: one log line, ignored); then `plain` when the Qt platform is not `wayland*`; `plain` when `org.kde.layershell` does not load in the engine; `plain` when the compositor's registry has no `zwlr_layer_shell_v1` (read by `wayland_globals()`: `ctypes` on libwayland-client, a connection of its own, one round trip); else `layer`. When the registry cannot be read (no library, no compositor, `WAYLAND_SOCKET`), the module and the platform decide (the layer shell, as before). The log gets `shell: layer` or `shell: plain` at the start (`__main__.load_panel`).
+- `QT_QPA_PLATFORM` defaults to `wayland;xcb`: the same plugin on a Wayland desktop, and Qt falls back to X11 when no Wayland compositor answers (the plain shell then; Qt writes two lines to stderr).
+- A change of behaviour that the rule brings: on KDE with a Qt minor version that does not match the system module, the panel was not shown (an error line); now it shows in the plain shell with a warning line.
 
 ### 3. macOS
 
@@ -99,6 +109,12 @@ New against that design: the process host (`psutil`, for `sys_platform != "linux
 ### 5. Other Linux desktops
 
 With the plain shell the panel runs on X11 and on Wayland desktops with no layer shell (GNOME). Limits to state, not to hide: on GNOME Wayland a program cannot ask for "always on top", and cannot place its window; the raise of the Herdr window has only the second method of today.
+
+Limits found in the real runs of P2 (KDE Plasma 6, KWin, two monitors; scratch runs, made-up data):
+
+- **Plain shell on Wayland (`BELLWETHER_SHELL=plain`, KWin)**: KWin treats the panel as a normal window. It places it by its own rule (at 1120,666 of the left monitor, not at the saved place), `keepAbove` is false (stays-on-top is not honoured), it has a taskbar entry (`skipTaskbar` false: `Qt.Tool` is not honoured), and it is the active window after its start (the flag "does not accept focus" has no Wayland protocol). Qt keeps the place it asked for as the geometry of the window, so the drag model and the window part: a drag moves the place of the panel, not the window. This shell on a Wayland compositor is a fallback only: the panel shows and works by its tray and its clicks, but the compositor decides where it is and whether it is above other windows.
+- **Plain shell on X11 (`QT_QPA_PLATFORM=xcb`, XWayland under KWin)**: the window is `_NET_WM_WINDOW_TYPE_UTILITY` with `_NET_WM_STATE_ABOVE` / `STAYS_ON_TOP`, `WM_HINTS` input false, frameless (`_MOTIF_WM_HINTS`), not the active window; the place is applied (2760,660 = DP-1 at 2560,360 + 200,300), and a move to the next screen moves the window. One open fault: on the left monitor (HDMI-A-1 at 0,0) the window was sometimes 90 px lower than the place asked (y 390 for 300), and a later move put it at the right place again; the cause was not found (Qt's own geometry reports it, so it comes from the window manager or XWayland). A person should check the plain shell on a real X11 session.
+- **During a drag across two screens** (plain shell, off screen with two screens) Qt gives the window the screen that holds its centre by itself; at the release the panel belongs to that screen.
 
 ## Proof
 
