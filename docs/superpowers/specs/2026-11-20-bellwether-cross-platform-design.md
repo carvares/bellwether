@@ -1,0 +1,115 @@
+# Bellwether on every system — design
+
+Date: 2026-11-20. Branch: `cross-platform` (from `unblock-agents` at `525907c`, 1667 tests). Base product spec: `2026-11-18-bellwether-design.md`. This document takes the place of `2026-11-19-bellwether-macos-port-design.md` (kept for its detail on the macOS window; where the two differ, this one is right).
+
+## Request and decisions of the user
+
+- 2026-11-20: "check if we can re-write or maybe just adapt this mod to run on all OS", then "do the suggested order, open a branch for it". The order: (1) a platform layer, pure move; (2) a second window shell; (3) macOS, proven on a GitHub runner; (4) Windows.
+- Decisions of 2026-11-19 that still hold: the user has no Mac (and no Windows machine); the install is from source with `uv` on each system (no bundle, no installer); the goal is full parity; a CI runner is accepted within the free minutes; the work is on its own branch.
+
+## Goal
+
+The same program runs on Linux (KDE Wayland as today; other Wayland desktops and X11 through the second shell), macOS and Windows: the floating panel above all windows that does not take the keyboard, five layouts, the options window, the tray or menu bar icon, the jump to an agent, the answer window, the names by terminal title, the model and session-time line, the custom look.
+
+Linux on KDE Wayland must stay exactly as it is: the same pixels, the same protocol behaviour, every test.
+
+## What is tied to Linux today
+
+| # | Where | Today | macOS | Windows |
+|---|---|---|---|---|
+| 1 | `ui/Main.qml`, `__main__.py` | A wlr-layer-shell surface (`org.kde.layershell`) placed with margins | A frameless always-on-top panel that never becomes the key window, on all Spaces | A frameless topmost tool window with no activation |
+| 2 | `window.py`, `client.py` (`busctl`) | Raise of the Herdr window with the KWin runner | Activate the Herdr app | `SetForegroundWindow` of the Herdr window |
+| 3 | `client.py` (`systemd-run`) | Start of a closed Herdr app outside our process tree | `open -a` | A detached process |
+| 4 | `client.py` (`env -u …`) | The caller variables are removed with `env` | The same, or an environment given to the process | An environment given to the process (no `env` program) |
+| 5 | `sessions.py` (`Host`) | `/proc`: the start of a process, its children, its open files | A `Host` built on `psutil` | A `Host` built on `psutil` |
+| 6 | `events.py` (`prctl`) | The event child ends with us | A watcher process | A watcher process (or a job object) |
+| 7 | `paths.py` | XDG folders | `~/Library/Application Support`, `~/Library/Logs`, `~/Library/Caches` | `%APPDATA%`, `%LOCALAPPDATA%` |
+| 8 | `appicon.py` | The Herdr icon from the `.desktop` file and the icon theme | The icon of the app bundle | The icon beside the program, else the circle |
+| 9 | `__main__.py` (`fcntl.flock`) | The single-instance lock | The same | `msvcrt.locking` |
+| 10 | `scripts/start.sh` | `setsid -f`, XDG state folder | `nohup … &` | `scripts/start.cmd` with `pythonw` |
+| 11 | `skins/*Theme.qml`, `Fonts` | Linux font families first | Add Menlo, SF | Add Consolas, Segoe UI |
+| 12 | `__main__.py` (`signal`, `QT_QPA_PLATFORM=wayland`) | Forces the Wayland plugin | Not set | Not set |
+
+Portable already: the Herdr commands (`herdr-app ls`, `do agent.focus`, `herdr-core events`, `ls`, `get`, `read`, `keys`, `send`), the prompt readers, the backend, the settings file, every QML skin, theme and control, the options window, the answer window, the tray through `QSystemTrayIcon`, the window icon.
+
+## Design
+
+### 1. A platform package
+
+`bellwether/platform/`: `__init__.py` picks one module from `sys.platform` one time (`linux.py`, `macos.py`, `windows.py`) and gives its members. The rest of the program calls only this interface. No `sys.platform` test and no system-specific import outside the package.
+
+The interface (functions take an injected `run` or paths where a test needs it):
+
+- `config_home()`, `state_home()`, `cache_home()`, `runtime_dir()`.
+- `lock(path)` → the single-instance lock: an object that holds the lock, or None when a different process holds it.
+- `shell()` → the name of the window shell to load (`"layer"` or `"plain"`), and `prepare_engine(engine)` (the import path that the shell needs).
+- `prepare_app(app)` → set-up before the first window; `prepare_window(window, role)` → native set-up after a window exists (`role`: `"panel"`, `"answer"`, `"options"`).
+- `raise_app(run, …)` → bring the Herdr window to the front; `start_app(run, …)` → start a closed Herdr app outside our process tree.
+- `clean_environment(argv)` or an `env` mapping → a command that runs without the caller variables of Herdr.
+- `spawn_child(argv)` → the event child, which ends when we end.
+- `process_host()` → the `Host` of `sessions.py` for this system.
+- `app_icon_file()` → the icon file of the Herdr app, or None.
+- `find_executables()` → where `herdr-app` and `herdr-core` are.
+
+`platform/linux.py` gets the code that exists today, **moved, not rewritten**.
+
+### 2. Two window shells, one panel
+
+`Main.qml` today mixes (a) the layer-shell properties, (b) the place model (x, y, screen, clamp, default corner, drag, move to next screen, hot-plug), (c) the Loader, the pointer handler and the hit test. Split:
+
+- `ui/PanelShell.qml` — (b) and (c): nothing that names a window system.
+- `ui/shells/Layer.qml` — (a): the layer surface. KDE Wayland, and any compositor with the layer-shell protocol.
+- `ui/shells/Plain.qml` — a frameless `Window` with `Tool | FramelessWindowHint | WindowStaysOnTopHint | WindowDoesNotAcceptFocus | NoDropShadowWindowHint` and a clear background, that maps the place to `x`, `y` and `screen`. macOS, Windows, X11, and Wayland with no layer shell.
+
+The shell on Linux: `layer` when the platform is Wayland, the QML module `org.kde.layershell` loads and the compositor has `zwlr_layer_shell_v1`; else `plain`. `BELLWETHER_SHELL=plain|layer` forces one (for tests and for a person).
+
+`Plain.qml` has no system call in it, so every behaviour test of the panel runs on it **on Linux**, off screen, with the same parametrized tests as the layer shell.
+
+### 3. macOS
+
+As sections 3 to 7 of the 2026-11-19 design: an accessory app (no Dock icon); the panel is an `NSPanel` at status level, on all Spaces, non-activating (through `pyobjc-framework-Cocoa`, a dependency only for `sys_platform == "darwin"`; without it a plain always-on-top window and one log line); the answer and options windows activate the app when they open; raise = activate the Herdr app (`open -a` as the second method); start = `open -a`; the watcher for the event child; the paths of the table.
+
+New against that design: the process host (`psutil`, for `sys_platform != "linux"`). The check that a Claude Code session file is of the live process uses the start of the process; the form of `procStart` in that file on macOS is **not known** — the reader must compare only what it can prove and else give no model (the row then shows the time).
+
+### 4. Windows
+
+- The panel: `Plain.qml`; `prepare_window` sets `WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW` and topmost through `ctypes` (`user32`), so a click does not take the focus and the panel has no taskbar entry.
+- Raise: find the top-level window of the Herdr process and call `SetForegroundWindow` (with `ShowWindow(SW_RESTORE)` for a minimized window). Windows can refuse this for a background process: then the failure message of today shows.
+- Start: `subprocess.Popen` with `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`.
+- No `env` program: the command gets an environment without the caller variables.
+- Lock: `msvcrt.locking` on the lock file.
+- Event child: the watcher of macOS (plain Python), or a job object with `KILL_ON_JOB_CLOSE`. The watcher first: one mechanism for two systems.
+- Paths: `%APPDATA%\bellwether` (settings), `%LOCALAPPDATA%\bellwether\{Logs,Cache}`.
+- Start: `scripts/start.cmd` runs `.venv\Scripts\pythonw.exe -m bellwether` detached.
+- `signal.SIGTERM` handling and the log rotation must not assume POSIX (a rotated file that is open cannot be renamed on Windows).
+
+### 5. Other Linux desktops
+
+With the plain shell the panel runs on X11 and on Wayland desktops with no layer shell (GNOME). Limits to state, not to hide: on GNOME Wayland a program cannot ask for "always on top", and cannot place its window; the raise of the Herdr window has only the second method of today.
+
+## Proof
+
+1. **Linux, full proof** (tasks P1, P2): Linux on KDE identical — every test, the pixel comparisons, the protocol trace of the layer surface, the running panel.
+2. **Linux, logic proof** for the code of other systems: `Plain.qml` behaviour; `platform/macos.py` and `platform/windows.py` with fake `run`, fake paths and fake `ctypes`/`pyobjc` objects; the watcher; the start scripts.
+3. **GitHub Actions**, real systems (`macos-latest`, `windows-latest`): a workflow started by hand and on pushes to this branch that touch code. `uv sync`, the test suite off screen, a smoke run with a made-up `herdr-app` and `herdr-core`, a self-test mode (`python -m bellwether --self-test`) that prints the facts of the real window as JSON (class, level or styles, focus rule, frame, screen, tray item), and a picture of the runner's own screen with made-up data as an artifact. Budget: the repository is private, so macOS minutes count 10 times and Windows minutes 2 times; one run under 10 minutes.
+4. **Not provable from here**, to say in the README until a person checks it: the feel of the drag; a full-screen app; a real second monitor; the jump with the real Herdr app; the mod start; the sharpness on a Retina or scaled screen; the answer window with a real agent.
+
+## Open questions (by research or on a runner, not by guess)
+
+1. The name, the bundle identifier and the install places of the Herdr app, `herdr-app` and `herdr-core` on macOS and on Windows.
+2. Does `herdr-app do agent.focus` alone bring the app to the front on those systems?
+3. Does the mod's `exec` run the start script there, and with which `PATH`?
+4. The form of `procStart` in a Claude Code session file on macOS and Windows.
+
+## Tasks (each: one implementer, a task review, fix rounds)
+
+- **P1 — the platform package, pure move.** `platform/{__init__,linux}.py`; paths, lock, raise, start, clean environment, child spawn, process host, app icon, executables behind the interface; a static test that no module outside the package tests `sys.platform` or imports `fcntl`, `ctypes`, or names `/proc`, `busctl`, `systemd-run`. Linux identical.
+- **P2 — the shell split.** `PanelShell.qml`, `shells/Layer.qml`, `shells/Plain.qml`; the shell rule; the behaviour tests of the panel parametrized over both shells; the layer shell identical (pixels, protocol trace); a short real run of the plain shell on Linux (XWayland).
+- **P3 — macOS.** `platform/macos.py`, the watcher, the start script, the font lists, `psutil`, `pyobjc`; the self-test mode; the workflow on a macOS runner; fix what the runner shows.
+- **P4 — Windows.** `platform/windows.py`, `scripts/start.cmd`, the lock, the log rotation; the workflow on a Windows runner; fix what the runner shows.
+- **P5 — documents.** README (the support table, the install for each system, the "not verified by a person" list), the reference page, the notes.
+
+## Error handling
+
+- A missing optional part (`pyobjc`, `psutil`, the app bundle, the commands) gives one clear log line and the nearest working behaviour, never a crash at start.
+- A raise that the system refuses is reported as today: the row shows the failure message for 3 seconds.
