@@ -117,6 +117,7 @@ def main() -> int:
             f": it needs {platform.SHELL_NEEDS}" if shell == "layer" else "")
         return 1
 
+    platform.prepare_window(engine.rootObjects()[0], "panel")
     follow_refresh_rate(engine.rootObjects()[0])
     logging.getLogger("bellwether").info("screen refresh rate: %.0f Hz", engine.rootObjects()[0].property("refreshRate"))
 

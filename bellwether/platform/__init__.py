@@ -43,3 +43,5 @@ prepare_app = _system.prepare_app
 prepare_engine = _system.prepare_engine
 SHELL_FILES = _system.SHELL_FILES
 shell = _system.shell
+prepare_window = _system.prepare_window
+window_facts = _system.window_facts

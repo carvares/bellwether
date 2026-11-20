@@ -7,6 +7,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject
 
+from . import platform
 from .layouts import UI_PATH
 
 log = logging.getLogger("bellwether")
@@ -47,6 +48,7 @@ class Answer:
                 self._backend.closePrompt()  # no window shows the prompt: it does not stay open
                 return
             self._window = roots[-1]
+            platform.prepare_window(self._window, "answer")  # the set-up of the system (macOS: activate at each open)
             self._window.installEventFilter(self._keys)
         if self._window.isVisible() and not self._window.isActive():
             # Behind a different window. On Wayland a program cannot raise its window, but a new window comes to

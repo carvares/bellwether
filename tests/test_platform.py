@@ -38,10 +38,12 @@ INTERFACE = {
     "prepare_engine": ("function", ("engine",)),
     "SHELL_FILES": ("shells", None),
     "shell": ("function", ("engine", "environ", "platform_name", "compositor_globals")),
+    "prepare_window": ("function", ("window", "role")),
+    "window_facts": ("function", ("window",)),
 }
 # The names of the package that are not members of a system.
 # The modules of the package are names of it too, once imported.
-OWN = {"load", "MODULES", "annotations", "importlib", "sys", "ModuleType", "linux", "host"}
+OWN = {"load", "MODULES", "annotations", "importlib", "sys", "ModuleType", "linux", "host", "posix"}
 
 
 def test_on_linux_the_package_gives_the_members_of_the_linux_module():
@@ -235,7 +237,7 @@ def test_the_scan_finds_each_way_to_write_a_system_test(source, found):
 
 def test_the_scan_finds_each_forbidden_text():
     """The check of the test above works on real code: the Linux module has its system code, where it belongs."""
-    found = system_specific((PACKAGE / "linux.py").read_text())
+    found = system_specific((PACKAGE / "linux.py").read_text() + (PACKAGE / "posix.py").read_text())
     assert {"import fcntl", "import ctypes"} <= set(found)
     assert [word for word in FORBIDDEN_TEXTS if word not in found] == []
 

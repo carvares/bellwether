@@ -102,6 +102,18 @@ def test_the_window_opens_one_time_and_a_second_open_shows_the_same_window(app, 
     assert messages == []
 
 
+def test_the_system_prepares_the_window_one_time_when_it_is_made(app, opened, monkeypatch):
+    from bellwether import platform
+    calls = []
+    monkeypatch.setattr(platform, "prepare_window", lambda window, role: calls.append((window, role)))
+    options, engine, backend, messages = opened
+    options.open()
+    settle(app)
+    options.open()
+    settle(app)
+    assert calls == [(engine.rootObjects()[0], "options")]
+
+
 def test_the_window_lists_the_five_designs_and_marks_the_selected_and_the_ones_to_come(app, opened):
     options, engine, backend, messages = opened
     options.open()

@@ -102,6 +102,15 @@ def desk(app, tmp_path):
         assert warnings == []
 
 
+def test_the_system_prepares_the_window_one_time_when_it_is_made(app, desk, monkeypatch):
+    from bellwether import platform
+    calls = []
+    monkeypatch.setattr(platform, "prepare_window", lambda window, role: calls.append((window, role)))
+    d = desk()
+    window = d.answer_for("t1")
+    assert calls == [(window, "answer")]
+
+
 # ----- ready: the question and one button for each option -----
 
 @pytest.mark.parametrize("letter", LETTERS)

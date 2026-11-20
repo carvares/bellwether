@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from . import platform
 from .layouts import UI_PATH
 
 log = logging.getLogger("bellwether")
@@ -25,6 +26,7 @@ class Options:
                 log.error("the options window did not load")
                 return
             self._window = roots[-1]
+            platform.prepare_window(self._window, "options")  # the set-up of the system (macOS: activate at each open)
         if self._window.isVisible() and not self._window.isActive():
             # Behind a different window. On Wayland a program cannot raise its window without a click in one of
             # its windows (the tray menu is not one), but a new window comes to the front: show it again.

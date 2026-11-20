@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import ctypes
-import fcntl
 import json
 import logging
 import os
@@ -20,6 +19,7 @@ from PySide6.QtQml import QQmlComponent
 
 from ..layouts import UI_PATH
 from .host import MAX_PROCESSES, ProcessHost  # noqa: F401  (MAX_PROCESSES: the limit of family(), for the tests)
+from .posix import lock  # noqa: F401  (the single-instance lock: fcntl.flock)
 
 
 # ----- the folders: the XDG base folders with the standard defaults -----
@@ -44,20 +44,6 @@ def cache_home() -> Path:
 
 def runtime_dir() -> Path:
     return Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp")
-
-
-# ----- the single-instance lock -----
-
-def lock(path: Path):
-    """Take the lock of the file at `path`. Return the open file that holds it, or None when a different process
-    (or a different open file of this process) holds it. Close the file to give the lock back."""
-    handle = open(path, "w")
-    try:
-        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        handle.close()
-        return None
-    return handle
 
 
 # ----- the programs of the system that the client runs -----
@@ -342,6 +328,16 @@ def prepare_app(app) -> None:
 def prepare_engine(engine) -> None:
     """Give the QML engine the import path of the layer shell module (before shell() and before the load)."""
     engine.addImportPath(str(IMPORT_PATH))
+
+
+def prepare_window(window, role: str) -> None:
+    """After a window of the program exists: `role` is "panel", "answer" or "options". Nothing on Linux: the shell
+    and the flags of the QML window are all that the window needs."""
+
+
+def window_facts(window) -> dict:
+    """The facts of the native window, for the self-test. None on Linux: the facts of Qt say it all."""
+    return {}
 
 
 def layer_module_loads(engine) -> bool:
