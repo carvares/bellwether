@@ -4,12 +4,12 @@ Where the facts come from, for a terminal of this machine:
   the processes   `herdr-core get` names the first process of the terminal and the one that has it now. The process
                   host of the system gives their child processes. Only these processes are asked.
   Claude Code     `~/.claude/sessions/<pid>.json` of such a process (it must name that pid, and the start of that
-                  process as the process host has it: a file that an older process with this pid left is not used). It has the
-                  start of the session and the session id. The model is in the transcript of that session
+                  process as the process host has it: a file that an older process with this pid left is not used).
+                  It has the start of the session and the session id. The model is in the transcript of that session
                   (`~/.claude/projects/<folder>/<session id>.jsonl`): the last record of the assistant counts.
-  Codex           a rollout file under `~/.codex/sessions/` that such a process has open (the process host names them). Its first
-                  line has the start, and its last "turn_context" record the model. With no open rollout file there
-                  is no model: a file is never chosen by its folder or its time.
+  Codex           a rollout file under `~/.codex/sessions/` that such a process has open (the process host names
+                  them). Its first line has the start, and its last "turn_context" record the model. With no open
+                  rollout file there is no model: a file is never chosen by its folder or its time.
 A model is a fact only when it was read for that process. With no start of a session, the engine uses the creation
 time of the terminal.
 
