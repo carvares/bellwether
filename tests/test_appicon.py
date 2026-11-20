@@ -378,3 +378,23 @@ def test_tray_icons_load_gives_the_mark_of_a_good_icon_with_no_log(tree, caplog)
     red = made.icon(RED).pixmap(32).toImage()
     assert red.pixelColor(16, 16) == QColor(RED) and alpha(red, 2, 2) == 0  # the square of the test SVG
     assert caplog.records == []
+
+
+# ----- the icon of the windows of the program (the taskbar shows it for the answer and the options window) -----
+
+def test_the_window_icon_is_the_herdr_mark_in_the_blocked_colour_or_the_circle(app):
+    from bellwether.state import STATE_COLORS
+    from bellwether.tray import window_icon
+    red = QColor(STATE_COLORS["blocked"])
+    for icons in (TrayIcons(image(64, Qt.GlobalColor.transparent, GLYPH, QRect(16, 16, 32, 32))), TrayIcons(None)):
+        icon = window_icon(icons)
+        assert not icon.isNull()
+        picture = icon.pixmap(32, 32).toImage()
+        opaque = [picture.pixelColor(x, y) for x in range(32) for y in range(32) if picture.pixelColor(x, y).alpha() == 255]
+        assert opaque and all(c.rgb() == red.rgb() for c in opaque)
+
+
+def test_the_program_gives_its_windows_that_icon():
+    from pathlib import Path
+    import bellwether.__main__ as main
+    assert "app.setWindowIcon(window_icon())" in Path(main.__file__).read_text()

@@ -7,7 +7,7 @@ from PySide6.QtCore import QMetaObject, QObject, Qt
 from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
-from . import appicon
+from . import appicon, state
 from .appicon import tint
 from .state import PRIORITY
 
@@ -71,6 +71,13 @@ class TrayIcons:
             log.info("the Herdr app icon cannot be used (%s): the tray icon is a circle", type(exc).__name__)
             self._shapes = None
             return make_icon(color)
+
+
+def window_icon(icons: TrayIcons | None = None) -> QIcon:
+    """The icon of the windows of the program (the answer and the options window): the Herdr mark in the colour of
+    "blocked". The taskbar shows it; without it the desktop shows its generic icon, because the program has no
+    desktop file."""
+    return (icons or TrayIcons.load()).icon(state.STATE_COLORS["blocked"])
 
 
 class Tray(QObject):

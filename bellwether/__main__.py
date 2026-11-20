@@ -22,7 +22,7 @@ from .layouts import UI_PATH
 from .options import Options
 from .paths import NAME, OLD_NAME, move_old_folders, runtime_dir, state_home
 from .sessions import SessionWatch
-from .tray import Tray
+from .tray import Tray, window_icon
 
 LOG_PATH = state_home() / NAME / f"{NAME}.log"
 # Holds only a link to the system module org.kde.layershell. The Qt of the wheel does not find it alone.
@@ -93,6 +93,7 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("bellwether")
     app.setQuitOnLastWindowClosed(False)
+    app.setWindowIcon(window_icon())  # for the taskbar entry of the answer and the options window
     if app.platformName() != "wayland":
         logging.getLogger("bellwether").warning(
             "the Qt platform is %s, not wayland: the widget cannot be an overlay", app.platformName()
