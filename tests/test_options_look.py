@@ -764,9 +764,21 @@ def test_on_a_low_screen_a_pointer_or_a_finger_scrolls_the_sections_and_a_slider
         drag(app, window, start + QPoint(0, 40), QPoint(start.x(), window.height() - 2))  # past the end: no further
         assert contentY() == lowest
         # A drag of the sections themselves (the empty room at their left), as a pen or a mouse with no wheel.
+        # Measured while the button is down: the release starts a flick, an animation of the clock, so a measure
+        # after the release depends on the speed of the computer.
         place = scroller.mapToScene(QPointF(window.property("pad") / 2, scroller.height() / 2)).toPoint()
-        drag(app, window, place, place + QPoint(0, 120))
-        assert contentY() <= lowest - 100
+        moved = []
+        QTest.mousePress(window, LEFT, NONE, place)
+        settle(app)
+        for n in range(1, 11):
+            QTest.mouseMove(window, place + QPoint(0, 12 * n))
+            settle(app)
+            moved.append(lowest - contentY())
+        # The drag starts within two steps (the drag distance of the system), then the sections follow the pointer.
+        assert [round(b - a, 3) for a, b in zip(moved[2:], moved[3:])] == [12] * 7 and moved[-1] >= 120 - 24
+        QTest.mouseRelease(window, LEFT, NONE, place + QPoint(0, 120))
+        settle(app)
+        assert contentY() <= lowest - moved[-1]  # the release does not take the sections back
         # A finger that moves up: the sections move with it.
         scroller.setProperty("contentY", 0)
         settle(app)
