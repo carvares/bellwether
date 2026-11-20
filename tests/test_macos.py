@@ -662,3 +662,18 @@ def test_pyobjc_and_psutil_are_dependencies_only_where_they_are_used():
              for d in project["dependencies"]}
     assert marks["pyobjc-framework-cocoa"] == "sys_platform == 'darwin'"
     assert marks["psutil"] == "sys_platform != 'linux'"
+
+
+def test_off_screen_the_program_makes_no_native_call_and_says_so_one_time(app, caplog):
+    """The Qt platform of the tests is offscreen: the winId of a window is no NSView, so nothing native is done."""
+    caplog.set_level(logging.INFO, logger="bellwether")
+    assert macos.cocoa() is False and macos.load_appkit() is None
+    window = QtWindow()
+    macos.prepare_window(window, "panel")
+    macos.prepare_window(window, "options")
+    window.show()
+    assert window.calls == [("show",)] and window.visibleChanged.slots == []
+    assert macos.window_facts(window) == {}
+    macos.prepare_app(app)
+    assert records(caplog) == [(logging.INFO, "the Qt platform is offscreen, not cocoa: the program gets no set-up of "
+                                              "macOS")]

@@ -2,8 +2,11 @@
 import os
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
+
+import pytest
 
 SCRIPT = Path(__file__).parent.parent / "scripts" / "start.sh"
 LIMIT = 1024 * 1024
@@ -33,7 +36,9 @@ def start(tmp_path, old_log: bytes | None, system: str | None = None, setsid: bo
     python.parent.mkdir(parents=True)
     python.write_text('#!/bin/sh\necho "made-up widget: $*"\n')
     python.chmod(0o755)
-    log = log or tmp_path / "state" / "bellwether" / "start.log"
+    if log is None:  # the log folder of the real system (`uname -s`): macOS has its Library
+        darwin = system == "Darwin" or (system is None and sys.platform == "darwin")
+        log = (tmp_path / "home" / "Library" / "Logs" if darwin else tmp_path / "state") / "bellwether" / "start.log"
     if old_log is not None:
         log.parent.mkdir(parents=True)
         log.write_bytes(old_log)
@@ -69,15 +74,14 @@ def test_the_start_script_makes_the_start_log_when_there_is_none(tmp_path):
 
 def test_on_macos_the_start_log_is_in_the_logs_folder_of_the_library_and_nohup_starts_the_widget(tmp_path):
     """macOS has no setsid: nohup in the background. The XDG folder is not the log folder there."""
-    log = start(tmp_path, None, system="Darwin", setsid=False,
-                log=tmp_path / "home" / "Library" / "Logs" / "bellwether" / "start.log")
+    log = start(tmp_path, None, system="Darwin", setsid=False)
     assert log.read_text() == "made-up widget: -m bellwether\n"
     assert not (tmp_path / "state").exists()
 
 
+@pytest.mark.skipif(shutil.which("setsid") is None, reason="no setsid here")
 def test_on_macos_with_a_setsid_the_start_log_is_in_the_library_too(tmp_path):
-    log = start(tmp_path, b"an older line\n", system="Darwin", setsid=True,
-                log=tmp_path / "home" / "Library" / "Logs" / "bellwether" / "start.log")
+    log = start(tmp_path, b"an older line\n", system="Darwin", setsid=True)
     assert log.read_text() == "an older line\nmade-up widget: -m bellwether\n"
 
 

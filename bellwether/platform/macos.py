@@ -70,9 +70,19 @@ def shell(engine, environ=None, platform_name=None, compositor_globals=None) -> 
 
 # ----- AppKit, through pyobjc (a dependency only on macOS) -----
 
+def cocoa() -> bool:
+    """True when Qt uses its cocoa plugin: only then is the winId of a window an NSView. Off screen (the tests, a
+    person's QT_QPA_PLATFORM) the program makes no native call."""
+    from PySide6.QtGui import QGuiApplication  # noqa: PLC0415  (the watcher imports this module: no Qt at the top)
+    return QGuiApplication.platformName() == "cocoa"
+
+
 def load_appkit():
-    """The modules AppKit and objc of pyobjc (as .AppKit and .objc), or None when pyobjc cannot be imported. Each
-    member that needs them takes a loader as its `appkit` argument (None: this one); a test gives a fake."""
+    """The modules AppKit and objc of pyobjc (as .AppKit and .objc), or None when pyobjc cannot be imported or Qt
+    does not use its cocoa plugin. Each member that needs them takes a loader as its `appkit` argument (None: this
+    one); a test gives a fake."""
+    if not cocoa():
+        return None
     try:
         import AppKit  # noqa: PLC0415  (only on macOS)
         import objc  # noqa: PLC0415
@@ -223,7 +233,10 @@ def native_window(window, kit):
 
 def prepare_app(app, *, appkit=None) -> None:
     """After the QApplication: an accessory app (no Dock icon, no menu bar of its own; the tray item stays). Without
-    pyobjc: one log line, and the program runs with a Dock icon and a plain panel."""
+    pyobjc: one log line, and the program runs with a Dock icon and a plain panel. Not on cocoa: one log line."""
+    if appkit is None and not cocoa():
+        log.info("the Qt platform is %s, not cocoa: the program gets no set-up of macOS", app.platformName())
+        return
     kit = (appkit or load_appkit)()
     if kit is None:
         log.warning("pyobjc (AppKit) cannot be imported: the panel is a plain window above the others on the current "
@@ -291,7 +304,10 @@ def activate_app(window, kit) -> None:
 def prepare_window(window, role: str, *, appkit=None) -> None:
     """After a window of the program exists. "panel": a non-activating panel at the status level on every Space,
     that does not hide when the app is not active. "answer" and "options": the app is activated at each show of the
-    window (an accessory app is not active, and only the active app gets the keyboard)."""
+    window (an accessory app is not active, and only the active app gets the keyboard). Nothing when Qt does not use
+    its cocoa plugin (off screen)."""
+    if appkit is None and not cocoa():
+        return
     kit = (appkit or load_appkit)()
     if role == "panel":
         _prepare_panel(window, kit)
@@ -302,7 +318,10 @@ def prepare_window(window, role: str, *, appkit=None) -> None:
 
 
 def window_facts(window, *, appkit=None) -> dict:
-    """The facts of the native window and of the app, for the self-test. Each value as AppKit gives it."""
+    """The facts of the native window and of the app, for the self-test. Each value as AppKit gives it. None when
+    Qt does not use its cocoa plugin (off screen), as on Linux."""
+    if appkit is None and not cocoa():
+        return {}
     kit = (appkit or load_appkit)()
     if kit is None:
         return {"pyobjc": False, "always_show_property": bool(window.property(ALWAYS_SHOW))}
