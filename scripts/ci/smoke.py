@@ -18,13 +18,44 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 FAKE = ROOT / "scripts" / "ci" / "fake-herdr"
-PYTHON = ROOT / ".venv" / "bin" / "python"
 
 
-def pids(pattern: str) -> list[int]:
-    """The processes whose whole command line matches `pattern` (an extended regular expression of pgrep)."""
-    done = subprocess.run(["pgrep", "-f", pattern], capture_output=True, text=True)
-    return [int(word) for word in done.stdout.split()]
+def table() -> dict[int, tuple[int, str]]:
+    """Every process: pid → (parent pid, command line), from `ps` (the same columns on Linux and macOS)."""
+    done = subprocess.run(["ps", "-axo", "pid=,ppid=,command="], capture_output=True, text=True, check=True)
+    rows = {}
+    for line in done.stdout.splitlines():
+        words = line.split(None, 2)
+        if len(words) >= 2 and words[0].isdigit() and words[1].isdigit():
+            rows[int(words[0])] = (int(words[1]), words[2] if len(words) > 2 else "")
+    return rows
+
+
+def event_children(rows) -> list[int]:
+    """The made-up herdr-core event streams of this checkout."""
+    return [pid for pid, (_, command) in rows.items()
+            if command.endswith(f"{FAKE}/herdr-core events --json") and "bellwether.platform.guard" not in command]
+
+
+def widget_of(rows, child: int) -> int | None:
+    """The widget that started the event stream `child`: the nearest process above it that runs
+    `-m bellwether` (on macOS the watcher is between them, on Linux the widget is the parent)."""
+    pid = rows.get(child, (0, ""))[0]
+    while pid > 1 and pid in rows:
+        parent, command = rows[pid]
+        if command.endswith("-m bellwether"):
+            return pid
+        pid = parent
+    return None
+
+
+def gone(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+    return not state or state.startswith("Z")
 
 
 def main(argv: list[str]) -> int:
@@ -43,11 +74,8 @@ def main(argv: list[str]) -> int:
 
     folder = platform.state_home() / "bellwether"
     log, start_log = folder / "bellwether.log", folder / "start.log"
-    # Only a widget of this tree, started here: anchored to the python of this checkout.
-    widget = f"^{PYTHON} -m bellwether$"
-    events = f"^/bin/sh {FAKE}/herdr-core events --json$"
-    if pids(widget):
-        print(f"FAIL a widget of this checkout runs already: {pids(widget)}")
+    if event_children(table()):
+        print("FAIL an event stream of the made-up herdr-core runs already")
         return 1
     began = time.monotonic()
     subprocess.run(["/bin/sh", str(ROOT / "scripts" / "start.sh")], env=environ, check=True, timeout=30)
@@ -64,18 +92,27 @@ def main(argv: list[str]) -> int:
     time.sleep(2)  # some more seconds of the running widget: a late error shows in the log
     text = log.read_text(errors="replace") if log.is_file() else ""
     started = start_log.read_text(errors="replace") if start_log.is_file() else ""
-    found = pids(widget)
-    children = pids(events)
+    rows = table()
+    children = event_children(rows)
+    widgets = {widget_of(rows, child) for child in children} - {None}
+    # The processes of the run, for the record (made-up programs only): the widget, the watcher, the stream.
+    print("\n".join(f"{pid} {parent} {command}" for pid, (parent, command) in sorted(rows.items())
+                    if str(FAKE) in command or pid in widgets or "bellwether.platform.guard" in command))
     checks = {f"log has {line!r}": line in text for line in wanted}
     checks["no traceback in the logs"] = "Traceback" not in text + started
-    checks["one widget runs"] = len(found) == 1
     checks["one event child runs"] = len(children) == 1
-    for pid in found:
-        os.kill(pid, signal.SIGKILL)
-    time.sleep(3)
-    checks["the event child is gone 3 s after a SIGKILL of the widget"] = pids(events) == []
-    for pid in pids(events):  # a check that failed must not leave the child behind
-        os.kill(pid, signal.SIGKILL)
+    checks["one widget started it"] = len(widgets) == 1
+    for pid in widgets:
+        os.kill(pid, signal.SIGKILL)  # no clean-up of its own: the watcher must see it
+    end = time.monotonic() + 3
+    while time.monotonic() < end and not all(map(gone, children)):
+        time.sleep(0.1)
+    checks["the event child is gone 3 s after a SIGKILL of the widget"] = bool(children) and all(map(gone, children))
+    checks["the widget is gone"] = bool(widgets) and all(map(gone, widgets))
+    # A check that failed must not leave a process of this run behind (the self-test comes next): by pid.
+    for pid, (_, command) in table().items():
+        if command.endswith(f"{FAKE}/herdr-core events --json") or pid in widgets:
+            os.kill(pid, signal.SIGKILL)
     print(f"--- {log.name}\n{text}--- {start_log.name}\n{started}---")
     for name, good in checks.items():
         print(f"{'PASS' if good else 'FAIL'} {name}")
