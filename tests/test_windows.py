@@ -457,9 +457,44 @@ def test_a_child_that_cannot_join_the_job_still_runs_with_one_log_line(api, capl
 
 def test_the_limits_of_the_job_end_its_processes_when_it_is_closed():
     limits = windows.kill_on_close_limits()
-    assert limits.BasicLimitInformation.LimitFlags == 0x2000
+    # KILL_ON_JOB_CLOSE, and SILENT_BREAKAWAY_OK: a process that the child starts (the server of herdr-core, which
+    # runs the terminals) is not in the job and never ends with the panel.
+    assert limits.BasicLimitInformation.LimitFlags == 0x2000 | 0x1000
     if ctypes.sizeof(ctypes.c_void_p) == 8:
         assert ctypes.sizeof(limits) == 144  # JOBOBJECT_EXTENDED_LIMIT_INFORMATION on 64-bit Windows
+
+
+@on_windows
+def test_on_windows_a_process_that_the_event_child_starts_does_not_end_with_the_program(tmp_path):
+    """The server of herdr-core, started by `herdr-core events`, must outlive the panel: only the child is in the job."""
+    psutil = pytest.importorskip("psutil")
+    grandchild = (f"import os, time; open({str(tmp_path / 'pid')!r}, 'w').write(str(os.getpid())); time.sleep(30)")
+    child_code = (f"import subprocess, sys, time; subprocess.Popen([sys.executable, '-c', {grandchild!r}], "
+                  f"creationflags=0x8); print('started', flush=True); time.sleep(60)")
+    parent = subprocess.Popen([sys.executable, "-c", textwrap.dedent(f"""
+        import sys, time
+        from bellwether.platform import windows
+        process = windows.spawn_child([sys.executable, "-c", {child_code!r}])
+        print(process.stdout.readline().decode().strip(), flush=True)
+        time.sleep(60)
+    """)], stdout=subprocess.PIPE, cwd=ROOT)
+    other = None
+    try:
+        assert parent.stdout.readline().strip() == b"started"
+        end = time.monotonic() + 5
+        while not (tmp_path / "pid").exists() and time.monotonic() < end:
+            time.sleep(0.05)
+        other = int((tmp_path / "pid").read_text())
+        parent.kill()
+        parent.wait(10)
+        time.sleep(1.0)
+        assert psutil.pid_exists(other), "a process that the event child started ended with the program"
+    finally:
+        parent.kill()
+        parent.wait(10)
+        parent.stdout.close()
+        if other is not None and psutil.pid_exists(other):
+            psutil.Process(other).kill()
 
 
 @on_windows

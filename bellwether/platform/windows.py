@@ -145,7 +145,8 @@ EX_STYLES = {"WS_EX_DLGMODALFRAME": 0x1, "WS_EX_TOPMOST": WS_EX_TOPMOST, "WS_EX_
 DETACHED_PROCESS, CREATE_NEW_PROCESS_GROUP = 0x8, 0x200
 CREATE_BREAKAWAY_FROM_JOB, CREATE_NO_WINDOW = 0x01000000, 0x08000000
 PROCESS_TERMINATE, PROCESS_SET_QUOTA, PROCESS_QUERY_LIMITED_INFORMATION = 0x1, 0x100, 0x1000
-JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 0x2000, 9
+JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK = 0x2000, 0x1000
+JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
 
 
 def bit_names(value: int, names: dict[str, int]) -> list[str]:
@@ -173,8 +174,11 @@ class JobLimits(ctypes.Structure):
 
 
 def kill_on_close_limits() -> JobLimits:
+    """The processes of the job end when its last handle is closed; and a process that they start is NOT in the job
+    (silent breakaway): only the event child itself ends with the program, as on Linux. herdr-core can start its
+    server, which keeps every terminal running: it must never end with the panel."""
     limits = JobLimits()
-    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK
     return limits
 
 
