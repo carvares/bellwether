@@ -83,7 +83,10 @@ def test_a_system_with_no_module_is_a_clear_import_error(name):
 # the package of the program is `from . import platform`, a relative import, which the rule does not see.
 SYSTEM_MODULES = ("fcntl", "ctypes", "msvcrt", "winreg", "platform")
 # A module → its attributes that tell the system.
-SYSTEM_ATTRIBUTES = {"sys": ("platform",), "os": ("name",), "platform": ("system", "uname")}
+SYSTEM_ATTRIBUTES = {"sys": ("platform",), "os": ("name", "uname"), "platform": ("system", "uname"),
+                     "sysconfig": ("get_platform",)}
+# A name that tells the system wherever it comes from (Qt's facts of the system).
+SYSTEM_NAMES = ("QSysInfo",)
 # A text that names a system-specific mechanism: a call of the kernel, a file system, a program, the XDG rules.
 FORBIDDEN_TEXTS = ("prctl", "/proc", "busctl", "systemd-run", "XDG_", ".desktop")
 # path relative to bellwether/ → the findings that it may have, with the reason. Empty: no exception.
@@ -94,14 +97,15 @@ def modules_outside_the_package():
     return sorted(path for path in SOURCE.rglob("*.py") if PACKAGE not in path.parents)
 
 
-def named_module(node, aliases):
-    """The module that the expression `node` names: a name that an import gave, `__import__("m")` or
-    `importlib.import_module("m")`. None for anything else."""
+def named_module(node, aliases, importers=("__import__",)):
+    """The module that the expression `node` names: a name that an import or an assignment gave, or a call of an
+    import function with a constant name (`__import__("m")`, `importlib.import_module("m")`, or a name bound to
+    `import_module`). None for anything else."""
     if isinstance(node, ast.Name):
         return aliases.get(node.id)
     if isinstance(node, ast.Call) and node.args and isinstance(node.args[0], ast.Constant):
         call = node.func
-        if (isinstance(call, ast.Name) and call.id == "__import__") or (
+        if (isinstance(call, ast.Name) and call.id in importers) or (
                 isinstance(call, ast.Attribute) and call.attr == "import_module"):
             return node.args[0].value if isinstance(node.args[0].value, str) else None
     return None
@@ -109,11 +113,19 @@ def named_module(node, aliases):
 
 def system_specific(text):
     """The system-specific parts of the source `text`: "import <module>" for a system module (by an import statement
-    or by a call), "<module>.<attribute>" for an attribute that tells the system (as an attribute, through an alias,
-    `from <module> import <attribute>` or `getattr`), and each forbidden text."""
+    or by a call of an import function), "<module>.<attribute>" for an attribute that tells the system (as an
+    attribute, through an alias of an import or of an assignment, `from <module> import <attribute>` or `getattr`
+    with a constant name), "from <module> import *" for such a module, each name of SYSTEM_NAMES, and each
+    forbidden text.
+
+    Not found (a rule of the review, not of a proof): `vars(sys)["platform"]` and `sys.__dict__`, `getattr` with a
+    name that is not a constant, `eval`/`exec` of a text, a module object that comes from an other module or from a
+    function, and an alias made in a branch or a loop of an other scope than the use. A relative import (`from .
+    import platform`, the package of the program) is not seen, by design."""
     tree = ast.parse(text)
     found = []
-    aliases = {}  # a name of the module → the module that an absolute import bound to it
+    aliases = {}  # a name → the module that an absolute import or an assignment bound to it
+    importers = {"__import__"}  # the names of import functions
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -122,19 +134,40 @@ def system_specific(text):
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
             root = node.module.split(".")[0]
             found.append(f"import {root}")
-            found += [f"{root}.{a.name}" for a in node.names if a.name in SYSTEM_ATTRIBUTES.get(root, ())]
+            for alias in node.names:
+                if alias.name in SYSTEM_ATTRIBUTES.get(root, ()):
+                    found.append(f"{root}.{alias.name}")
+                elif alias.name == "*" and root in SYSTEM_ATTRIBUTES:
+                    found.append(f"from {root} import *")
+                elif root == "importlib" and alias.name == "import_module":
+                    importers.add(alias.asname or alias.name)
     found = [item for item in found if not item.startswith("import ") or item[7:] in SYSTEM_MODULES]
+    changed = True
+    while changed:  # an alias by assignment, also of an other alias (s = sys; t = s)
+        changed = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                module = named_module(node.value, aliases, importers)
+                if module and aliases.get(node.targets[0].id) != module:
+                    aliases[node.targets[0].id] = module
+                    changed = True
     for node in ast.walk(tree):
         if isinstance(node, ast.Attribute):
-            module = named_module(node.value, aliases)
+            module = named_module(node.value, aliases, importers)
             if node.attr in SYSTEM_ATTRIBUTES.get(module, ()):
                 found.append(f"{module}.{node.attr}")
+            if node.attr in SYSTEM_NAMES:
+                found.append(node.attr)
+        elif isinstance(node, ast.Name) and node.id in SYSTEM_NAMES:
+            found.append(node.id)
+        elif isinstance(node, ast.alias) and (node.asname or node.name).split(".")[-1] in SYSTEM_NAMES:
+            found.append((node.asname or node.name).split(".")[-1])
         elif isinstance(node, ast.Call):
-            module = named_module(node, aliases)
+            module = named_module(node, aliases, importers)
             if module and module.split(".")[0] in SYSTEM_MODULES:
                 found.append(f"import {module.split('.')[0]}")
             if isinstance(node.func, ast.Name) and node.func.id == "getattr" and len(node.args) >= 2:
-                module, name = named_module(node.args[0], aliases), node.args[1]
+                module, name = named_module(node.args[0], aliases, importers), node.args[1]
                 if isinstance(name, ast.Constant) and name.value in SYSTEM_ATTRIBUTES.get(module, ()):
                     found.append(f"{module}.{name.value}")
     return sorted(set(found)) + [word for word in FORBIDDEN_TEXTS if word in text]
@@ -167,6 +200,17 @@ def test_no_module_outside_the_package_has_system_specific_code():
     ("import sys\ngetattr(sys, 'platform')", ["sys.platform"]),
     ("import importlib\nimportlib.import_module('msvcrt')", ["import msvcrt"]),
     ("lock = __import__('fcntl.x')", ["import fcntl"]),
+    # The ways of the review of P2.
+    ("from importlib import import_module\nimport_module('fcntl')", ["import fcntl"]),
+    ("from importlib import import_module as load\nload('msvcrt')", ["import msvcrt"]),
+    ("import os\nos.uname()", ["os.uname"]),
+    ("import sysconfig\nsysconfig.get_platform()", ["sysconfig.get_platform"]),
+    ("from PySide6.QtCore import QSysInfo\nQSysInfo.productType()", ["QSysInfo"]),
+    ("import PySide6.QtCore as core\ncore.QSysInfo.kernelType()", ["QSysInfo"]),
+    ("import sys\ns = sys\ns.platform", ["sys.platform"]),
+    ("import sys\ns = sys\nt = s\nt.platform", ["sys.platform"]),
+    ("s = __import__('os')\ns.name", ["os.name"]),
+    ("from sys import *", ["from sys import *"]),
     ("open('/proc/self/stat')", ["/proc"]),
     # Not system-specific: the package of the program, and the same words on other things.
     ("from . import platform\nplatform.shell(None)\nplatform.system", []),
