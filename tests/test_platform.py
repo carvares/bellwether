@@ -11,12 +11,12 @@ from types import SimpleNamespace
 import pytest
 
 from bellwether import platform
-from bellwether.platform import linux, macos
+from bellwether.platform import linux, macos, windows
 
 PACKAGE = Path(platform.__file__).parent
 SOURCE = PACKAGE.parent
-# The module of each system, by the value of sys.platform. Windows comes with task P4 (until then: an ImportError).
-SYSTEMS = {"linux": linux, "darwin": macos}
+# The module of each system, by the value of sys.platform.
+SYSTEMS = {"linux": linux, "darwin": macos, "win32": windows}
 
 # The interface: member → (kind, the names of its parameters). Each module of a system gives all of them, with these
 # parameters in this order; a function may have more parameters only after them, keyword-only and with a default
@@ -49,7 +49,7 @@ INTERFACE = {
 # The names of the package that are not members of a system.
 # The modules of the package are names of it too, once imported.
 OWN = {"load", "MODULES", "annotations", "importlib", "sys", "ModuleType", "linux", "host", "posix", "macos", "guard",
-       "mainthread",
+       "mainthread", "windows",
        "SYSTEM"}
 on_linux = pytest.mark.skipif(sys.platform != "linux", reason="needs Linux")
 
@@ -77,8 +77,9 @@ def test_each_member_of_each_system_has_its_kind_and_its_parameters(system, name
         assert tuple(p.name for p in given[:len(parameters)]) == parameters
         assert all(p.kind is p.KEYWORD_ONLY and p.default is not p.empty for p in given[len(parameters):])
         assert all(p.kind is p.POSITIONAL_OR_KEYWORD for p in given[:len(parameters)])
-    elif kind == "commands":
-        assert member and all(isinstance(k, str) and isinstance(v, str) and v for k, v in member.items())
+    elif kind == "commands":  # Windows has none: the program makes its calls itself
+        assert isinstance(member, dict) and all(isinstance(k, str) and isinstance(v, str) and v
+                                                for k, v in member.items())
     elif kind == "options":
         assert isinstance(member, dict) and all(isinstance(k, str) for k in member)
     elif kind == "shells":
@@ -92,6 +93,7 @@ def test_the_roles_of_the_commands_are_the_same_where_the_client_uses_them():
     its own roles (macOS has no `env` program and no raise program)."""
     assert set(linux.COMMANDS) == {"raiser", "launcher", "env_cleaner"}
     assert set(macos.COMMANDS) == {"launcher"}
+    assert windows.COMMANDS == {}
 
 
 @pytest.mark.parametrize("system", SYSTEMS)
@@ -108,11 +110,11 @@ def test_the_process_host_of_each_system_is_a_process_host_and_shares_its_family
             read(1)
 
 
-@pytest.mark.parametrize("name", ["win32", "cygwin", "freebsd14", "linux2", ""])
+@pytest.mark.parametrize("name", ["cygwin", "freebsd14", "linux2", "win64", ""])
 def test_a_system_with_no_module_is_a_clear_import_error(name):
     with pytest.raises(ImportError) as failure:
         platform.load(name)
-    assert str(failure.value) == f"bellwether does not run on this system ({name!r}): it runs on linux, darwin"
+    assert str(failure.value) == f"bellwether does not run on this system ({name!r}): it runs on linux, darwin, win32"
 
 
 def test_the_wait_of_the_posix_systems_sees_data_and_the_end_of_a_pipe():

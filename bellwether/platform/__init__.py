@@ -11,7 +11,7 @@ import sys
 from types import ModuleType
 
 # The value of sys.platform → the module of this package for that system.
-MODULES = {"linux": "linux", "darwin": "macos"}
+MODULES = {"linux": "linux", "darwin": "macos", "win32": "windows"}
 
 
 def load(name: str) -> ModuleType:
