@@ -1,0 +1,4 @@
+# The Windows start script keeps its Windows line ends; the shell scripts keep theirs on every checkout.
+*.cmd text eol=crlf
+*.sh text eol=lf
+scripts/ci/fake-herdr/* text eol=lf
