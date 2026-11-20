@@ -68,6 +68,33 @@ def follow_refresh_rate(window) -> None:
     follow()
 
 
+def reserved_part(screen) -> dict:
+    """What the system keeps for itself at each edge of the screen (the macOS menu bar and Dock, the panels of an X11
+    desktop): the screen less its available geometry, in pixels."""
+    whole, free = screen.geometry(), screen.availableGeometry()
+    return {"left": free.x() - whole.x(), "top": free.y() - whole.y(),
+            "right": whole.x() + whole.width() - free.x() - free.width(),
+            "bottom": whole.y() + whole.height() - free.y() - free.height()}
+
+
+def follow_work_area(window, app) -> None:
+    """Give the plain shell the part of each screen that the system keeps (`reserved` of the panel): now, and when a
+    screen comes, goes or changes its available geometry. (The layer shell does not need it: the compositor keeps
+    its panels free.)"""
+    def update(*_args) -> None:
+        window.setProperty("reserved", {screen.name(): reserved_part(screen) for screen in app.screens()})
+
+    def watch(screen) -> None:
+        screen.availableGeometryChanged.connect(update)
+        screen.geometryChanged.connect(update)
+
+    for screen in app.screens():
+        watch(screen)
+    app.screenAdded.connect(lambda screen: (watch(screen), update()))
+    app.screenRemoved.connect(update)
+    update()
+
+
 def load_panel(engine) -> str:
     """Load the panel in the window shell of this system and write the shell in the log. Return the shell; the
     panel window is engine.rootObjects()[0] when it loaded."""
@@ -78,10 +105,23 @@ def load_panel(engine) -> str:
     return shell
 
 
+def start_panel(engine, app) -> str:
+    """Load the panel (load_panel) and prepare its window: the set-up of the system, the refresh rate, and for the
+    plain shell the work area of the screens. Return the shell."""
+    shell = load_panel(engine)
+    if engine.rootObjects():
+        window = engine.rootObjects()[0]
+        platform.prepare_window(window, "panel")
+        follow_refresh_rate(window)
+        if shell == "plain":
+            follow_work_area(window, app)
+    return shell
+
+
 def main() -> int:
     if sys.argv[1:] == ["--self-test"]:  # made-up agents and the facts of the windows as JSON: see selftest.py
         from .selftest import run  # noqa: PLC0415
-        return run(load_panel)
+        return run(start_panel)
     # The lock comes first: a widget that runs (of the old name too) still uses its folders.
     lock = take_single_instance_lock()
     if lock is None:
@@ -113,15 +153,13 @@ def main() -> int:
     backend = Backend(client, icons=Icons(), events=events, sessions=SessionWatch(client))
     engine = QQmlApplicationEngine()
     engine.rootContext().setContextProperty("backend", backend)
-    shell = load_panel(engine)
+    shell = start_panel(engine, app)
     if not engine.rootObjects():
         logging.getLogger("bellwether").error(
             "the QML interface did not load (shell: %s)%s", shell,
             f": it needs {platform.SHELL_NEEDS}" if shell == "layer" else "")
         return 1
 
-    platform.prepare_window(engine.rootObjects()[0], "panel")
-    follow_refresh_rate(engine.rootObjects()[0])
     logging.getLogger("bellwether").info("screen refresh rate: %.0f Hz", engine.rootObjects()[0].property("refreshRate"))
 
     answer = Answer(engine, backend)  # the answer window, at the "Answer" control of a blocked agent row

@@ -100,8 +100,8 @@ def native_facts(window) -> dict:
         return {"error": type(error).__name__}
 
 
-def run(load_panel, show: float = SHOW, step: float = STEP, out=sys.stdout, err=sys.stderr) -> int:
-    """`load_panel`: the load of the panel of the program (`__main__.load_panel`), with its shell rule."""
+def run(start_panel, show: float = SHOW, step: float = STEP, out=sys.stdout, err=sys.stderr) -> int:
+    """`start_panel`: the load and the set-up of the panel of the program (`__main__.start_panel`)."""
     began = time.monotonic()
     log = logging.getLogger("bellwether")
     handler = logging.StreamHandler(err)
@@ -127,23 +127,25 @@ def run(load_panel, show: float = SHOW, step: float = STEP, out=sys.stdout, err=
                           icons=Icons(Path(folder) / "app", Path(folder) / "cache"))
         engine = QQmlApplicationEngine()
         engine.rootContext().setContextProperty("backend", backend)
-        facts["shell"] = load_panel(engine)
+        facts["shell"] = start_panel(engine, app)
         tray = None
         try:
             if not engine.rootObjects():
                 facts["error"] = "the QML interface did not load"
                 return 1
             panel = engine.rootObjects()[0]
-            platform.prepare_window(panel, "panel")
             backend.apply(AGENTS)
             options = Options(engine)
-            facts["tray"] = {"available": QSystemTrayIcon.isSystemTrayAvailable(), "visible": False}
+            facts["tray"] = {"available": QSystemTrayIcon.isSystemTrayAvailable(), "visible": False, "items": 0}
             if facts["tray"]["available"]:
                 tray = Tray(backend, panel, app, options.open)
-                facts["tray"]["visible"] = tray.findChild(QSystemTrayIcon).isVisible()
+                items = tray.findChildren(QSystemTrayIcon)  # the tray items that this program made
+                facts["tray"].update(items=len(items), visible=any(item.isVisible() for item in items))
             wait(app, 0.5)
             shown(f"panel-{backend.layout}")
             wait(app, show)
+            # Before any normal window of the program opens: the facts of a program that shows only its panel (on
+            # macOS the app must not be active then: the panel takes no focus, and the start activates nothing).
             facts["panel"] = qt_facts(panel)
             facts["native"] = native_facts(panel)
             facts["layouts"] = {}

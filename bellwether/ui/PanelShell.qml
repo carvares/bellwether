@@ -37,6 +37,10 @@ Window {
     // The screen of the window while the named screen is not there.
     readonly property var home: screenNamed(screenName)
         || ({name: Screen.name, x: Screen.virtualX, y: Screen.virtualY, width: Screen.width, height: Screen.height})
+    // The parts of each screen that the system keeps for itself (the macOS menu bar and Dock, the panels of an X11
+    // desktop): screen name → {left, top, right, bottom} in pixels. The program sets it for the plain shell from the
+    // available geometry of each screen; empty (the layer shell: the compositor keeps its panels free itself): none.
+    property var reserved: ({})
     // True from the time the system closes the window (the compositor closes a layer surface when its monitor went
     // away) until the panel shows again.
     property bool closedByCompositor: false
@@ -73,13 +77,24 @@ Window {
         posY = place.y
     }
 
+    // The part of the screen `target` (one of screens()) that the panel may use, from its top-left corner: the
+    // screen less what the system keeps for itself (`reserved`).
+    function workArea(target) {
+        var r = reserved[target.name] || {}
+        var left = r.left || 0
+        var top = r.top || 0
+        return {x: left, y: top, width: target.width - left - (r.right || 0),
+                height: target.height - top - (r.bottom || 0)}
+    }
+
     // The place of a panel of w × h on its screen: the default corner when the panel has no place of its own, and
-    // kept on the screen.
+    // kept in the work area of the screen.
     function clampedPlace(w, h) {
-        var px = atDefault ? home.width - w - edge : posX
-        var py = atDefault ? edge : posY
-        return {x: Math.min(Math.max(0, px), Math.max(0, home.width - w)),
-                y: Math.min(Math.max(0, py), Math.max(0, home.height - h))}
+        var a = workArea(home)
+        var px = atDefault ? a.x + a.width - w - edge : posX
+        var py = atDefault ? a.y + edge : posY
+        return {x: Math.min(Math.max(a.x, px), Math.max(a.x, a.x + a.width - w)),
+                y: Math.min(Math.max(a.y, py), Math.max(a.y, a.y + a.height - h))}
     }
 
     // True while a drag moves the panel: it can then be on two screens, and nothing pulls it back to its own.
@@ -270,7 +285,7 @@ Window {
             return
         var w = scaled(skin.implicitWidth)
         var h = scaled(skin.implicitHeight)
-        if (h > home.height && panelModel.shown > 1 && panelModel.rowHeight > 0) {
+        if (h > workArea(home).height && panelModel.shown > 1 && panelModel.rowHeight > 0) {
             requestUpdate()  // a frame, so that fitRows() runs
             return
         }
@@ -309,7 +324,7 @@ Window {
         if (!skin || panelModel.rowHeight <= 0)
             return
         var rest = skin.implicitHeight - rows * panelModel.rowHeight
-        var fit = Math.floor((home.height / panelScale - rest) / panelModel.rowHeight + 0.000001)
+        var fit = Math.floor((workArea(home).height / panelScale - rest) / panelModel.rowHeight + 0.000001)
         panelModel.rowRoom = Math.max(1, Math.min(panelModel.rowLimit, fit))
     }
 
@@ -344,6 +359,12 @@ Window {
         takeSize()
     }
     onPanelScaleChanged: takeSize()
+    // The system keeps a different part of a screen (the Dock moved, a panel of the desktop grew).
+    onReservedChanged: {
+        if (started && screenNamed(screenName) !== null)
+            clampPosition()
+        takeSize()
+    }
     onAfterAnimating: fitRows()
     onScreenSourceChanged: recoverTimer.restart()
     // Only the system closes the window (the tray hides it): with the layer shell, the monitor of the surface went

@@ -1390,6 +1390,33 @@ def test_the_plain_window_is_at_the_place_of_the_panel_and_a_new_size_keeps_its_
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
+@both_shells
+def test_the_panel_stays_out_of_the_part_of_the_screen_that_the_system_keeps(app, window, shell):
+    """`reserved` (the program gives it to the plain shell: the macOS menu bar and Dock, X11 panels): the default
+    corner and the clamp use the work area. Without it (the layer shell) the whole screen, as before."""
+    root, backend, messages = window
+    use_screens(root, OFFSET, "B", 100, 200)
+    w, h = root.width(), root.height()
+    js(root, "root.reserved = {B: {top: 31, right: 10, bottom: 70}, A: {top: 25}}")
+    root.setProperty("atDefault", True)
+    js(root, "root.clampPosition()")
+    settle(app)
+    assert place(root) == ("B", 1920 - 10 - w - 16, 31 + 16)  # the default corner of the work area
+    root.setProperty("atDefault", False)
+    for asked, kept in (((100, 5), (100, 31)), ((5000, 5000), (1920 - 10 - w, 1080 - 70 - h)), ((0, 300), (0, 300))):
+        root.setProperty("posX", asked[0])
+        root.setProperty("posY", asked[1])
+        js(root, "root.clampPosition()")
+        assert place(root) == ("B", *kept)
+    root.setProperty("posY", 5)
+    js(root, "root.reserved = ({})")  # nothing kept: the whole screen again
+    settle(app)
+    js(root, "root.clampPosition()")
+    assert place(root) == ("B", 0, 5)
+    window_follows(app, root, shell)
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
 @plain_only
 def test_a_place_change_of_the_plain_window_is_one_request_with_both_coordinates(app, window):
     """x and y go to the window system together: the window never stands at a point between the two places (from
@@ -1559,6 +1586,43 @@ def test_the_program_loads_the_panel_in_the_shell_of_the_rule_and_writes_the_she
         app.processEvents()
 
 
+@pytest.mark.parametrize("variable, chosen", [("plain", "plain"),
+                                               pytest.param("layer", "layer", marks=needs_layershell)])
+def test_the_start_of_the_panel_gives_the_plain_shell_the_work_area_of_each_screen(
+        app, fake_client, tmp_path, monkeypatch, variable, chosen):
+    """__main__.start_panel: the platform prepares the window, and the plain shell gets the part of each screen that
+    the system keeps (off screen: nothing). The layer shell gets none: the compositor keeps its panels free."""
+    from bellwether import platform
+    from bellwether.__main__ import start_panel
+    monkeypatch.setenv("BELLWETHER_SHELL", variable)
+    prepared = []
+    monkeypatch.setattr(platform, "prepare_window", lambda window, role: prepared.append(role))
+    backend = Backend(fake_client, settings_path=tmp_path / "state.json", icons=Icons(tmp_path / "app", tmp_path / "cache"))
+    engine = QQmlApplicationEngine()
+    engine.rootContext().setContextProperty("backend", backend)
+    try:
+        assert start_panel(engine, app) == chosen
+        (root,) = engine.rootObjects()
+        none = {"left": 0, "top": 0, "right": 0, "bottom": 0}
+        wanted = {screen.name(): none for screen in app.screens()} if chosen == "plain" else {}
+        assert json.loads(js(root, "JSON.stringify(root.reserved)")) == wanted
+        assert prepared == ["panel"] and root.property("refreshRate") > 0
+    finally:
+        del engine
+        app.processEvents()
+
+
+def test_the_part_of_a_screen_that_the_system_keeps_is_the_screen_less_its_available_geometry():
+    from PySide6.QtCore import QRect
+    from types import SimpleNamespace
+    from bellwether.__main__ import reserved_part
+    mac = SimpleNamespace(geometry=lambda: QRect(0, 0, 1024, 768), availableGeometry=lambda: QRect(0, 31, 1024, 674))
+    assert reserved_part(mac) == {"left": 0, "top": 31, "right": 0, "bottom": 63}
+    right = SimpleNamespace(geometry=lambda: QRect(2560, 360, 1920, 1080),
+                            availableGeometry=lambda: QRect(2600, 360, 1830, 1050))
+    assert reserved_part(right) == {"left": 40, "top": 0, "right": 50, "bottom": 30}
+
+
 def test_without_the_layer_shell_module_only_the_layer_cases_are_skipped(tmp_path):
     from tests.conftest import shell_for
     missing = tmp_path / "qmldir"
@@ -1567,3 +1631,15 @@ def test_without_the_layer_shell_module_only_the_layer_cases_are_skipped(tmp_pat
         shell_for("layer", missing)
     (tmp_path / "qmldir").write_text("module org.kde.layershell\n")
     assert shell_for("layer", missing) == "layer"
+
+
+def test_each_case_of_the_runner_set_is_a_case_of_the_tests():
+    """A renamed test must not drop out of the set of the macOS runner without notice."""
+    import subprocess
+    from tests.conftest import RUNNER
+    done = subprocess.run([sys.executable, "-m", "pytest", "--co", "-q", "-p", "no:cacheprovider", "-m", "runner",
+                           "tests/test_qml.py", "tests/test_skins.py", "tests/test_answer_control.py"],
+                          capture_output=True, text=True, cwd=Path(__file__).parent.parent, timeout=120,
+                          env={**os.environ, "QT_QPA_PLATFORM": "offscreen"})
+    collected = {line for line in done.stdout.splitlines() if "::" in line}
+    assert collected == RUNNER, sorted(RUNNER ^ collected)

@@ -53,7 +53,13 @@ def checks(facts: dict) -> list[tuple[str, str, object]]:
         one.get("shown") and one.get("visible") for one in layouts.values()), layouts)
     check("the options window is visible", options.get("visible") is True, options.get("visible"))
     check("no Qt warning", facts.get("messages") == [], facts.get("messages"), soft=True)
-    check("the tray item is there", facts.get("tray", {}).get("visible") is True, facts.get("tray"), soft=True)
+    tray = facts.get("tray", {})
+    check("the tray item is there", tray.get("visible") is True, tray, soft=True)
+    check("the program made one tray item at most", tray.get("items", 0) <= 1, tray.get("items"))
+    frame, area = panel.get("frame") or [0, 0, 0, 0], (panel.get("screen") or {}).get("available") or [0, 0, 0, 0]
+    check("the panel is inside the available area of its screen (not under a menu bar, a Dock or a panel)",
+          area[0] <= frame[0] and area[1] <= frame[1] and frame[0] + frame[2] <= area[0] + area[2]
+          and frame[1] + frame[3] <= area[1] + area[3], {"frame": frame, "available": area})
     if facts.get("system") == "darwin":
         native = facts.get("native", {})
         check("Qt uses its cocoa plugin", facts.get("qt_platform") == "cocoa", facts.get("qt_platform"))
@@ -76,6 +82,8 @@ def checks(facts: dict) -> list[tuple[str, str, object]]:
               native.get("activation_policy"))
         check("the panel is not active while the app is not", panel.get("active") is False, panel.get("active"),
               soft=True)
+        check("the app was not active while only the panel showed (the panel and the start take no focus)",
+              native.get("app_active") is False, native.get("app_active"))
         after = facts.get("panel_after_options", {}).get("native", {})
         check("the panel is still visible after the options window opened", after.get("visible") is True,
               after.get("visible"))

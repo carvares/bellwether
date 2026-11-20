@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from bellwether import selftest
-from bellwether.__main__ import load_panel
+from bellwether.__main__ import start_panel
 
 ROOT = Path(__file__).parent.parent
 STEPS = ["panel-C", "layout-A", "layout-B", "layout-C", "layout-D", "layout-E", "options"]
@@ -19,7 +19,7 @@ STEPS = ["panel-C", "layout-A", "layout-B", "layout-C", "layout-D", "layout-E", 
 def test_the_self_test_shows_each_step_and_gives_the_facts_of_the_windows(app, monkeypatch):
     monkeypatch.delenv("BELLWETHER_SHELL", raising=False)
     out, err = io.StringIO(), io.StringIO()
-    assert selftest.run(load_panel, show=0.05, step=0.05, out=out, err=err) == 0
+    assert selftest.run(start_panel, show=0.05, step=0.05, out=out, err=err) == 0
     lines = out.getvalue().splitlines()
     assert len(lines) == 1  # ONE object
     facts = json.loads(lines[0])
@@ -34,7 +34,7 @@ def test_the_self_test_shows_each_step_and_gives_the_facts_of_the_windows(app, m
     assert set(facts["layouts"]) == set("ABCDE")
     assert all(one["shown"] and one["visible"] and one["size"][0] > 200 for one in facts["layouts"].values())
     assert facts["options"]["visible"] is True and facts["options"]["flag_names"][0] == "Window"
-    assert facts["tray"] == {"available": False, "visible": False}  # no tray off screen
+    assert facts["tray"] == {"available": False, "visible": False, "items": 0}  # no tray off screen
     assert facts["messages"] == [] and "error" not in facts
     assert "INFO shell: plain" in err.getvalue()
 
@@ -60,3 +60,41 @@ def test_the_command_prints_one_json_object_and_touches_nothing_of_the_user(tmp_
     assert facts["shell"] == "plain" and facts["panel"]["visible"] is True and 10 < facts["seconds"] < 60
     assert list((tmp_path / "r").iterdir()) == []  # no lock file
     assert not (tmp_path / "s" / "bellwether").exists() and not (tmp_path / "c" / "bellwether").exists()
+
+
+def ci_checks():
+    """The checks of scripts/ci/selftest.py (the script of the runner)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ci_selftest", ROOT / "scripts" / "ci" / "selftest.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.checks
+
+
+def mac_facts(frame, app_active, items=1):
+    """Facts as the macOS runner gave them in run 1 (made-up agents): a 1024 × 768 screen with a menu bar of 31 px."""
+    native = {"pyobjc": True, "panel": True, "class": "QNSPanel", "level": 25, "collection_behavior": 337,
+              "style_mask": 142, "can_become_key": False, "key": False, "hides_on_deactivate": False,
+              "has_shadow": False, "always_show_property": True, "activation_policy": 1, "app_active": app_active,
+              "visible": True}
+    return {"system": "darwin", "qt_platform": "cocoa", "shell": "plain", "messages": [],
+            "panel": {"visible": True, "active": False, "frame": frame, "flag_names": [
+                "Tool", "FramelessWindowHint", "WindowStaysOnTopHint", "WindowDoesNotAcceptFocus"],
+                "screen": {"geometry": [0, 0, 1024, 768], "available": [0, 31, 1024, 674]}},
+            "native": native, "layouts": {letter: {"shown": True, "visible": True} for letter in "ABCDE"},
+            "options": {"visible": True, "native": {"app_active": True, "key": True}},
+            "panel_after_options": {"native": {"visible": True}},
+            "tray": {"available": True, "visible": True, "items": items}}
+
+
+def test_the_checks_of_the_runner_fail_on_the_faults_of_run_1_and_pass_without_them():
+    checks = ci_checks()
+
+    def failed(facts):
+        return [name for status, name, _ in checks(facts) if status == "FAIL"]
+
+    assert failed(mac_facts([688, 16, 320, 192], app_active=True, items=2)) == [
+        "the program made one tray item at most",
+        "the panel is inside the available area of its screen (not under a menu bar, a Dock or a panel)",
+        "the app was not active while only the panel showed (the panel and the start take no focus)"]
+    assert failed(mac_facts([688, 47, 320, 192], app_active=False)) == []
