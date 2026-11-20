@@ -21,6 +21,7 @@ from .icons import Icons
 from .layouts import UI_PATH
 from .options import Options
 from .paths import NAME, OLD_NAME, move_old_folders, runtime_dir, state_home
+from .sessions import SessionWatch
 from .tray import Tray
 
 LOG_PATH = state_home() / NAME / f"{NAME}.log"
@@ -102,7 +103,8 @@ def main() -> int:
     app_path, core_path = find_executables()
     # herdr-core tells of each change, so a change shows at once. Without herdr-core: one read each second.
     events = (lambda wake: EventSource([core_path, "events", "--json"], wake)) if core_path else None
-    backend = Backend(HerdrClient(app_path, core_path), icons=Icons(), events=events)
+    client = HerdrClient(app_path, core_path)
+    backend = Backend(client, icons=Icons(), events=events, sessions=SessionWatch(client))
     engine = QQmlApplicationEngine()
     engine.rootContext().setContextProperty("backend", backend)
     engine.addImportPath(str(IMPORT_PATH))

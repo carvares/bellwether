@@ -14,10 +14,11 @@ from . import layouts
 from .client import HerdrError, HerdrOffline, valid_address
 from .icons import TEXT_COLOR
 from .prompt_session import FOLLOW, PROMPT_FLOOR, SENT_SECONDS, PromptSession
+from .sessions import age_text, age_words, short_model
 from .settings import (
     COLOR_ROLES, DEFAULT_LOOK, DEFAULT_PATH, FONT_SCALE_LIMITS, FONT_SCALE_STEP, OPACITY_LIMITS, OPACITY_STEP,
-    SCALE_LIMITS, SCALE_STEP, clamped, load_layout, load_look, load_position, save_layout, save_look, save_position,
-    save_screen, valid_color)
+    SCALE_LIMITS, SCALE_STEP, clamped, load_layout, load_look, load_position, load_show_meta, save_layout, save_look,
+    save_position, save_screen, save_show_meta, valid_color)
 from .state import ATTENTION, STATE_COLORS, STATES, Agent, count_states, top_state
 
 log = logging.getLogger("bellwether")
@@ -33,6 +34,15 @@ FLOOR = 0.25
 AFTER = (0.15, 0.25, 0.15, 0.45, 0.6)
 # Milliseconds from the last change of the custom look to its save: a slider that moves writes the file one time.
 LOOK_SAVE_DELAY = 400
+# Milliseconds between two looks at the session ages: the text of an age changes one time each minute at the most.
+# No file and no command is read for it.
+AGE_TICK = 60000
+# The shortest wait of the thread that reads the model and the session time, in seconds.
+META_FLOOR = 1.0
+# The mark between the model and the session time of an agent row.
+META_MARK = " · "
+
+
 def _natural(address: str) -> list:
     """A sort key that reads the numbers of an address as numbers: "t2" is before "t10"."""
     # The split gives text and numbers in turn: the parts at the odd places are the numbers.
@@ -54,7 +64,10 @@ class Backend(QObject):
     promptChanged = Signal()
     # The "Answer" control of a row was used and a prompt is open: the answer window shows (bellwether/answer.py).
     answerRequested = Signal()
+    # The setting "Show model and session time" is different.
+    showMetaChanged = Signal()
     _snapshot = Signal(object)
+    _metaRead = Signal()
     _focusDone = Signal()
 
     def __init__(self, client, interval: float = 1.0, settings_path: Path = DEFAULT_PATH, icons=None,
@@ -62,7 +75,8 @@ class Backend(QObject):
                  after: tuple[float, ...] = AFTER, clock=time.monotonic, wait=None,
                  skins: dict[str, Path] | None = None, families: list[str] | None = None,
                  prompt_floor: float = PROMPT_FLOOR, follow: tuple[float, ...] = FOLLOW,
-                 pending_follow: tuple[float, ...] | None = None, sent_seconds: float = SENT_SECONDS) -> None:
+                 pending_follow: tuple[float, ...] | None = None, sent_seconds: float = SENT_SECONDS,
+                 sessions=None, now=time.time) -> None:
         super().__init__()
         self._clock = clock
         # wait(event, seconds) waits for a threading.Event and returns True when it is set. Tests give
@@ -123,6 +137,25 @@ class Backend(QObject):
             client, self._agent, self._blocked_agent, lambda agent: self._rows([agent])[0], self._wake.set,
             self._stop.is_set, clock, self._wait, prompt_floor, follow, pending_follow, sent_seconds, parent=self)
         self._session.changed.connect(self.promptChanged)
+        # ----- the model and the session time of the agent rows (bellwether/sessions.py) -----
+        # `sessions`: the SessionWatch that reads them. None: the rows have no such line. `now`: the time of the
+        # day in seconds since 1970, for the age of a session.
+        self._watch = sessions
+        self._now = now
+        self._show_meta, ignored_meta = load_show_meta(self._settings_path)
+        if ignored_meta:  # Not the value: a file that a person changed can hold anything.
+            log.warning("the saved value of showMeta cannot be used: the model and session-time line shows")
+        self._meta_wake = threading.Event()
+        self._meta_thread: threading.Thread | None = None
+        self._meta_failure: str | None = None
+        self._meta_keys: frozenset = frozenset()  # the agents (address and program) at the last wake of the reads
+        self._meta_shown: dict[str, str] = {}  # the line of each agent at the last look
+        self._metaRead.connect(self._look_at_meta)
+        self._age_timer = QTimer(self)
+        self._age_timer.setInterval(AGE_TICK)
+        self._age_timer.timeout.connect(self._look_at_meta)
+        if self._watch is not None and self._show_meta:
+            self._age_timer.start()
 
     # ----- properties for QML -----
 
@@ -152,16 +185,24 @@ class Backend(QObject):
     def _rows(self, agents: list[Agent]) -> list[dict]:
         """The agent rows of one group. A row with an icon does not show the program word."""
         rows = []
+        facts = self._facts()
         for a in agents:
             icon = self._icons.url(a.app) if self._icons else ""
             spoken = "Go to " + (", ".join(filter(None, (a.name, a.app))) or a.key)
+            model, age, age_spoken = self._meta(facts, a.key)
+            said = ", ".join(filter(None, (model and "model " + model, age_spoken and "session age " + age_spoken)))
             rows.append({
                 "key": a.key,
                 "icon": icon,
                 "label": a.name or (a.workspace if icon else a.app) or a.key,
                 "detail": a.workspace if a.name or not icon else "",
                 "address": "",
-                "spoken": spoken + (f" in {a.workspace}" if a.workspace else ""),
+                "spoken": spoken + (f" in {a.workspace}" if a.workspace else "") + (said and ", " + said),
+                # The second line of the row: the model that the agent runs and the age of its session. "": the
+                # row has no such part (and with no part, no line).
+                "model": model,
+                "sessionAge": age,
+                "metaText": META_MARK.join(filter(None, (model, age))),
                 # The row can open the answer window: the agent is blocked and its key is a terminal address.
                 "canAnswer": a.status == "blocked" and valid_address(a.key),
             })
@@ -173,6 +214,18 @@ class Backend(QObject):
             if looks.count(look) > 1 and row["label"] != row["key"]:
                 row["address"] = row["key"]  # Rows that look the same: the address tells them apart.
         return rows
+
+    def _facts(self) -> dict:
+        """The model id and the start of the session of each agent that has them. Empty with the setting off."""
+        return self._watch.facts() if self._watch is not None and self._show_meta else {}
+
+    def _meta(self, facts: dict, key: str) -> tuple[str, str, str]:
+        """The short model name, the age of the session, and that age in words. "" for a part that is not known."""
+        model, started = facts.get(key, (None, None))
+        if started is None:
+            return short_model(model), "", ""
+        seconds = self._now() - started / 1000
+        return short_model(model), age_text(seconds), age_words(seconds)
 
     @Property(str, notify=changed)
     def topState(self) -> str:
@@ -373,6 +426,11 @@ class Backend(QObject):
             self._online = online
             self._agents = agents
             self.changed.emit()
+        if self._watch is not None:
+            keys = frozenset((a.key, a.app) for a in agents)
+            if keys != self._meta_keys:  # an agent that is new in the list is read at once
+                self._meta_keys = keys
+                self._meta_wake.set()
         self._session.tick()
 
     def fetch(self) -> list[Agent] | None:
@@ -397,10 +455,17 @@ class Backend(QObject):
         self._thread.start()
         if self._events is not None:
             self._events.start()
+        if self._watch is not None:
+            self._meta_thread = threading.Thread(target=self._run_meta, name="session-facts", daemon=True)
+            self._meta_thread.start()
 
     def stop(self) -> None:
         self._stop.set()
         self._wake.set()
+        self._meta_wake.set()
+        self._age_timer.stop()
+        if self._meta_thread is not None:
+            self._meta_thread.join(timeout=3)
         self._session.finish()  # the question and the screen text do not stay in memory; a held text is killed
         if self._events is not None:
             self._events.stop()  # Ends the child process of the event stream.
@@ -434,6 +499,65 @@ class Backend(QObject):
                 rest = self._floor - (self._clock() - began)
                 if rest > 0:
                     self._wait(self._stop, rest)
+
+    # ----- the model and the session time of the agent rows -----
+
+    @Property(bool, notify=showMetaChanged)
+    def showMeta(self) -> bool:
+        """The setting "Show model and session time": the agent rows have their second line."""
+        return self._show_meta
+
+    @Slot(bool)
+    def setShowMeta(self, show: bool) -> None:
+        """Show the line or not, and save it. Off: nothing is read for it, and what was read is dropped."""
+        if show == self._show_meta:
+            return
+        self._show_meta = show
+        if self._watch is not None:
+            self._watch.clear()
+            if show:
+                self._age_timer.start()
+            else:
+                self._age_timer.stop()
+        try:
+            save_show_meta(show, self._settings_path)
+        except OSError:
+            log.warning("showMeta was not saved")
+        self.showMetaChanged.emit()
+        self._look_at_meta()
+        self._meta_wake.set()
+
+    def read_meta(self) -> None:
+        """One round of the reads of the model and the session time that are due. Runs on its worker thread. With
+        the setting off, and with no reader, nothing is read."""
+        if self._watch is None or not self._show_meta:
+            return
+        if self._watch.step(self._agents if self._online else [], self._stop.is_set):
+            self._metaRead.emit()
+
+    @Slot()
+    def _look_at_meta(self) -> None:
+        """The rows are told when the line of an agent is different: after a read, and when an age has a new text."""
+        facts = self._facts()
+        shown = {a.key: META_MARK.join(filter(None, self._meta(facts, a.key)[:2])) for a in self._agents}
+        if shown != self._meta_shown:
+            self._meta_shown = shown
+            self.changed.emit()
+
+    def _run_meta(self) -> None:
+        while not self._stop.is_set():
+            self._meta_wake.clear()
+            try:
+                self.read_meta()
+                failure = None
+            except Exception as exc:  # the thread must not end; the class only: no text of an error
+                failure = type(exc).__name__
+            if failure != self._meta_failure:
+                self._meta_failure = failure
+                if failure:
+                    log.warning("session facts failed: %s", failure)
+            # Until the next read is due, or until the list has a new agent or the setting changes.
+            self._wait(self._meta_wake, max(META_FLOOR, self._watch.wait()))
 
     # ----- actions from QML -----
 

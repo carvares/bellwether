@@ -1,6 +1,6 @@
 """Load and save the state file: the window position (x and y from the top-left corner of a screen, and the name
-of that screen), the layout, and the custom look (scale, fontScale, fontFamily, colors). Each save reads the file
-and changes only its own keys."""
+of that screen), the layout, the custom look (scale, fontScale, fontFamily, colors), and showMeta (the model and
+session-time line of the agent rows). Each save reads the file and changes only its own keys."""
 from __future__ import annotations
 
 import json
@@ -81,6 +81,22 @@ def load_layout(path: Path = DEFAULT_PATH) -> str | None:
 
 def save_layout(layout: str, path: Path = DEFAULT_PATH) -> None:
     _save(path, {"layout": layout})
+
+
+def load_show_meta(path: Path = DEFAULT_PATH) -> tuple[bool, bool]:
+    """The saved "showMeta": the agent rows show the model and the session time. A file with no such key: True.
+    The second value is True when the file has a value that is not true or false: it is ignored."""
+    value = _load(path).get("showMeta", True)
+    return (value, False) if type(value) is bool else (True, True)
+
+
+def save_show_meta(show: bool, path: Path = DEFAULT_PATH) -> None:
+    """Save "showMeta". True is the default: the file then has no such key. The other keys stay."""
+    if show:
+        if "showMeta" in _load(path):
+            _save(path, {}, drop=("showMeta",))
+    else:
+        _save(path, {"showMeta": False})
 
 
 def clamped(key: str, value) -> float | None:
