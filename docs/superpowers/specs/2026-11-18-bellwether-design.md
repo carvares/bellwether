@@ -464,6 +464,50 @@ What the controls needed from the backend, and got in this task: `scaleStep`, `f
 
 Limits: at a text size of 80 % the smallest texts of the window (the reset marks, the values of the colours, the tag) are 7 to 8 pixels high. A double click on the track of "Text size" away from its handle changes the text size with its first click, the window moves its rows, and the second click can miss the slider: the double click is for the handle, and "Reset" next to the value is the sure way. The window scrolls with the wheel, with a drag of the pointer or a finger, with a drag of the thumb, and with the keyboard.
 
+## Change on 2026-11-19: model and session time
+
+Request of the user: "can we include the agent model [in] the lists? […] just below each agent in the list with the model it's running and how much time the session exists". Each agent row of an open list has a second line: a short model name and the age of the session ("Opus 5.5 · 2h 14m").
+
+Sources (`bellwether/sessions.py`; one reader for each program word, `READERS`, as `bellwether/prompts/`):
+
+- The processes of a terminal: `herdr-core get <t> --json` gives `pid` (the first process), `foreground.pid` and `created_ms` (`HerdrClient.terminal`, with the address check of the screen calls: a valid address of the last list, and the answer must name that address). Measured: for 2 of 4 real Claude Code terminals the foreground process is the shell. So a reader gets, one at a time: the foreground process, the first process, then their child processes (`/proc/<pid>/task/*/children`, at most 32 processes). The child processes are read only when the first ones are not the agent.
+- Claude Code: `~/.claude/sessions/<pid>.json`. The file must name that pid and, in `procStart`, the start time that `/proc/<pid>/stat` (field 22) has now; a file that an older process with the same pid left is not used (`other_process`). `startedAt` is the start of the session. The session file has no model. The model is `message.model` of the last `type: "assistant"` record (not a side chain, not `<synthetic>`) of `~/.claude/projects/<folder>/<sessionId>.jsonl`; the folder name is made from `cwd`, and when that file is not there the session id is searched in the project folders. The session id must have the form of a UUID. After "/clear" (a new session id of the same process) the model of before stays until the first answer.
+- Codex: a file `~/.codex/sessions/…/rollout-<time>-<id>.jsonl` that a process of the terminal has open (`/proc/<pid>/fd`). The start is the `timestamp` at the start of its first line; the model is `payload.model` of the last `type: "turn_context"` record. A rollout file is never chosen by its folder or its time. **Not verified live**: no Codex terminal was allowed in the task, so it is not known that the Codex program keeps its rollout file open. When it does not, a Codex row shows the time of the terminal only.
+- A program with no reader, and an agent of an other machine (an address with "/": its pids are not of this machine, so no local file and no local process is read): the time of the terminal only.
+- Fallbacks: no model → the time alone; no start of a session → `created_ms`; neither → no line. A model shows only when it was read for that process.
+- A model id is used only when it has the form of an id (letters, digits, `. _ : / @ [ ] -`, at most 80 characters).
+
+Reading a transcript (`last_model`): from its end in blocks of 64 KB until a record with a model is found, at most 4 MB in one scan (`SCAN_LIMIT`). Measured: 3 of 4 real transcripts have no assistant record in their last 64 KB, and one real line is 568 KB, so one 64 KB tail is not enough. A file that did not change (same file, same size) is not read again; of a file that grew only the new part is read (when that part starts at the start of a line), and the model of before stays when the new part has none. Only regular files are opened (no pipe can block the read). A line is parsed only when it has the bytes `"type":"assistant"` (Codex: `"type":"turn_context"`).
+
+Privacy: only the model id and time stamps leave these files. No content of a session file, a transcript or a rollout file is in a log line, an error, a text form of a value (`Mark.path` is not in the text form) or a file. A log line has the address, the program word and a reason code, and is written when the code of an agent changes: `session facts terminal=t1 app=claude-code reason=ok`. Reason codes: `ok`, `no_model` (a session with no answer yet), `no_transcript`, `no_session`, `other_process`, `no_reader`, `remote`, `reader_error`, and the codes of a failed `get` (`timeout`, `herdr_not_found`, `not_this_terminal`, …).
+
+The text (`short_model`, `age_text`, `age_words`):
+
+- `claude-opus-5-5` → "Opus 5.5"; `claude-sonnet-5-5-20261001` → "Sonnet 5.5"; `claude-3-5-sonnet-20241022` → "Sonnet 3.5"; a `[1m]` suffix is kept as " 1M" ("Opus 5.5 1M"); `us.anthropic.…-v1:0`, `anthropic/…` and `…@20250514` lose the provider parts; `gpt-5.2-codex` → "GPT-5.2-codex"; any other id stays as it is, cut at 32 characters with "…". Never empty for an id.
+- The age, in whole units, never rounded up: under 1 minute "<1m"; "14m"; "2h 14m" ("2h" with 0 minutes); from 24 hours "3d 2h" ("3d" with 0 hours). In words for a screen reader: "less than 1 minute", "2 hours 14 minutes", "3 days 2 hours".
+
+The engine (`SessionWatch`) and the budget:
+
+- `step(agents)` runs on its own thread of the backend ("session-facts"), never on the interface thread. For each agent with a terminal address: at most one `herdr-core get` in 30 seconds (`REFRESH`); at once for an agent that is new in the list, that came back, or that has an other program word. The thread wakes when the set of (address, program) of the list changes, and when the next read is due.
+- So each minute and agent: 2 `get` commands, 2 reads of the small session file (Claude Code), and of the transcript only what is new. With the setting off, and offline: no command and no read.
+- The results are in memory only, by address; the mark of a transcript is used again only for the same pid.
+- The age text needs no read: a timer of the backend looks one time each minute (`AGE_TICK`) and tells the rows only when a text is different.
+- Errors are values: a row with a failed read has no line (or the time of the terminal), and the thread goes on after an unexpected error (the log has its class name only).
+
+Row values (`Backend._rows`): `model` (the short text or ""), `sessionAge` (the text or ""), `metaText` (both with " · ", or one part alone), and `spoken` ends with ", model Opus 5.5, session age 2 hours 14 minutes" (the parts that exist). A row whose key is not a terminal address (a sub-agent with no terminal of its own) is never asked and has none.
+
+The line in the skins:
+
+- `AgentRow`: `model`, `sessionAge`, `hasMeta`, and `lineShift` (where the first line of the row is, from the middle of the row). `MetaLine.qml` (one component for every skin, as `AnswerControl.qml`) draws the line: the model (it ends in "…" when the row is too narrow), a "·" mark, the age (never cut).
+- Token: `metaSize` in every theme file (A, B, D, E: 11 px; C: 10 px), through `size()`, so the text size of the custom look applies. Colours: `dimColor` for the text and `faintColor` for the mark (C: its `dim`), so a custom text colour applies; the font family of the skin.
+- Height: `AgentList.metaHeight` (each skin: `metaLineHeight`, `theme.fit(14)`; C `theme.fit(13)`) is added to the rows of a list when a row of the OPEN group has the line (`PanelModel.metaRows`, `AgentList.pitch`). Every row of a list has the same height: the list scrolls by whole rows and the window counts the rows that fit (`fitRows` reads `panel.rowHeight`, which is the pitch). So in a list with mixed rows a row with no facts is as tall as the others, with its one line in the middle. With no facts in the open group every row has the height of before, and every layout is pixel-identical to `2c085e5` (125 of 125 images of `t26-shots.py`).
+- Placement, the same in all five layouts (each has one-line rows: the label at the left, the detail or the note at the right, the "Answer" control at the right end): the first line keeps the label, the address, and at the right the detail, "opening…" or the failure message. The line is below the label, from the left edge of the label to the right end of the row, or to the "Answer" control (8 px before it). The program icon and the "Answer" control stay in the middle of the row. Reason: the label and the line read as one block; the note and the detail keep their place and their line, so nothing collides; the control is the action of the whole row. In C the tree line of a row points to the first line.
+- The rule of the screen height holds: with 14 agents with the line, at scale 2.0 (and with text size 140 %) each layout stays within 1080 px (test).
+
+The setting: "Show model and session time", a check box in the line of the title "Layout" of the options window, at its right (`controls/CheckRow.qml`: role CheckBox, checkable, checked, focusable; Space, Enter, Return and a click change it; the Toggle and Press actions for a screen reader; a focus ring). There it adds no height to the window. Tab order: after the close control and before the cards that are not selected (it is before the cards in the window). `state.json`: `showMeta`, a boolean; missing means true; `true` is saved as no key (as the look); a value of an other type is ignored with one log line ("the saved value of showMeta cannot be used: …"); the save keeps the other keys. Off: the rows have no line, the engine drops what it read, and no command and no file is read for it.
+
+Decisions that the task left open, and why: the `[1m]` suffix is kept ("1M": it is a different context window); "2h" and "3d" with no zero part; the start of a Claude Code session is `startedAt` of the session file (for a resumed session: the start of this run of it); one height for all rows of a list (above); the check box is in the Layout section.
+
 ## Goal
 
 A small window that floats above all other applications.

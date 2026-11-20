@@ -92,6 +92,7 @@ If the empty block stays in the window after that, remove it from your layout in
   - C, "Techno / HUD" (the default): monospace text, corner brackets and one cell for each agent.
   - D, "Signal strip": the number of all agents, the most important status as a badge, one bar with the share of each status, and the four statuses as tabs.
   - E, "Ring": a ring with the share of each status and the number of all agents in its centre, and a list of the four counts.
+- In every layout, an agent in an open list has a second, smaller line below its name: the model that the agent runs and the age of its session, for example "Opus 5.5 · 2h 14m" (see "The model and session-time line").
 - In every layout: click a status to show its agents, click it again to close it, click an agent to open the Herdr app on that agent. A status with no agents does nothing. A list shows 8 agents at the most; turn the mouse wheel for more. The frame (in Layout C: the corner brackets) has the colour of the most important status.
 - The lines below describe Layout C.
 - The panel is a dark box, 320 px wide, with text in a monospace font (Hack, or a different monospace font if Hack is not installed).
@@ -125,6 +126,21 @@ If the empty block stays in the window after that, remove it from your layout in
 - Right-click the tray icon to open the menu: "Options…", "Hide widget" or "Show widget", "Move to next screen" (with more than one monitor) and "Quit".
 - The tray icon has the same colour as the corner brackets of the panel when at least one agent exists. With no agents, or offline, the two are grey (two different greys).
 
+### The model and session-time line
+
+- The line shows two things: a short name of the model ("Opus 5.5", "Fable 5.2", "Sonnet 5.5", "GPT-5.2-codex") and how long the session of the agent exists ("<1m", "14m", "2h 14m", "3d 2h").
+- Where the model comes from:
+  - Claude Code: Bellwether finds the Claude Code process of the terminal and reads its session file (`~/.claude/sessions/<pid>.json`) and the end of the transcript of that session (`~/.claude/projects/…`). The model of the last answer counts, so a change of the model during a session shows.
+  - Codex: Bellwether reads the model only from a session file (`~/.codex/sessions/…`) that the Codex process of the terminal has open. When Codex has no such file open, the line shows the time only.
+  - A different program: the line shows the time only.
+- Where the time comes from: the start of the session in the files above. When there is none, the time when the terminal was made in Herdr.
+- A part that Bellwether cannot read is not shown. Bellwether never guesses a model. A row with no part has no second line. When one row of an open list has the line, all rows of that list have the same, taller height.
+- A model name that is too long for the row ends in "…". The time always shows in full.
+- The model can be up to 30 seconds old: Bellwether asks Herdr one time in 30 seconds for each agent (one `herdr-core get`), and at once for an agent that is new in the list. The time text changes one time each minute.
+- Privacy: Bellwether takes only the model name and the time stamps from these files. It does not log, save or show any other content of a session or a transcript. It reads a transcript from its end, at most 4 MB in one read, and not again while the file did not change.
+- A screen reader says the model and the age with the name of the row ("…, model Opus 5.5, session age 2 hours 14 minutes").
+- To hide the line: clear "Show model and session time" in the options window. Bellwether then reads nothing for it. The file key is `showMeta` (see "Files").
+
 ### Options
 
 - Right-click the tray icon, then click "Options…". The options window opens. It has the look of the layout that the panel shows: the same frame, font and colours. It has no title bar of the system; its own header shows "Bellwether — Options" and a close control (×) at the right.
@@ -135,9 +151,10 @@ If the empty block stays in the window after that, remove it from your layout in
 - Click a card to use that layout. The panel changes at once and stays at its place, on its monitor, with the same open row. The widget saves the layout.
 - The window changes its look together with the panel. The cards stay at their places.
 - All five layouts are built. If the file of a layout is missing, its card is dim, has the tag "COMING NEXT", and a click on it does nothing.
+- In the line of the title "Layout", at the right, is the check box "Show model and session time" (on by default). It shows or hides the second line of the agent rows in all five layouts. The widget saves it.
 - Below the cards are the sections "Size", "Text" and "Colours" (see "Custom look"), and at the bottom "Reset to defaults".
 - On a low monitor the window is lower than its content. Turn the mouse wheel to move the sections. The header and the bottom line with "Reset to defaults" stay.
-- Keyboard: Tab and Shift+Tab move through the controls in the order of the window: the cards, the sliders, the font, the colours, "Reset to defaults" and the close control. Enter or Space presses a control. The arrow keys move a slider. The window moves its sections so that the control with the keyboard is on the screen.
+- Keyboard: Tab and Shift+Tab move through the controls in the order of the window: the cards, the sliders, the font, the colours, "Reset to defaults", the close control and "Show model and session time". Enter or Space presses a control. The arrow keys move a slider. The window moves its sections so that the control with the keyboard is on the screen.
 - Esc closes what is open inside the window first (the colour editor, the list of fonts). Then Esc closes the window.
 - Close the window with Esc or with the close control (×) in its header. The widget continues to run.
 
@@ -259,7 +276,7 @@ Safety rules:
 - One click or one key of yours is one answer. The window never sends anything by itself, and there is no "answer all".
 - After a question shows (or can be answered again), a click does nothing until 0.4 seconds passed with no click and no key, and a number does nothing until 1 second passed with no key. Each press in that time starts the wait again. So a double click, or the next keys of your typing, cannot answer the next question.
 - When the question in the window changes, the numbers go off until you click in the window or press Tab. Only one change keeps them on: the next question after your own answer from this window, when the window stayed active and you pressed no key since that answer. The window says so: "New question — the number keys are off. Click in the window or press Tab to turn them on." A later change does not turn them on again. A new question has the mark "New question" with its number, and the window lights up for a moment.
-- The options that approve stay off until the last line of the detail was on the screen: "Scroll to the end of the text above to approve." A new command always shows from its first line, and its end counts only after its first line was on the screen. Bellwether itself checks this, not only the window. "No" and "Open in Herdr" work at any time.
+- The options that approve stay off until the last line of the detail was on the screen: "Scroll to the end of the text above to approve." A new command always shows from its first line, and its end counts only after its first line was on the screen. When the first line was not counted (for example, you scrolled while the question was still new), the window says "Scroll to the top, then to the end, to approve." Bellwether itself checks this, not only the window. "No" and "Open in Herdr" work at any time.
 - "Partly visible": Bellwether cannot see all that the dialog approves (a dialog that is taller than the screen of the agent, and every edit of Codex: its patch is not in the dialog). You can only decline from the window. To approve, use "Open in Herdr".
 - The text of a screen stays in memory only while the window shows it. It is never in the log and never in a file.
 
@@ -282,7 +299,7 @@ Limits:
 
 ## Files
 
-- Position, layout and custom look: `~/.config/bellwether/state.json`. The keys are `x` and `y` (from the top-left corner of a monitor), `screen` (the name of that monitor), `layout` (the letter of the layout, `"C"` when the key is not there), and `scale`, `fontScale`, `fontFamily` and `colors` (see "Custom look" above; a file without them has the look of the layouts). A panel that is at its default corner (top right) has no `x` and `y`. A layout that the widget does not have gives Layout C and one line in the log.
+- Position, layout and custom look: `~/.config/bellwether/state.json`. The keys are `x` and `y` (from the top-left corner of a monitor), `screen` (the name of that monitor), `layout` (the letter of the layout, `"C"` when the key is not there), `scale`, `fontScale`, `fontFamily` and `colors` (see "Custom look" above; a file without them has the look of the layouts), and `showMeta` (`false` hides the model and session-time line; the key is not there when the line shows; a value that is not `true` or `false` is ignored with one line in the log). A panel that is at its default corner (top right) has no `x` and `y`. A layout that the widget does not have gives Layout C and one line in the log.
 - Log: `~/.local/state/bellwether/bellwether.log`
 - Start log (output of `scripts/start.sh` starts): `~/.local/state/bellwether/start.log`
 - Icon copies: `~/.cache/bellwether/icons/`. The widget reads the icons from the folder of the app (`~/.config/herdr-app/icons/`, or `$HERDR_APP_HOME/icons/`) and does not change them. A one-colour icon is black, so the widget writes a copy of it here, in a light colour or in your text colour (`colors.text`). You can delete this folder.
