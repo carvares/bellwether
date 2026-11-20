@@ -10,9 +10,11 @@ from types import SimpleNamespace
 
 import pytest
 
+from bellwether import client as client_module
 from bellwether.client import (
     PRESS_TIMEOUT, READ_TIMEOUT, SEND_TIMEOUT, TEXT_LIMIT, Failure, HerdrClient, Screen, text_problem, valid_address,
     valid_text)
+from bellwether.platform import linux
 
 CORE = "/fake/herdr-core"
 MARKER = "MARKER-private-screen-text"
@@ -21,6 +23,13 @@ LIST = {"terminals": [
     {"address": "t1c", "agent": "codex", "state": "live", "status": "working"},
     {"address": "box/t7", "agent": "claude-code", "state": "live", "status": "blocked"},
 ]}
+
+
+@pytest.fixture(autouse=True)
+def linux_system(monkeypatch):
+    """The client with the Linux module of the platform, on every system: these tests check its command lines
+    (the KWin raise, systemd-run, `env -u`). The client with the macOS module: tests/test_macos.py."""
+    monkeypatch.setattr(client_module, "platform", linux)
 
 
 def done(stdout=b"", returncode=0, stderr=b""):
@@ -409,6 +418,39 @@ def test_a_text_with_a_cancel_runs_as_a_process_that_is_watched():
     assert spawned == [["env", "-u", "HC_TERMINAL_ID", "-u", "HC_SCOPE", "-u", "HC_TERMINAL_SOCKET",
                         CORE, "send", "--force", "--", "t1", "made-up text"]]
     assert runner.gets == [([CORE, "get", "t1", "--json"], READ_TIMEOUT)] and not process.killed
+
+
+def test_a_platform_that_gives_an_environment_runs_the_command_as_it_is_in_that_environment(monkeypatch):
+    """A system with no `env` program (macOS, Windows): the platform gives the argv unchanged and an environment
+    without the caller variables. The client gives it to the runner and to the process (with a cancel)."""
+    made_up = {"PATH": "/made/up", "HOME": "/made/up/home"}
+    asked = []
+
+    def clean_environment(argv, names, commands):
+        asked.append((list(argv), tuple(names), commands))
+        return list(argv), dict(made_up)
+
+    monkeypatch.setattr(client_module, "platform", SimpleNamespace(COMMANDS={}, clean_environment=clean_environment))
+    calls = []
+    runner = Runner(done({}))
+
+    def run(argv, timeout=2.0, **options):
+        calls.append((argv, options))
+        return runner(argv, timeout)
+
+    spawned = []
+    process = Process(ends=1)
+    client = HerdrClient(None, CORE, run=run, spawn=lambda argv, **options: spawned.append((argv, options)) or process)
+    client.list_agents()
+    assert client.send_text("t1", "made-up text") is None
+    assert client.send_text("t1", "made-up text", cancel=threading.Event()) is None
+    argv = [CORE, "send", "--force", "--", "t1", "made-up text"]
+    assert asked == [(argv, ("HC_TERMINAL_ID", "HC_SCOPE", "HC_TERMINAL_SOCKET"), {})] * 2
+    assert [call for call in calls if call[0][1] == "send"] == [(argv, {"env": made_up})]
+    assert [call for call in calls if call[0][1] != "send"] == [([CORE, "ls", "--json"], {}),
+                                                                  ([CORE, "get", "t1", "--json"], {}),
+                                                                  ([CORE, "get", "t1", "--json"], {})]
+    assert spawned == [(argv, {"env": made_up})]
 
 
 def test_a_text_whose_cancel_is_set_is_killed_and_ends_after_the_process(records):

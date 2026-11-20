@@ -15,6 +15,13 @@ from bellwether.state import Agent
 APP = "/fake/herdr-app"
 CORE = "/fake/herdr-core"
 
+
+@pytest.fixture(autouse=True)
+def linux_system(monkeypatch):
+    """The client with the Linux module of the platform, on every system: these tests check its command lines
+    (the KWin raise, systemd-run, `env -u`). The client with the macOS module: tests/test_macos.py."""
+    monkeypatch.setattr(client_module, "platform", linux)
+
 APP_LIST = {
     "spaces": [
         {
@@ -310,14 +317,14 @@ class Desk:
 def jump(key="t1", **desk_options):
     desk = Desk(**desk_options)
     client = HerdrClient(APP, CORE, run=desk, sleep=desk.sleep, clock=desk.clock,
-                         busctl=BUSCTL, systemd_run=SYSTEMD_RUN)
+                         raiser=BUSCTL, launcher=SYSTEMD_RUN)
     return client, desk
 
 
 def test_the_client_takes_only_the_commands_that_the_platform_names():
-    assert HerdrClient(APP, CORE, busctl=BUSCTL)._commands == {**linux.COMMANDS, "busctl": BUSCTL}
-    with pytest.raises(TypeError, match="unknown commands: bus_ctl"):
-        HerdrClient(APP, CORE, bus_ctl=BUSCTL)  # a misspelled fake must not leave the real program in its place
+    assert HerdrClient(APP, CORE, raiser=BUSCTL)._commands == {**linux.COMMANDS, "raiser": BUSCTL}
+    with pytest.raises(TypeError, match="unknown commands: raise_with"):
+        HerdrClient(APP, CORE, raise_with=BUSCTL)  # a misspelled fake must not leave the real program in its place
 
 
 def test_focus_with_a_visible_window_shows_the_agent_and_raises_the_window():
@@ -498,7 +505,7 @@ def test_focus_asks_the_app_when_kwin_finds_no_window():
 
 def test_focus_fails_when_the_launcher_is_not_found():
     client, desk = jump(running=False)
-    client._commands["systemd_run"] = "/fake/herdr-app-missing"
+    client._commands["launcher"] = "/fake/herdr-app-missing"
     desk_call = desk.__call__
 
     def run(argv, timeout=2.0):
@@ -568,7 +575,7 @@ def test_focus_that_does_not_answer_is_offline():
 def test_focus_without_the_app_program_runs_nothing():
     desk = Desk()
     client = HerdrClient(None, CORE, run=desk, sleep=desk.sleep, clock=lambda: desk.now,
-                         busctl=BUSCTL, systemd_run=SYSTEMD_RUN)
+                         raiser=BUSCTL, launcher=SYSTEMD_RUN)
     with pytest.raises(HerdrError) as failure:
         client.focus_agent("t1")
     assert (failure.value.code, failure.value.message) == ("no_app", "Herdr app is not installed")
@@ -609,6 +616,17 @@ def test_default_runner_uses_no_shell_and_a_timeout(monkeypatch):
     }
     client_module._run(["/fake/herdr-app", "ls"], timeout=0.5)
     assert seen["timeout"] == 0.5
+    client_module._run(["/fake/herdr-core", "send"], env={"PATH": "/made/up"})  # a platform with no `env` program
+    assert seen["env"] == {"PATH": "/made/up"}
+
+
+def test_default_spawn_gives_an_environment_only_when_the_platform_gives_one(monkeypatch):
+    seen = []
+    monkeypatch.setattr(subprocess, "Popen", lambda argv, **options: seen.append(options))
+    client_module._spawn(["/fake/herdr-core", "send"])
+    client_module._spawn(["/fake/herdr-core", "send"], env={"PATH": "/made/up"})
+    assert [options.get("env", "none") for options in seen] == ["none", {"PATH": "/made/up"}]
+    assert all(options["stdin"] == subprocess.DEVNULL for options in seen)
 
 
 def test_find_executables(monkeypatch, tmp_path):

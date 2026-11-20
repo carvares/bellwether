@@ -61,8 +61,9 @@ def lock(path: Path):
 
 # ----- the programs of the system that the client runs -----
 
-# By name. A test of the client gives fakes in their place (HerdrClient takes them as keyword arguments).
-COMMANDS = {"busctl": "busctl", "systemd_run": "systemd-run", "env": "env"}
+# By role: the raise of the Herdr window, the start of the app, the command without some variables. A test of the
+# client gives fakes in their place (HerdrClient takes them as keyword arguments by role).
+COMMANDS = {"raiser": "busctl", "launcher": "systemd-run", "env_cleaner": "env"}
 
 
 # ----- the raise of the Herdr app window -----
@@ -110,7 +111,7 @@ def _info(run, busctl: str, window: str) -> dict:
 
 def raise_app(run, commands: dict[str, str]) -> bool:
     """Restore and activate the window of the Herdr app. Return False when that did not occur."""
-    return raise_app_window(run, commands["busctl"])
+    return raise_app_window(run, commands["raiser"])
 
 
 # ----- the start of a closed Herdr app -----
@@ -119,14 +120,15 @@ def start_app(run, app: str, commands: dict[str, str]) -> int:
     """Run plain `herdr-app` as the desktop does: a unit of the user's systemd, with the environment of the session
     and not of this process. The app does not end with the widget and has none of its files. Return the exit code
     of the launcher (0: accepted). The errors of `run` go to the caller."""
-    return run([commands["systemd_run"], "--user", "--quiet", "--collect", "--slice=app.slice", "--", app]).returncode
+    return run([commands["launcher"], "--user", "--quiet", "--collect", "--slice=app.slice", "--", app]).returncode
 
 
 # ----- a command without some variables of this process -----
 
-def clean_environment(argv: list[str], names, commands: dict[str, str]) -> list[str]:
-    """The command `argv`, run without the environment variables `names`."""
-    return [commands["env"], *(part for name in names for part in ("-u", name)), *argv]
+def clean_environment(argv: list[str], names, commands: dict[str, str]) -> tuple[list[str], None]:
+    """The command `argv` and its environment, to run without the environment variables `names`: on Linux `env -u`
+    takes them away, and the environment is the one of this process (None)."""
+    return [commands["env_cleaner"], *(part for name in names for part in ("-u", name)), *argv], None
 
 
 # ----- where the Herdr programs are -----
@@ -142,10 +144,12 @@ def find_executables() -> tuple[str | None, str | None]:
 
 _PR_SET_PDEATHSIG = 1
 # The function is found and its types are set here and not in the child: between fork and exec the child
-# must not load a library or look for a symbol.
-_prctl = ctypes.CDLL(None).prctl
-_prctl.argtypes = [ctypes.c_int, ctypes.c_ulong]
-_prctl.restype = ctypes.c_int
+# must not load a library or look for a symbol. None on a system without it: there only the tests import this
+# module (the logic of the other members runs with fakes on each system), and spawn_child is not used.
+_prctl = getattr(ctypes.CDLL(None), "prctl", None)
+if _prctl is not None:
+    _prctl.argtypes = [ctypes.c_int, ctypes.c_ulong]
+    _prctl.restype = ctypes.c_int
 
 
 def spawn_child(argv: list[str]) -> subprocess.Popen:

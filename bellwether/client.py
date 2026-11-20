@@ -167,19 +167,26 @@ def _title(value: object) -> str:
     return " ".join("".join(ch if ch.isprintable() else " " for ch in value[:4 * TITLE_LIMIT]).split())[:TITLE_LIMIT]
 
 
-def _run(argv: list[str], timeout: float = TIMEOUT) -> subprocess.CompletedProcess:
-    return subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout)
+def _environment(env: dict[str, str] | None) -> dict:
+    """The `env=` option only for a command that the platform gives its own environment (None: this process's)."""
+    return {} if env is None else {"env": env}
 
 
-def _spawn(argv: list[str]) -> subprocess.Popen:
-    return subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+def _run(argv: list[str], timeout: float = TIMEOUT, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout, **_environment(env))
+
+
+def _spawn(argv: list[str], env: dict[str, str] | None = None) -> subprocess.Popen:
+    return subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            **_environment(env))
 
 
 class HerdrClient:
     def __init__(self, app: str | None, core: str | None, run=_run, sleep=time.sleep, clock=time.monotonic,
                  spawn=_spawn, **commands: str) -> None:
-        """`commands`: programs of the system in the place of the ones that the platform names (a test gives
-        fakes); a name that the platform does not use is an error."""
+        """`commands`: programs of the system, by role, in the place of the ones that the platform names (a test
+        gives fakes); a role that the platform does not have is an error. `run` and `spawn` get `env=` only for a
+        command that the platform gives its own environment (`platform.clean_environment`)."""
         unknown = sorted(commands.keys() - platform.COMMANDS.keys())
         if unknown:
             raise TypeError(f"unknown commands: {', '.join(unknown)}")
@@ -323,19 +330,21 @@ class HerdrClient:
             address = None
         if address != terminal:
             return self._failed(action, terminal, "not_this_terminal")
-        argv = [self._core, *args]
+        argv, env = [self._core, *args], None
         if no_caller:
-            argv = platform.clean_environment(argv, _CALLER_VARIABLES, self._commands)
+            argv, env = platform.clean_environment(argv, _CALLER_VARIABLES, self._commands)
         if lasting:
             done = self._lasting(argv, timeout, terminal, late)
         else:
-            done = self._command(argv, timeout) if cancel is None else self._watched(argv, timeout, cancel)
+            done = self._command(argv, timeout, env) if cancel is None else self._watched(argv, timeout, cancel, env)
         return self._failed(action, terminal, done.code) if isinstance(done, Failure) else done
 
-    def _command(self, argv: list[str], timeout: float) -> subprocess.CompletedProcess | Failure:
-        """Run one herdr-core command. Its output is not logged and not kept when it fails."""
+    def _command(self, argv: list[str], timeout: float, env: dict[str, str] | None = None
+                 ) -> subprocess.CompletedProcess | Failure:
+        """Run one herdr-core command (in the environment `env`, None: the one of this process). Its output is not
+        logged and not kept when it fails."""
         try:
-            done = self._run(argv, timeout=timeout)
+            done = self._run(argv, timeout=timeout) if env is None else self._run(argv, timeout=timeout, env=env)
         except subprocess.TimeoutExpired:
             return Failure("timeout")
         except (OSError, subprocess.SubprocessError):
@@ -344,14 +353,15 @@ class HerdrClient:
             return Failure(self._error_kind(done.stderr) or f"exit_{done.returncode}")
         return done
 
-    def _watched(self, argv: list[str], timeout: float, cancel: threading.Event
+    def _watched(self, argv: list[str], timeout: float, cancel: threading.Event, env: dict[str, str] | None = None
                  ) -> subprocess.CompletedProcess | Failure:
-        """Run one herdr-core command that `cancel` can end: then it is killed. The call returns only after the
-        process has ended, so a kill is confirmed. Its output is not logged and not kept when it fails."""
+        """Run one herdr-core command (in the environment `env`, None: the one of this process) that `cancel` can
+        end: then it is killed. The call returns only after the process has ended, so a kill is confirmed. Its
+        output is not logged and not kept when it fails."""
         if cancel.is_set():
             return Failure("cancelled")
         try:
-            process = self._spawn(argv)
+            process = self._spawn(argv) if env is None else self._spawn(argv, env=env)
         except (OSError, subprocess.SubprocessError):
             return Failure("no_run")
         deadline = self._clock() + timeout
