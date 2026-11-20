@@ -264,6 +264,7 @@ Item {
                             anchors.right: parent.right
                             anchors.rightMargin: skin.pad + 2
                             anchors.verticalCenter: parent.verticalCenter
+                            anchors.verticalCenterOffset: answer.drop
                         }
                         Text {
                             id: detail

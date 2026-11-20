@@ -189,7 +189,17 @@ def test_the_line_does_not_touch_the_note_the_detail_or_the_answer_control(app, 
         meta, _, age = line(blocked.row(key))
         control = blocked.control(key)
         assert box(meta).right() <= box(control).left() - 4 and box(age).right() <= box(control).left() - 4
-        assert box(control).center().y() == pytest.approx(box(blocked.row(key)).center().y(), abs=0.6)
+        # The control is at the second line, below the name of the agent: it ends 3 px above the end of the row,
+        # and the first line (the name, the detail) has the full width of the row.
+        row = box(blocked.row(key))
+        assert box(control).bottom() == pytest.approx(row.bottom() - 3, abs=0.6)
+        assert box(control).center().y() > row.center().y() + 3
+        assert control.property("lowered") is True and control.property("reserve") == 0
+    plain = panel(letter, facts={}, state="blocked")  # no second line: the control is in the middle, as before
+    for key in ("t6", "t7"):
+        control = plain.control(key)
+        assert box(control).center().y() == pytest.approx(box(plain.row(key)).center().y(), abs=0.6)
+        assert control.property("lowered") is False and control.property("reserve") > control.width()
 
 
 @pytest.mark.parametrize("scale", [0.8, 1.4])

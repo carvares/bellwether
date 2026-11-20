@@ -282,6 +282,7 @@ Item {
                             anchors.right: parent.right
                             anchors.rightMargin: 20
                             anchors.verticalCenter: parent.verticalCenter
+                            anchors.verticalCenterOffset: answer.drop
                         }
                         Text {
                             id: detail

@@ -32,8 +32,14 @@ Item {
     readonly property bool hovered: row.view.panel.hoverItem === control
     // A jump runs: a click does nothing, as on a row.
     readonly property bool inert: row.view.panel.opening !== ""
-    // The width that the row keeps free for the control: 0 when the row has none.
-    readonly property real reserve: visible ? width + gap : 0
+    // On a row with the second line (the model and the session time) the control is at that line, below the first
+    // line: the name and the detail of the agent keep the full width of the row, and the control is not on them.
+    readonly property bool lowered: visible && row.hasMeta
+    // How far the control is below the middle of the row: a skin adds it to `anchors.verticalCenter`. Lowered, the
+    // control ends 3 px above the end of the row.
+    readonly property real drop: lowered ? Math.max(0, (row.height - height) / 2 - 3) : 0
+    // The width that the first line of the row keeps free for the control: 0 when the row has none, or has it lower.
+    readonly property real reserve: visible && !lowered ? width + gap : 0
     // The ink of the word: the accent, or on the full plate under the pointer the ink that can be read on it.
     readonly property color ink: hovered ? tokens.inkOn(tokens.accentColor) : tokens.accentColor
 
@@ -48,7 +54,8 @@ Item {
     // the label of the agent keeps most of the row, and it gives way first: it takes only what the whole label
     // leaves (with a large text it goes). The message of a failed jump gives the control its width.
     function detailRoom(failedRoom, room) {
-        return row.failed ? failedRoom - reserve : visible ? Math.max(0, Math.min(room, 72, leftByLabel)) : room
+        return row.failed ? failedRoom - reserve
+            : visible && !lowered ? Math.max(0, Math.min(room, 72, leftByLabel)) : room
     }
 
     visible: row.canAnswer

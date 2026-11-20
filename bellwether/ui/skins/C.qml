@@ -336,6 +336,7 @@ Item {
                                     anchors.right: parent.right
                                     anchors.rightMargin: agentList.longer ? 10 : 0
                                     anchors.verticalCenter: parent.verticalCenter
+                                    anchors.verticalCenterOffset: answer.drop
                                 }
                                 Text {
                                     id: detail

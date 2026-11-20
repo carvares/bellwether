@@ -255,7 +255,7 @@ The widget follows the changes of herdr-core with one child process, `herdr-core
 
 A blocked agent waits for your answer in its terminal. You can give that answer from the panel, without the Herdr window.
 
-1. Click the status "Blocked". Each blocked agent has an "Answer" control at the right end of its row.
+1. Click the status "Blocked". Each blocked agent has an "Answer" control at the right end of its row. On a row with the model and session-time line, the control is at that second line, so the name of the agent keeps the full first line.
 2. Click "Answer". The answer window opens with the question of that agent. A click on the rest of the row still shows the agent in Herdr.
 3. Click an option, or press its number (1 to 9). The window sends that one key to that one terminal.
 
