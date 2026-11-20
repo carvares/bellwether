@@ -11,13 +11,16 @@ from types import SimpleNamespace
 import pytest
 
 from bellwether import platform
-from bellwether.platform import linux
+from bellwether.platform import linux, macos
 
 PACKAGE = Path(platform.__file__).parent
 SOURCE = PACKAGE.parent
+# The module of each system, by the value of sys.platform. Windows comes with task P4 (until then: an ImportError).
+SYSTEMS = {"linux": linux, "darwin": macos}
 
-# The interface: member → (kind, the names of its parameters). Each module of a system gives all of them; the macOS
-# and the Windows modules are written against this table.
+# The interface: member → (kind, the names of its parameters). Each module of a system gives all of them, with these
+# parameters in this order; a function may have more parameters only after them, keyword-only and with a default
+# (a test gives its fakes there: the loader of AppKit or psutil, the finder of a program).
 INTERFACE = {
     "config_home": ("function", ()),
     "state_home": ("function", ()),
@@ -44,13 +47,14 @@ INTERFACE = {
 # The names of the package that are not members of a system.
 # The modules of the package are names of it too, once imported.
 OWN = {"load", "MODULES", "annotations", "importlib", "sys", "ModuleType", "linux", "host", "posix", "macos", "guard"}
+on_linux = pytest.mark.skipif(sys.platform != "linux", reason="needs Linux")
 
 
-def test_on_linux_the_package_gives_the_members_of_the_linux_module():
-    assert sys.platform == "linux"  # the suite runs on Linux; P3 and P4 add the other systems
-    assert platform.load(sys.platform) is linux
+def test_the_package_gives_the_members_of_the_module_of_this_system():
+    assert platform.load(sys.platform) is SYSTEMS[sys.platform]
+    assert set(platform.MODULES) == set(SYSTEMS)
     for name in INTERFACE:
-        assert getattr(platform, name) is getattr(linux, name), name
+        assert getattr(platform, name) is getattr(SYSTEMS[sys.platform], name), name
 
 
 def test_the_package_gives_exactly_the_members_of_the_table():
@@ -58,13 +62,17 @@ def test_the_package_gives_exactly_the_members_of_the_table():
     assert given == set(INTERFACE)
 
 
+@pytest.mark.parametrize("system", SYSTEMS)
 @pytest.mark.parametrize("name", INTERFACE)
-def test_each_member_of_the_linux_module_has_its_kind_and_its_parameters(name):
+def test_each_member_of_each_system_has_its_kind_and_its_parameters(system, name):
     kind, parameters = INTERFACE[name]
-    member = getattr(linux, name)
+    member = getattr(SYSTEMS[system], name)
     if kind == "function":
         assert callable(member)
-        assert tuple(inspect.signature(member).parameters) == parameters
+        given = list(inspect.signature(member).parameters.values())
+        assert tuple(p.name for p in given[:len(parameters)]) == parameters
+        assert all(p.kind is p.KEYWORD_ONLY and p.default is not p.empty for p in given[len(parameters):])
+        assert all(p.kind is p.POSITIONAL_OR_KEYWORD for p in given[:len(parameters)])
     elif kind == "commands":
         assert member and all(isinstance(k, str) and isinstance(v, str) and v for k, v in member.items())
     elif kind == "shells":
@@ -73,10 +81,20 @@ def test_each_member_of_the_linux_module_has_its_kind_and_its_parameters(name):
         assert isinstance(member, str) and member
 
 
-def test_the_process_host_of_the_linux_module_is_a_process_host_and_shares_its_family_rule(tmp_path):
+def test_the_roles_of_the_commands_are_the_same_where_the_client_uses_them():
+    """The client passes COMMANDS to raise_app, start_app and clean_environment of its system only: each system has
+    its own roles (macOS has no `env` program and no raise program)."""
+    assert set(linux.COMMANDS) == {"raiser", "launcher", "env_cleaner"}
+    assert set(macos.COMMANDS) == {"launcher"}
+
+
+@pytest.mark.parametrize("system", SYSTEMS)
+def test_the_process_host_of_each_system_is_a_process_host_and_shares_its_family_rule(tmp_path, system):
     from bellwether.platform.host import MAX_PROCESSES, ProcessHost
-    assert isinstance(linux.process_host(), ProcessHost)
-    assert linux.Host.family is ProcessHost.family and linux.MAX_PROCESSES == MAX_PROCESSES
+    module = SYSTEMS[system]
+    host = module.process_host() if system == "linux" else module.process_host(psutil=lambda: None)
+    assert isinstance(host, ProcessHost) and type(host).family is ProcessHost.family
+    assert linux.MAX_PROCESSES == MAX_PROCESSES
     bare = ProcessHost(tmp_path)
     assert (bare.home, bare.bytes_read) == (tmp_path.resolve(), 0)
     for read in (bare.start_ticks, bare.children, bare.arguments, bare.open_files):
@@ -84,11 +102,11 @@ def test_the_process_host_of_the_linux_module_is_a_process_host_and_shares_its_f
             read(1)
 
 
-@pytest.mark.parametrize("name", ["darwin", "win32", "cygwin", "freebsd14", ""])
+@pytest.mark.parametrize("name", ["win32", "cygwin", "freebsd14", "linux2", ""])
 def test_a_system_with_no_module_is_a_clear_import_error(name):
     with pytest.raises(ImportError) as failure:
         platform.load(name)
-    assert str(failure.value) == f"bellwether does not run on this system ({name!r}): it runs on linux"
+    assert str(failure.value) == f"bellwether does not run on this system ({name!r}): it runs on linux, darwin"
 
 
 # ----- only the package has system-specific code -----
@@ -413,6 +431,7 @@ def test_a_library_without_a_function_or_no_library_gives_none_and_no_search_of_
     assert linux.wayland_globals(libraries=()) is None
 
 
+@on_linux  # it needs libwayland-client
 def test_a_compositor_that_does_not_answer_gives_none_within_the_time_limit(tmp_path):
     """A socket that takes the connection and never answers: the read ends after its time limit."""
     import socket

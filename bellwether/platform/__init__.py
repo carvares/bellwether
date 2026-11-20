@@ -1,8 +1,8 @@
 """Everything that depends on the operating system, behind one interface.
 
 The rest of the program calls only the members of this package. `load` picks the module of the system one time, at
-the import of this package. Only Linux has a module today: on any other system the import fails with a clear
-ImportError (the macOS and the Windows modules come with their own tasks, see the design of the port).
+the import of this package. Linux and macOS have a module; on any other system the import fails with a clear
+ImportError (the Windows module comes with its own task, see the design of the port).
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import sys
 from types import ModuleType
 
 # The value of sys.platform → the module of this package for that system.
-MODULES = {"linux": "linux"}
+MODULES = {"linux": "linux", "darwin": "macos"}
 
 
 def load(name: str) -> ModuleType:
