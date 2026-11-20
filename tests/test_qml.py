@@ -1595,9 +1595,14 @@ def run_on_two_screens(tmp_path, module, *arguments):
         {"name": "LEFT", "x": 0, "y": 0, "width": 1920, "height": 1080, "logicalDpi": 96, "logicalBaseDpi": 96, "dpr": 1},
         {"name": "RIGHT", "x": 1920, "y": 0, "width": 1280, "height": 720, "logicalDpi": 96, "logicalBaseDpi": 96, "dpr": 1},
     ]}), encoding="utf-8")
+    # The arguments of a Qt platform are split at each ":", so a path with a drive letter ("C:\\…") breaks the
+    # option on Windows (the process ended with 0xC0000409 on the runner). The file is named relative to the folder
+    # of the process, and the checkout is found through PYTHONPATH.
+    root = str(Path(__file__).parent.parent)
     done = subprocess.run(
-        [sys.executable, "-m", module, *arguments], capture_output=True, text=True, timeout=60,
-        cwd=Path(__file__).parent.parent, env={**os.environ, "QT_QPA_PLATFORM": f"offscreen:configfile={config}"})
+        [sys.executable, "-m", module, *arguments], capture_output=True, text=True, timeout=60, cwd=tmp_path,
+        env={**os.environ, "QT_QPA_PLATFORM": f"offscreen:configfile={config.name}",
+             "PYTHONPATH": os.pathsep.join(filter(None, [root, os.environ.get("PYTHONPATH", "")]))})
     assert done.returncode == 0, done.stderr[-2000:]
     return {s.pop("step"): s for s in map(json.loads, done.stdout.splitlines())}
 
