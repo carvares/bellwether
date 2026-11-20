@@ -1,0 +1,45 @@
+
+ ▐▛███▛█   Claude Code v2.1.322
+▝▜██████▀  Model One with high effort · Sample Plan
+ ▝▝   ▝▝   ~/projects/sample-app
+
+
+❯ Run this shell command and nothing else: touch made-by-test.txt
+
+  Ran 1 shell command
+  ⎿  Interrupted · What should Claude do instead?
+
+✻ Cooked for 2s · done 1:16 PM
+
+❯ <hc from="t1">Use your Edit tool to change the word beta to delta in list.txt. Do nothing else.</hc>
+
+  Read 1 file
+
+● Update(list.txt)
+  ⎿  Added 1 line, removed 1 line
+      1  alpha
+      2 -beta
+      2 +delta
+      3  gamma
+
+● I changed beta to delta in list.txt, on line 2.
+
+  I read the file first, because the Edit tool needs a read before it can change a file. I made no other changes.
+
+✻ Cooked for 7s · done 1:17 PM
+
+❯ <hc from="t1">Use your AskUserQuestion tool to ask me one question with exactly two options: Tea or Coffee. Do nothing else before I answer.</hc>
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Drink
+
+Which drink do you want: tea or coffee?
+
+❯ 1. Tea
+     Choose tea.
+  2. Coffee
+     Choose coffee.
+  3. Type something.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

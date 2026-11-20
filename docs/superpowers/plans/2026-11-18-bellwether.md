@@ -1,4 +1,6 @@
-# herdr-float Implementation Plan
+# Bellwether Implementation Plan
+
+Renamed from herdr-float to Bellwether on 2026-11-18. The task text below (Tasks 1 to 9) is the record of the work as it was planned, and keeps the old names `herdr-float` and `herdr_float`. The current names are in the spec, the README and the code.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -8,7 +10,7 @@
 
 **Tech Stack:** Python 3.12+, PySide6 (system package, Qt 6.12), QML, `org.kde.layershell` QML module (package `layer-shell-qt`), pytest, uv.
 
-**Spec:** `docs/superpowers/specs/2026-11-18-herdr-float-design.md`
+**Spec:** `docs/superpowers/specs/2026-11-18-bellwether-design.md`
 
 ## Global Constraints
 
@@ -18,13 +20,13 @@
 - `blocked` and `done` are the attention states.
 - A system tray icon lets the user hide, show and quit the widget.
 - The widget only reads Herdr state. The one write is `agent.focus` on a user click.
-- Logs: `~/.local/state/herdr-float/herdr-float.log`. IDs and states only. No pane text.
-- Position file: `~/.config/herdr-float/state.json`.
+- Logs: `~/.local/state/bellwether/bellwether.log`. IDs and states only. No pane text.
+- Position file: `~/.config/bellwether/state.json`.
 - PySide6 comes from the system package `pyside6`, not from PyPI. The PyPI wheel has its own Qt and cannot load the system layer-shell plugin.
 - Commits: use the configured git identity. No AI attribution in commit messages. Do not push unless the user asks.
 - The widget starts with Herdr (plugin). It stays on the screen after the Herdr window closes. No systemd service.
 - Do not run `herdr server stop`. Do not close panes, tabs or workspaces.
-- All commands run from `/home/carvares/Projects/Personal/herdr-float`.
+- All commands run from `/home/carvares/Projects/Personal/bellwether`.
 
 ## Verified facts (Herdr 0.9.5, protocol 22, from `herdr api schema`)
 
@@ -47,13 +49,13 @@
 | File | Responsibility |
 |---|---|
 | `pyproject.toml` | Project metadata, pytest configuration. |
-| `herdr_float/state.py` | Pure logic: parse `agent.list`, sort, count. |
-| `herdr_float/client.py` | Socket request and response. Errors. |
-| `herdr_float/settings.py` | Load and save the window position. |
-| `herdr_float/backend.py` | Qt object: 1-second read thread, properties for QML, focus slot. |
-| `herdr_float/ui/Main.qml` | Layer-shell window, pill, list, drag. |
-| `herdr_float/tray.py` | System tray icon: hide, show, quit. State colours. |
-| `herdr_float/__main__.py` | Logging, single instance, start. |
+| `bellwether/state.py` | Pure logic: parse `agent.list`, sort, count. |
+| `bellwether/client.py` | Socket request and response. Errors. |
+| `bellwether/settings.py` | Load and save the window position. |
+| `bellwether/backend.py` | Qt object: 1-second read thread, properties for QML, focus slot. |
+| `bellwether/ui/Main.qml` | Layer-shell window, pill, list, drag. |
+| `bellwether/tray.py` | System tray icon: hide, show, quit. State colours. |
+| `bellwether/__main__.py` | Logging, single instance, start. |
 | `plugin/herdr-plugin.toml` | Herdr plugin manifest. |
 | `plugin/start.sh` | Start command for the plugin. |
 | `tests/` | pytest files, one for each Python module. |
@@ -1991,18 +1993,18 @@ The user said: "remember to make the repo private". The user did not ask for a p
 
 - [ ] **Step 1: Ask the user to confirm**
 
-Ask: "Create the private repository `carvares/herdr-float` on GitHub and push `main`?" The `gh` account on this machine is `carvares`.
+Ask: "Create the private repository `carvares/bellwether` on GitHub and push `main`?" The `gh` account on this machine is `carvares`.
 
 - [ ] **Step 2: Create the repository as private and push**
 
 ```bash
-gh repo create carvares/herdr-float --private --source . --remote origin --push
+gh repo create carvares/bellwether --private --source . --remote origin --push
 ```
 
 - [ ] **Step 3: Confirm that it is private**
 
 ```bash
-gh repo view carvares/herdr-float --json visibility,url
+gh repo view carvares/bellwether --json visibility,url
 ```
 
 Expected: `"visibility":"PRIVATE"`.

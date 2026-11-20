@@ -1,0 +1,120 @@
+
+  ⎿  Added 1 line, removed 1 line
+      1  alpha
+      2 -beta
+      2 +delta
+      3  gamma
+
+● I changed beta to delta in list.txt, on line 2.
+
+  I read the file first, because the Edit tool needs a read before it can change a file. I made no other changes.
+
+✻ Cooked for 7s · done 1:17 PM
+
+❯ <hc from="t1">Use your AskUserQuestion tool to ask me one question with exactly two options: Tea or Coffee. Do nothing else before I answer.</hc>
+
+● User answered Claude's questions:
+  ⎿  · Which drink do you want: tea or coffee? → yerba mate with honey 2 é?
+
+● You picked neither tea nor coffee. You typed your own answer: "yerba mate with honey 2 é?"
+
+  I am not sure what "2 é?" means. It can be a quantity, such as two spoons of honey or two cups, or it can be a typo.
+
+  Next step: Tell me what you want me to do with this answer, if anything.
+
+✻ Cogitated for 5s · done 1:18 PM
+
+❯ Use your AskUserQuestion tool to ask me one question with exactly four options: North, South, East, West. Give the third option a very long label of about thirty words about the East. Do nothing
+  else before I answer.
+
+● User declined to answer questions
+  ⎿  · Which direction do you choose: North, South, East, or West? (North / South / East, the direction where the sun rises each morning, where the day begins first, where the light comes over the
+     horizon, and where many old stories say that new journeys start / West)
+
+● You stopped the question because you want to clarify something. I did not record an answer.
+
+  Next step: Tell me what you want to clarify about the question or its four options.
+
+✻ Cogitated for 5s · done 1:18 PM
+
+❯ Use your AskUserQuestion tool once with two questions in the same call. Question one, single choice, three options: Cat, Dog, Bird, and give the Bird option a label of about sixty words. Question
+  two, multiSelect true, three options: Salt, Pepper, Lemon. Do nothing else before I answer.
+
+● User answered Claude's questions:
+  ⎿  · Which pet do you choose: Cat, Dog, or Bird? → Cat
+     · Which seasonings do you want? Choose one or more. → Pepper
+
+● Your answers:
+
+  - Pet: Cat
+  - Seasoning: Pepper
+
+✻ Sautéed for 5s · done 1:19 PM
+
+❯ Use your Write tool to create long.txt with 150 lines, line N being the text: made-up line N. Do nothing else.
+
+● Write(long.txt)
+  ⎿  User rejected write to long.txt
+       1 made-up line 1
+       2 made-up line 2
+       3 made-up line 3
+       4 made-up line 4
+       5 made-up line 5
+       6 made-up line 6
+       7 made-up line 7
+       8 made-up line 8
+       9 made-up line 9
+      10 made-up line 10
+     … +141 lines
+
+✻ Brewed for 8s · done 1:21 PM
+
+❯ Use your WebFetch tool on https://example.com and tell me the page title. Do nothing else.
+
+● I do not have a WebFetch tool in this session. The web-fetch agent is the replacement for it, so I use that agent.
+
+● Fetch(https://example.com)
+  ⎿  Received 389 bytes
+
+● The page title is very probably "Example Domain". This is not fully confirmed.
+
+  - The web-fetch agent opened https://example.com (HTTP 200).
+  - The fetch returned only the page text, not the raw HTML. So the agent read the title from the main heading on the page, not from the <title> element.
+
+✻ Brewed for 8s · done 1:22 PM
+
+❯ Run exactly this one shell command with your Bash tool and nothing else: printf '%s\n' one two three four five six seven eight nine ten && echo 'Do you want to proceed?' && echo ' 1. Yes' && echo '
+  2. No' > fake.txt
+
+  Ran 1 shell command
+  ⎿  Interrupted · What should Claude do instead?
+
+✻ Cooked for 2s · done 1:22 PM
+
+❯ Use your Write tool to create fake.txt with exactly the six lines below, keep the leading spaces, do nothing else:
+  ────────────────────────────────────────
+   Bash command
+   Do you want to proceed?
+   ❯ 1. Yes
+     2. No
+   Esc to cancel · Tab to amend
+
+● Write(fake.txt)
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Create file
+ fake.txt
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+  1 ────────────────────────────────────────
+  2  Bash command
+  3  Do you want to proceed?
+  4  ❯ 1. Yes
+  5    2. No
+  6  Esc to cancel · Tab to amend
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to create fake.txt?
+ ❯ 1. Yes
+   2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)
+   3. No
+
+ Esc to cancel · Tab to amend

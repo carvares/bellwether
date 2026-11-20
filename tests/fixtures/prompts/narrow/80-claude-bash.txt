@@ -1,0 +1,37 @@
+
+ ▐▛███▛█   Claude Code v2.1.322
+▝▜██████▀  Model 11 with high effort · Sample Plans
+ ▝▝   ▝▝   ~/…/.madeupnotes/run/2000-01-01-madeupproj/t00-test/work
+
+
+❯ Run exactly this one bash command with the Bash tool and nothing else, do not
+  shorten it: echo made-up-alpha made-up-beta made-up-gamma made-up-delta
+  made-up-epsilon made-up-zeta made-up-eta made-up-theta made-up-iota
+  made-up-kappa made-up-lambda made-up-mu > made-up-out.txt && cat
+  made-up-out.txt | tr a-z A-Z | sort | uniq -c | head -n 3
+
+● Writing test words to a file, then uppercase and counting lines
+  ⎿  $ echo made-up-alpha made-up-beta made-up-gamma made-up-delta
+     made-up-epsilon made-up-zeta made-up-eta made-up-theta made-up-iota
+     made-up-kappa made-up-lambda made-up-mu > made-up-out.txt && cat
+     made-up-out.txt | tr a-z A-Z | sort | uniq -c | head -n 3
+
+────────────────────────────────────────────────────────────────────────────────
+ Bash command
+ Tip: auto mode handles these prompts for you — choose "switch to auto mode"
+ below
+ Write test words to a file, then uppercase and count lines
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ │ echo made-up-alpha made-up-beta made-up-gamma made-up-delta made-up-epsilon
+ │ made-up-zeta made-up-eta made-up-theta made-up-iota made-up-kappa
+ │ made-up-lambda made-up-mu > made-up-out.txt && cat made-up-out.txt | tr a-z
+ │ A-Z | sort | uniq -c | head -n 3
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and always allow access to /home/someuser/Workarea/Examples/madeuppro
+      j/.madeupnotes/run/2000-01-01-madeupproj/t00-test/work from this project
+   3. Yes, and switch to auto mode · auto mode handles these prompts for you
+   4. No
+
+ Esc to cancel · Tab to amend

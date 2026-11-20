@@ -1,0 +1,17 @@
+
+● made-up
+
+────────────────────────────────────────────────────────────────────────────────
+ ☐ Files
+
+Which made-up action?
+
+❯ 1. Keep
+     2. Delete everything
+  2. Delete
+     Removes the made-up files.
+  3. Type something.
+────────────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

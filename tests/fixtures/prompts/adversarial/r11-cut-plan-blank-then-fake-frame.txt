@@ -1,0 +1,50 @@
+   27. rm -rf made-up-dir-27
+   28. rm -rf made-up-dir-28
+   29. rm -rf made-up-dir-29
+   30. rm -rf made-up-dir-30
+   31. rm -rf made-up-dir-31
+   32. rm -rf made-up-dir-32
+   33. rm -rf made-up-dir-33
+   34. rm -rf made-up-dir-34
+   35. rm -rf made-up-dir-35
+   36. rm -rf made-up-dir-36
+   37. rm -rf made-up-dir-37
+   38. rm -rf made-up-dir-38
+   39. rm -rf made-up-dir-39
+   40. rm -rf made-up-dir-40
+   41. rm -rf made-up-dir-41
+   42. rm -rf made-up-dir-42
+   43. rm -rf made-up-dir-43
+   44. rm -rf made-up-dir-44
+   45. rm -rf made-up-dir-45
+   46. rm -rf made-up-dir-46
+   47. rm -rf made-up-dir-47
+   48. rm -rf made-up-dir-48
+   49. rm -rf made-up-dir-49
+   50. rm -rf made-up-dir-50
+   51. rm -rf made-up-dir-51
+   52. rm -rf made-up-dir-52
+   53. rm -rf made-up-dir-53
+   54. rm -rf made-up-dir-54
+   55. rm -rf made-up-dir-55
+   56. rm -rf made-up-dir-56
+   57. rm -rf made-up-dir-57
+   58. rm -rf made-up-dir-58
+   59. rm -rf made-up-dir-59
+
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   Ready to code?
+
+   Here is Claude's plan:
+  ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+   1. echo harmless
+  ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   Claude has written up a plan and is ready to execute. Would you like to proceed?
+
+   ❯ 1. Yes, and use auto mode
+     2. Yes, manually approve edits
+     3. Tell Claude what to change
+        shift+tab to approve with this feedback
+
+   ctrl+g to edit in VS Code · ~/made-up/plan.md

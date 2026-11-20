@@ -1,0 +1,23 @@
+
+ ▐▛███▛█   Claude Code v2.1.322
+▝▜██████▀  Model One with high effort · Sample Plan
+ ▝▝   ▝▝   /home/dev/projects/sample-app
+
+
+❯ Use your AskUserQuestion tool to ask me one question: which colour do I prefer, with the options Red, Green and Blue. Do nothing else before I answer.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Colour
+
+Which colour do you prefer?
+
+❯ 1. Red
+     You prefer red.
+  2. Green
+     You prefer green.
+  3. Blue
+     You prefer blue.
+  4. Type something.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

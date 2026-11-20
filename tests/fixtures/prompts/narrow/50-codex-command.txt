@@ -1,0 +1,45 @@
+
+  >_ OpenAI Codex (v0.170.0)
+     ~/Workarea/Examples/…/t00-test/work
+
+
+› Run exactly this shell command and nothing
+  else, do not check anything first: touch made-
+  up-file-alpha-made-up-file-beta-made-up-file-
+  gamma-made-up-file-delta-made-up-file-
+  epsilon.txt made-up-second.txt
+
+
+• Running touch made-up-file-alpha-made-up-file-b…
+    + Show details
+
+
+
+
+
+
+
+
+  Would you like to run the following command?
+
+  Environment: local
+
+  Reason: Do you want to create the two
+  requested empty files?
+
+  $ touch
+  made-up-file-alpha-made-up-file-beta-made-up-f
+  ile-gamma-made-up-file-delta-made-up-file-epsi
+  lon.txt made-up-second.txt
+
+
+› 1. Yes, proceed (y)
+  2. Yes, and don't ask again for commands that
+     start with `touch made-up-file-alpha-made-up-
+     file-beta-made-up-file-gamma-made-up-file-
+     delta-made-up-file-epsilon.txt made-up-
+     second.txt` (p)
+  3. No, and tell Codex what to do differently
+     (esc)
+
+  Press enter to confirm or esc to cancel

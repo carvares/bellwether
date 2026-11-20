@@ -1,0 +1,35 @@
+
+ ▐▛███▛█   Claude Code v2.1.322
+▝▜██████▀  Model 11 with high effort · Sample Plans
+ ▝▝   ▝▝   ~/…/.madeupnotes/run/2000-01-01-madeupproj/t00-test/work
+
+
+❯ Use the AskUserQuestion tool now to ask me one question with the header
+  Colour: 'Which made-up colour scheme should the made-up widget use?' Give 3
+  options. Each option label must be about 14 words long and each description
+  about 30 words long. All content made-up.
+────────────────────────────────────────────────────────────────────────────────
+ ☐ Colour
+
+Which made-up colour scheme should the made-up widget use?
+
+❯ 1. Glimmerfrost Teal with soft Vellumshade borders and a bright Quillberry
+     accent on hover states
+     A cool palette built around the invented Glimmerfrost Teal. Borders use
+     pale Vellumshade grey. Buttons glow Quillberry red when the pointer moves
+     over them, so actions stand out clearly.
+  2. Duskmoth Amber with deep Brindlewood panels and calm Oakmist text for long
+     reading sessions
+     A warm palette based on the invented Duskmoth Amber. Panels use dark
+     Brindlewood brown for depth. Text uses Oakmist cream, which keeps contrast
+     high and reduces eye strain over long sessions.
+  3. Zephyrine Violet with crisp Snowpetal backgrounds and sharp Coppervane
+     highlights for key status badges
+     A light palette that uses the invented Zephyrine Violet as its main colour.
+     Backgrounds stay clean Snowpetal white. Status badges use Coppervane
+     orange, so warnings and success states are easy to see.
+  4. Type something.
+────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

@@ -1,0 +1,141 @@
+"""Logic for the agent table: rows of the Herdr lists become sorted agents. No reads of Herdr."""
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+
+log = logging.getLogger("bellwether")
+
+STATES: tuple[str, ...] = ("blocked", "done", "working", "idle")  # The order of the rows.
+# Which state the border and the tray dot show. The user chose idle above working.
+PRIORITY: tuple[str, ...] = ("blocked", "done", "idle", "working")
+ATTENTION: frozenset[str] = frozenset({"blocked", "done"})
+# The colour of each state, and of the top state with no agents ("none") and when Herdr does not answer ("offline").
+# The user can change the four of STATES (the custom look).
+STATE_COLORS: dict[str, str] = {
+    "blocked": "#f28b82",
+    "done": "#fdd663",
+    "working": "#8ab4f8",
+    "idle": "#81c995",
+    "offline": "#5f6368",
+    "none": "#5f6368",
+}
+
+_logged_words: set[str] = set()
+
+
+@dataclass(frozen=True)
+class Agent:
+    key: str  # The terminal address, for example "t11". The jump uses it.
+    status: str
+    name: str  # The name of the terminal. "" when it has none.
+    workspace: str
+    app: str = ""  # The program word, for example "claude-code". "" when Herdr gives none.
+
+
+def _status(word: object, sub_agent: bool = False) -> str | None:
+    """Return one of STATES, or None when the terminal is not an agent."""
+    # The same mapping as the agent list of the app: a program that reports "error" needs the person,
+    # and a sub-agent is never "done" (it reports to its parent).
+    if word == "error":
+        return "blocked"
+    if word == "done" and sub_agent:
+        return "idle"
+    if word in STATES:
+        return word
+    if word and isinstance(word, str) and word not in _logged_words:
+        _logged_words.add(word)
+        log.warning("status word not known: %r", word[:32])
+    return None
+
+
+def _text(value: object) -> str:
+    return value if isinstance(value, str) else ""
+
+
+def _sorted(agents) -> list[Agent]:
+    return sorted(agents, key=lambda a: (STATES.index(a.status), a.key))
+
+
+def parse_app(spaces: list) -> list[Agent]:
+    """Convert the "spaces" list of `herdr-app ls` to sorted agents. Invalid rows are skipped."""
+    agents: dict[str, Agent] = {}
+    for space in spaces:
+        tabs = space.get("tabs") if isinstance(space, dict) else None
+        if not isinstance(tabs, list):
+            continue
+        for tab in tabs:
+            if not isinstance(tab, dict):
+                continue
+            where = str(space.get("name") or "")
+            if len(tabs) > 1 and tab.get("name"):
+                where = f"{where} / {tab['name']}"
+            _add_terminals(agents, tab.get("terminals"), where, sub_agent=False)
+    return _sorted(agents.values())
+
+
+def _add_terminals(agents: dict[str, Agent], rows: object, where: str, sub_agent: bool) -> None:
+    """Add the rows and their sub-agents. A row has the shape of `herdr-app ls` ("terminal") or,
+    for a sub-agent, possibly the shape of `herdr-core ls --json` ("address", "state")."""
+    if not isinstance(rows, list):
+        return
+    for row in rows:
+        if not isinstance(row, dict) or row.get("state", "live") != "live":
+            continue
+        key = row.get("terminal") or row.get("address")
+        status = _status(row.get("status"), sub_agent)
+        # The app shows a terminal that is also a sub-agent below its parent, so that entry wins.
+        if isinstance(key, str) and key and status and (sub_agent or key not in agents):
+            agents[key] = Agent(key, status, _text(row.get("name")), where, _text(row.get("app") or row.get("agent")))
+        _add_terminals(agents, row.get("sub_agents"), where, sub_agent=True)
+
+
+def parse_core(terminals: list, seen: dict[str, int] | None = None) -> list[Agent]:
+    """Convert the "terminals" list of `herdr-core ls --json` to sorted agents. Invalid rows are skipped.
+
+    The core does not know what the person saw: it says "done" where the app said "idle". `seen` has, for each
+    agent that the app showed as idle, the turn number of that moment: such an agent is idle until its next turn.
+    """
+    live = [row for row in terminals if isinstance(row, dict) and row.get("state") == "live"]
+    tabs: dict[str, set[str]] = {}
+    for row in live:
+        space, _, tab = _text(row.get("where")).partition(" / ")
+        tabs.setdefault(space, set()).add(tab)
+    agents = []
+    for row in live:
+        key = row.get("address")
+        status = _status(row.get("status"), sub_agent=bool(row.get("parent")))
+        if not (isinstance(key, str) and key and status):
+            continue
+        if status == "done" and seen and key in seen and row.get("turn") == seen[key]:
+            status = "idle"
+        # As the app: the name of the tab only when its space has more tabs.
+        where = _text(row.get("where"))
+        space = where.partition(" / ")[0]
+        agents.append(Agent(key, status, _text(row.get("name")), where if len(tabs[space]) > 1 else space,
+                            _text(row.get("agent"))))
+    return _sorted(agents)
+
+
+def seen_turns(terminals: list, idle: frozenset[str]) -> dict[str, int]:
+    """The turn number of each "done" row of the core whose agent is in `idle` (the app showed it as idle)."""
+    return {
+        row["address"]: row["turn"]
+        for row in terminals
+        if isinstance(row, dict) and row.get("status") == "done" and row.get("address") in idle
+        and isinstance(row.get("turn"), int)
+    }
+
+
+def count_states(agents: list[Agent]) -> dict[str, int]:
+    counts = dict.fromkeys(STATES, 0)
+    for agent in agents:
+        counts[agent.status] += 1
+    return counts
+
+
+def top_state(online: bool, counts: dict[str, int]) -> str:
+    """The state that the border and the tray dot show: "offline", "none", or the first of PRIORITY with an agent."""
+    if not online:
+        return "offline"
+    return next((state for state in PRIORITY if counts[state] > 0), "none")

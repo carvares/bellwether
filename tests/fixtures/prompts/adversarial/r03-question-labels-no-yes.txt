@@ -1,0 +1,50 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+❯ ask me
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ Choice
+
+Do you want to proceed?
+
+❯ 1. No
+     Stop here.
+  2. Yes, and always allow access to /
+     Go on.
+  3. Yes, and switch to auto mode
+     Go on fast.
+  4. Type something.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

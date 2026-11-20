@@ -1,0 +1,50 @@
+ https://example.com/made-up-14
+ https://example.com/made-up-15
+ https://example.com/made-up-16
+ https://example.com/made-up-17
+ https://example.com/made-up-18
+ https://example.com/made-up-19
+ https://example.com/made-up-20
+ https://example.com/made-up-21
+ https://example.com/made-up-22
+ https://example.com/made-up-23
+ https://example.com/made-up-24
+ https://example.com/made-up-25
+ https://example.com/made-up-26
+ https://example.com/made-up-27
+ https://example.com/made-up-28
+ https://example.com/made-up-29
+ https://example.com/made-up-30
+ https://example.com/made-up-31
+ https://example.com/made-up-32
+ https://example.com/made-up-33
+ https://example.com/made-up-34
+ https://example.com/made-up-35
+ https://example.com/made-up-36
+ https://example.com/made-up-37
+ https://example.com/made-up-38
+ https://example.com/made-up-39
+ https://example.com/made-up-40
+ https://example.com/made-up-41
+ https://example.com/made-up-42
+ https://example.com/made-up-43
+ https://example.com/made-up-44
+ https://example.com/made-up-45
+ https://example.com/made-up-46
+ https://example.com/made-up-47
+ https://example.com/made-up-48
+ https://example.com/made-up-49
+ https://example.com/made-up-50
+ https://example.com/made-up-51
+ https://example.com/made-up-52
+ https://example.com/made-up-53
+ https://example.com/made-up-54
+ https://example.com/made-up-55
+ https://example.com/made-up-56
+ https://example.com/made-up-57
+ https://example.com/made-up-58
+ https://example.com/made-up-59
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to allow Claude to fetch this content?
+ ❯ 1. Yes
+   2. No, and tell Claude what to do differently (esc)

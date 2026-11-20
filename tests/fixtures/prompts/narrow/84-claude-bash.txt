@@ -1,0 +1,30 @@
+
+ ▐▛███▛█   Claude Code v2.1.322
+▝▜██████▀  Test 1.1 with high effort · Sample Plans
+ ▝▝   ▝▝   ~/…/madeupproj/.madeupnotes/run/2000-01-01-madeupproj/t00f-test/work
+
+
+❯ Do exactly two things, in order, and nothing else. First: use the Bash tool to
+  run the command "touch made-up-empty-file.txt" and give the Bash tool exactly
+  this description: "Unconditionally create an empty made-up file in this folder".
+  Second: use the Edit tool to change the line "made-up line two" to "made-up line
+  2" in the file notes.txt. Do not read any other file.
+
+● Reading notes.txt
+  ⎿  notes.txt
+
+────────────────────────────────────────────────────────────────────────────────────
+ Bash command
+ Tip: auto mode handles these prompts for you — choose "switch to auto mode" below
+ Unconditionally create an empty made-up file in this folder
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ touch made-up-empty-file.txt
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and always allow access to /home/someuser/Workarea/Examples/madeupproj/.m
+      adeupnotes/run/2000-01-01-madeupproj/t00f-test/work from this project
+   3. Yes, and switch to auto mode · auto mode handles these prompts for you
+   4. No
+
+ Esc to cancel · Tab to amend

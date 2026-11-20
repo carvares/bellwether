@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Bellwether icon 5: prompt ring</title>
+  <desc>A reticle ring of four segments, one for each agent status, around a terminal prompt.</desc>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1a2028"/>
+      <stop offset="1" stop-color="#0c0f13"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="56" height="56" rx="13" fill="url(#tile)"/>
+  <rect x="4.75" y="4.75" width="54.5" height="54.5" rx="12.25" fill="none" stroke="#3a444e" stroke-width="1.5"/>
+  <!-- reticle ticks at the four gaps -->
+  <path d="M32 7.5V10.5M32 53.5V56.5M7.5 32H10.5M53.5 32H56.5" stroke="#5d6975" stroke-width="1.5" stroke-linecap="round"/>
+  <!-- ring: blocked top-left, done top-right, working bottom-right, idle bottom-left -->
+  <g fill="none" stroke-width="5" stroke-dasharray="24.5 94.88">
+    <circle cx="32" cy="32" r="19" stroke="#f28b82" transform="rotate(188 32 32)"/>
+    <circle cx="32" cy="32" r="19" stroke="#fdd663" transform="rotate(278 32 32)"/>
+    <circle cx="32" cy="32" r="19" stroke="#8ab4f8" transform="rotate(8 32 32)"/>
+    <circle cx="32" cy="32" r="19" stroke="#81c995" transform="rotate(98 32 32)"/>
+  </g>
+  <!-- prompt -->
+  <path d="M24.5 25L32 32L24.5 39M34.5 39.5H41.5" fill="none" stroke="#e3e9ee" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22">
+  <title>Bellwether tray icon 2: circuit ram</title>
+  <g fill="none" stroke="#8ab4f8" stroke-width="2" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M8.5 7.5L7 4.5H4L1.5 7V11.5L3.5 13.5H5"/>
+    <path d="M13.5 7.5L15 4.5H18L20.5 7V11.5L18.5 13.5H17"/>
+  </g>
+  <path d="M8.2 7H13.8L14.4 12.5L11 19L7.6 12.5Z" fill="#8ab4f8"/>
+</svg>

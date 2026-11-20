@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Bellwether icon 2: circuit ram</title>
+  <desc>A ram head seen from the front, built from circuit traces: two angular horn spirals that end in pads, and a terminal prompt as the face.</desc>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1a2028"/>
+      <stop offset="1" stop-color="#0c0f13"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="56" height="56" rx="13" fill="url(#tile)"/>
+  <rect x="4.75" y="4.75" width="54.5" height="54.5" rx="12.25" fill="none" stroke="#3a444e" stroke-width="1.5"/>
+  <!-- chin trace to a via -->
+  <path d="M32 48V52.5" stroke="#5d6975" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="32" cy="54.6" r="1.9" fill="none" stroke="#5d6975" stroke-width="1.5"/>
+  <!-- horns -->
+  <g fill="none" stroke="#8ab4f8" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M26 25L22 18H14L8 24V33L12 37H16L19 34V29H14.5"/>
+    <path d="M38 25L42 18H50L56 24V33L52 37H48L45 34V29H49.5"/>
+  </g>
+  <circle cx="14" cy="29" r="2.6" fill="#8ab4f8"/>
+  <circle cx="50" cy="29" r="2.6" fill="#8ab4f8"/>
+  <!-- head -->
+  <path d="M26 25H38L40 37L32 48L24 37Z" fill="#1c232b" stroke="#e3e9ee" stroke-width="2.5" stroke-linejoin="round"/>
+  <!-- prompt -->
+  <path d="M28.6 30L31.6 33L28.6 36M33.2 36.4H36.2" fill="none" stroke="#fdd663" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

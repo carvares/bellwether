@@ -1,0 +1,19 @@
+
+● Bash(made-up)
+  ⎿  $ made-up
+
+────────────────────────────────────────────────────────────────────────────────────────
+ Edit file
+ Tip: auto mode handles these prompts for you — choose "switch to auto mode" below
+ /etc/made-up/sudoers.d/made-up-file
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ 1  a
+ 2 -b
+ 2 +c
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to make this edit to made-up-file?
+ ❯ 1. Yes
+   2. Yes, and switch to accept edits (auto-approve) for this session (shift+tab)
+   3. No
+
+ Esc to cancel · Tab to amend

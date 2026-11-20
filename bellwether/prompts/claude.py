@@ -1,0 +1,297 @@
+"""The dialogs of Claude Code (measured with version 2.1.322): a permission dialog (Bash, Edit, Create, Fetch), a
+question of the AskUserQuestion tool (one question, or one tab of many), the review tab, and the plan approval.
+
+Where the agent can write: the text above the dialog, the detail (always behind one space or a line number), the
+question and the labels. A rule of the frame starts at the first column, so the detail cannot draw one. The
+check-box question (many answers) has a "Submit" row with no number: it is not read.
+"""
+from __future__ import annotations
+
+import re
+
+from . import ACCEPT, DECLINE, OTHER, TEXT, Option, Prompt, lines_of, numbered
+
+APP = "claude-code"
+RULE, DASH = "─", "╌"
+# The hint of a permission dialog. "Tab to amend" is not there while the cursor is on an option that cannot be
+# amended (measured: options 2 and 3 of a Bash dialog).
+PERMISSION_HINTS = (" Esc to cancel · Tab to amend", " Esc to cancel")
+TEXT_LABEL = "Type something."
+CHAT_LABEL = "Chat about this"
+PLAN_TEXT_LABEL = "Tell Claude what to change"
+_NUMBER = r"(?P<cursor>❯| ) (?P<key>\d+)\. (?P<label>\S.*)$"
+_PERMISSION_OPTION, _PERMISSION_MORE = re.compile(" " + _NUMBER), re.compile(r" {6}\S")
+_QUESTION_OPTION, _QUESTION_MORE = re.compile(_NUMBER), re.compile(r" {5}\S")
+_PLAN_OPTION, _PLAN_MORE = re.compile("   " + _NUMBER), re.compile(r" {8}\S")
+_ONE_HEADER = re.compile(r" ☐ (?P<title>\S.*)$")
+_TABS_HEADER = re.compile(r"←  (?P<tabs>\S.*\S)  ✔ Submit  →$")
+_TAB = re.compile(r"[☐☒] (?P<name>\S.*)$")
+_CHECK_BOX = re.compile(r"\[.\] ")
+_FOOTER = re.compile(r"─{20,}(?: [^─]{1,80} ─+)?$")
+_YES, _NO = re.compile(r"Yes\b"), re.compile(r"No\b")
+
+
+def _effect(label: str) -> str:
+    """The effect of an option of a permission or a plan: "Yes…" accepts, "No…" declines. "" for any other label:
+    the prompt is then not read."""
+    return ACCEPT if _YES.match(label) else DECLINE if _NO.match(label) else ""
+
+
+def _line(line: str, char: str, indent: int = 0) -> bool:
+    """True for a line of the frame: `indent` spaces, then only `char`."""
+    body = line[indent:]
+    return line[:indent] == " " * indent and len(body) >= 20 and set(body) == {char}
+
+
+def _rows(lines: list[str], start: re.Pattern, more: re.Pattern) -> list[dict] | None:
+    """The option lines: {key, label, extra lines, cursor}. None when a line is not a line of an option, when the
+    numbers are not 1, 2, … in sequence, or when the cursor is not on exactly one option."""
+    rows: list[dict] = []
+    for line in lines:
+        match = start.match(line)
+        if match:
+            rows.append({"key": match["key"], "label": match["label"], "first": line, "extra": [],
+                         "cursor": match["cursor"] == "❯"})
+        elif rows and more.match(line):
+            rows[-1]["extra"].append(line)
+        else:
+            return None
+    if [row["key"] for row in rows] != [str(n + 1) for n in range(len(rows))]:
+        return None
+    return rows
+
+
+def _cursor(rows: list[dict]) -> str | None:
+    marked = [row["key"] for row in rows if row["cursor"]]
+    return marked[0] if len(marked) == 1 else None
+
+
+def _wraps(first: str, second: str, width: int) -> bool:
+    """The line `second` goes on from `first` on a screen of `width` columns: `first` is full (a word was cut), or
+    the first word of `second` had no room at its end (measured on 80 and 50 columns: Claude Code wraps a text at a
+    space, and cuts a word that is longer than a line)."""
+    words = second.split()
+    return bool(words) and (len(first) >= width or len(first) + 1 + len(words[0]) > width)
+
+
+def _joined(row: dict, width: int = 0) -> str:
+    """The label of an option with the lines below it. A line that is full was cut inside a word: no space."""
+    text, last = row["label"], row["first"]
+    for line in row["extra"]:
+        text += ("" if width and len(last) >= width else " ") + line.strip()
+        last = line
+    return text
+
+
+def _stripped(lines: list[str]) -> list[str]:
+    """The lines with no empty lines before the first text and after the last text."""
+    first = next((place for place, line in enumerate(lines) if line), len(lines))
+    last = next((place for place in range(len(lines), 0, -1) if lines[place - 1]), 0)
+    return lines[first:last]
+
+
+def _above(lines: list[str], place: int, char: str, indent: int = 0) -> int:
+    """The place of the nearest frame line of `char` above `place`. -1 when there is none."""
+    return next((at for at in range(place - 1, -1, -1) if _line(lines[at], char, indent)), -1)
+
+
+def _top_rule(lines: list[str], place: int) -> bool:
+    """The rule at `place` can be the first line of a whole dialog: Claude Code draws an empty line above it, and
+    above that a line of its own at the first column ("●", "❯", "✻", …) shows. The detail of a cut dialog is behind a
+    space and can have empty lines, so a text line right above the rule, no line at all, or no line at the first
+    column above it: it cannot."""
+    return (place >= 2 and lines[place - 1] == ""
+            and any(line and not line.startswith(" ") for line in lines[:place - 1]))
+
+
+def _headers(lines: list[str], end: int) -> int:
+    """How many lines above `end` look like the top of a question dialog: a rule, and a header below it."""
+    return sum(1 for at in range(end - 1) if _line(lines[at], RULE)
+               and (_ONE_HEADER.match(lines[at + 1]) or _TABS_HEADER.match(lines[at + 1])))
+
+
+def read(text: str) -> Prompt | None:
+    lines = lines_of(text)
+    # A session with a name (after the plan view) has one rule with that name on the last line of the screen, below
+    # the dialog and some empty lines. Only that: the input box of a screen with no dialog has text below its rule.
+    if len(lines) > 2 and _FOOTER.match(lines[-1]) and not lines[-2]:
+        lines = lines_of("\n".join(lines[:-1]))
+    if len(lines) < 4:
+        return None
+    for reader in (_permission, _question, _review, _plan):
+        prompt = reader(lines)
+        if prompt is not None and numbered(list(prompt.options)):
+            return prompt
+    return None
+
+
+def _permission(lines: list[str]) -> Prompt | None:
+    end = len(lines)
+    hint = lines[-1] in PERMISSION_HINTS
+    if hint:
+        if lines[-2] != "":
+            return None
+        end -= 2
+    bottom = _above(lines, end, DASH)
+    block = lines[bottom + 1:end]
+    first = next((place for place, line in enumerate(block) if _PERMISSION_OPTION.match(line)), 0)
+    question = block[:first]
+    rows = _rows(block[first:], _PERMISSION_OPTION, _PERMISSION_MORE)
+    if bottom < 0 or not question or not rows or len(rows) < 2 or _cursor(rows) is None:
+        return None
+    if not all(re.match(r" \S", line) for line in question) or not question[-1].endswith("?"):
+        return None
+    width = len(lines[bottom])  # a dashed line is as wide as the screen
+    options = tuple(Option(row["key"], _joined(row, width), effect=_effect(_joined(row, width))) for row in rows)
+    dashes = sum(_line(line, DASH) for line in lines)
+    top = _above(lines, bottom, DASH)
+    detail = lines[top + 1:bottom]
+    if any(line and not line.startswith(" ") for line in detail) or not _stripped(detail):
+        return None
+    title, subtitle, cut = "", "", True
+    header = []
+    if top >= 0:
+        place = top - 1
+        while place >= 0 and re.match(r" \S", lines[place]):
+            header.insert(0, lines[place])
+            place -= 1
+        if place >= 0:
+            # The whole dialog is on the screen: a rule, the title lines, and the two dashed lines of the detail.
+            if not _line(lines[place], RULE) or not _top_rule(lines, place) or not 1 <= len(header) <= 6:
+                return None
+            # The lines below the title, each as the screen shows it: a "Tip:" of the program, the purpose of a
+            # command, a file name. None is left out, and none is joined to an other: the agent writes the purpose,
+            # so a line that looks like the tip may be its own text, and on a narrow screen a line can wrap.
+            title, cut = header[0].strip(), False
+            subtitle = "\n".join(line[1:] for line in header[1:])
+    # A dashed line that is not of this frame: the screen is not what this reader knows.
+    if dashes != (1 if top < 0 else 2):
+        return None
+    # Only the Fetch dialog has no hint line: the Escape key is then in the label of its last option.
+    if not hint and not (title.startswith("Fetch") and options[-1].label.endswith("(esc)")):
+        return None
+    return Prompt(APP, "permission", title, " ".join(line.strip() for line in question), options, _cursor(rows),
+                  subtitle=subtitle, detail=tuple(_stripped(detail)), cut=cut, blind=cut)
+
+
+def _question(lines: list[str]) -> Prompt | None:
+    hint = lines[-1]
+    if not (hint.startswith("Enter to select · ") and hint.endswith(" · Esc to cancel")) or lines[-2] != "":
+        return None
+    inner = len(lines) - 4
+    top = _above(lines, inner, RULE)
+    if inner < 0 or not _line(lines[inner], RULE) or top < 0 or inner - top < 6:
+        return None
+    # The text of a question can draw a rule and a header: with two tops, the reader cannot tell the real one.
+    if _headers(lines, inner) != 1:
+        return None
+    one, tabs = _ONE_HEADER.match(lines[top + 1]), _TABS_HEADER.match(lines[top + 1])
+    if one:
+        title = one["title"]
+    elif tabs:
+        names = [_TAB.match(tab) for tab in tabs["tabs"].split("  ")]
+        if not all(names):
+            return None
+        title = " · ".join(name["name"] for name in names)
+    else:
+        return None
+    body = lines[top + 2:inner]
+    if body[0] != "":
+        return None
+    gap = body.index("", 1) if "" in body[1:] else 0
+    question, block = body[1:gap], body[gap + 1:]
+    if not question or any(not re.match(r"\S", line) or _QUESTION_OPTION.match(line) for line in question):
+        return None
+    # A question of more than one line has a bar in front of each line (measured on 50 columns).
+    if len(question) > 1 and all(line.startswith("│ ") for line in question):
+        question = [line[2:] for line in question]
+    width = len(lines[top])  # the rule is as wide as the screen
+    rows = _rows([*block, lines[-3]], _QUESTION_OPTION, _QUESTION_MORE)
+    if not rows or len(rows) < 3 or _cursor(rows) is None:
+        return None
+    chat, entry = rows[-1], rows[-2]
+    if chat["label"] != CHAT_LABEL or chat["extra"] or not _QUESTION_OPTION.match(lines[-3]):
+        return None
+    # The option before the rule is the text entry. With a text typed in it, its label is that text: not read.
+    if entry["label"] != TEXT_LABEL or entry["extra"] or ("ctrl+g to edit" in hint and not entry["cursor"]):
+        return None
+    options = []
+    for row in rows[:-2]:
+        if _CHECK_BOX.match(row["label"]):
+            return None  # check boxes: a digit does not answer, it changes one box
+        # The lines below a label are its description. A label that is too long for one line goes on in such a
+        # line too, with the same indent: a line goes on from the line before when its first word had no room
+        # there (`_wraps`). The first line that does not is the start of the description.
+        label, last, extra = row["label"], row["first"], list(row["extra"])
+        while extra and _wraps(last, extra[0], width):
+            last = extra.pop(0)
+            label += " " + last.strip()
+        options.append(Option(row["key"], label, " ".join(line.strip() for line in extra), effect=OTHER))
+    # "Chat about this" ends the question with no answer.
+    options += [Option(entry["key"], TEXT_LABEL, kind=TEXT, effect=OTHER),
+                Option(chat["key"], CHAT_LABEL, kind=OTHER, effect=DECLINE)]
+    return Prompt(APP, "question", title, " ".join(question), tuple(options), _cursor(rows))
+
+
+def _review(lines: list[str]) -> Prompt | None:
+    if len(lines) < 10 or lines[-5:-2] != ["", "Ready to submit your answers?", ""]:
+        return None
+    rows = _rows(lines[-2:], _QUESTION_OPTION, _QUESTION_MORE)
+    top = _above(lines, len(lines) - 5, RULE)
+    if not rows or [row["label"] for row in rows] != ["Submit answers", "Cancel"] or _cursor(rows) is None or top < 0:
+        return None
+    if not _TABS_HEADER.match(lines[top + 1]) or lines[top + 2:top + 5] != ["", "Review your answers", ""]:
+        return None
+    if _headers(lines, len(lines) - 5) != 1:
+        return None
+    detail = lines[top + 5:-5]
+    if not detail or any(not line.startswith(" ") for line in detail):
+        return None
+    options = (Option("1", "Submit answers", effect=ACCEPT), Option("2", "Cancel", effect=DECLINE))
+    return Prompt(APP, "review", "Review your answers", "Ready to submit your answers?", options, _cursor(rows),
+                  detail=tuple(detail))
+
+
+def _plan(lines: list[str]) -> Prompt | None:
+    if not lines[-1].startswith("   ctrl+g to edit in ") or lines[-2] != "":
+        return None
+    low = _above(lines, len(lines) - 2, RULE, 2)
+    if low < 0 or len(lines) - low < 7 or lines[low + 2] != "":
+        return None
+    question = lines[low + 1]
+    if not re.match(r"   \S", question) or not question.endswith("Would you like to proceed?"):
+        return None
+    rows = _rows(lines[low + 3:-2], _PLAN_OPTION, _PLAN_MORE)
+    if not rows or len(rows) < 2 or _cursor(rows) is None or rows[-1]["label"] != PLAN_TEXT_LABEL:
+        return None
+    options = [Option(row["key"], row["label"], " ".join(line.strip() for line in row["extra"]),
+                      effect=_effect(row["label"])) for row in rows]
+    last = options[-1]
+    # The text entry sends the plan back with the text: the plan does not start.
+    options[-1] = Option(last.key, last.label, last.description, TEXT, DECLINE)
+    above = lines[:low]
+    while above and not above[-1]:
+        above.pop()
+    dashes = [place for place, line in enumerate(above) if _line(line, DASH, 2)]
+    top = _above(above, len(above), RULE, 2)
+    title, subtitle, cut = "", "", True
+    if top >= 0:
+        # The whole dialog is on the screen: the rule, the two title lines, and the plan between two dashed lines.
+        if above[top + 1:top + 4] != ["   Ready to code?", "", "   Here is Claude's plan:"] or not _top_rule(above, top):
+            return None
+        if dashes != [top + 4, len(above) - 1]:
+            return None
+        title, subtitle, cut = "Ready to code?", "Here is Claude's plan:", False
+        detail = above[top + 5:-1]
+    else:
+        # The plan is taller than the screen: what is on the screen above the question is the plan, each line
+        # behind the three spaces of the plan.
+        if len(dashes) > 1 or (dashes and dashes != [len(above) - 1]):
+            return None
+        detail = above[:-1] if dashes else above
+        if any(line and not line.startswith("   ") for line in detail):
+            return None
+    if not _stripped(detail):
+        return None
+    return Prompt(APP, "plan", title, question.strip(), tuple(options), _cursor(rows), subtitle=subtitle,
+                  detail=tuple(_stripped(detail)), cut=cut, blind=cut)
