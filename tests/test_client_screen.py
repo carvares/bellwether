@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import subprocess
+import sys
 import threading
 import time
 from types import SimpleNamespace
@@ -501,6 +502,7 @@ def test_a_watched_text_that_herdr_refuses_has_the_error_kind():
     assert client.send_text("t1", "text", cancel=threading.Event()) == Failure("herdr_not_found")
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="a POSIX shell script as herdr-core")
 def test_a_real_process_is_killed_and_gone_when_the_call_returns(tmp_path):
     """With a real child process (a shell script in the place of herdr-core, not herdr-core): the cancel kills it,
     and the call returns after it ended."""
@@ -589,6 +591,7 @@ def test_a_key_command_with_no_listener_runs_on_too():
     process.end(0)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="a POSIX shell script as herdr-core")
 def test_a_real_key_process_lives_past_the_deadline_and_is_reaped(tmp_path, monkeypatch):
     """With a real child process (a shell script in the place of herdr-core): the call returns at the deadline, the
     process runs on, and its end is told."""

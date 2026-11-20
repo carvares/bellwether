@@ -117,6 +117,7 @@ def test_a_system_with_no_module_is_a_clear_import_error(name):
     assert str(failure.value) == f"bellwether does not run on this system ({name!r}): it runs on linux, darwin, win32"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="select takes no pipe on Windows: tests/test_windows.py")
 def test_the_wait_of_the_posix_systems_sees_data_and_the_end_of_a_pipe():
     import os
     from bellwether.platform import posix
@@ -241,7 +242,8 @@ def test_no_module_outside_the_package_has_system_specific_code():
     found = []
     for path in modules:
         name = str(path.relative_to(SOURCE))
-        found += [f"{name}: {item}" for item in system_specific(path.read_text()) if item not in EXCEPTIONS.get(name, ())]
+        found += [f"{name}: {item}" for item in system_specific(path.read_text(encoding="utf-8"))
+                  if item not in EXCEPTIONS.get(name, ())]
     assert found == []
 
 
@@ -285,7 +287,8 @@ def test_the_scan_finds_each_way_to_write_a_system_test(source, found):
 
 def test_the_scan_finds_each_forbidden_text():
     """The check of the test above works on real code: the Linux module has its system code, where it belongs."""
-    found = system_specific((PACKAGE / "linux.py").read_text() + (PACKAGE / "posix.py").read_text())
+    found = system_specific(
+        (PACKAGE / "linux.py").read_text(encoding="utf-8") + (PACKAGE / "posix.py").read_text(encoding="utf-8"))
     assert {"import fcntl", "import ctypes"} <= set(found)
     assert [word for word in FORBIDDEN_TEXTS if word not in found] == []
 

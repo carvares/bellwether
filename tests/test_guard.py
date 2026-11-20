@@ -11,6 +11,9 @@ import pytest
 
 from bellwether.platform import guard, macos
 
+# The watcher is the way of macOS (POSIX signals, getppid); Windows ends the event child with a job object.
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="the watcher is not used on Windows")
+
 ROOT = Path(__file__).parent.parent
 # A made-up event child: it writes its pid and one line, then nothing for 60 s (a child that writes would end by
 # itself at its next write into a pipe with no reader: the watcher must end a quiet one too).

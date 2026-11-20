@@ -154,6 +154,34 @@ def checks(facts: dict, system: str | None = None) -> list[tuple[str, str, objec
                   native.get("app_active") is True, native.get("app_active"), soft=True)
             check(f"the {name} window is the key window (no input of a person here)", native.get("key") is True,
                   native.get("key"), soft=True)
+    if system == "win32":
+        native = facts.get("native", {})
+        check("Qt uses its windows plugin", facts.get("qt_platform") == "windows", facts.get("qt_platform"))
+        check("the panel takes no activation (WS_EX_NOACTIVATE)", native.get("no_activate") is True,
+              native.get("ex_style_names"))
+        check("the panel has no taskbar button (WS_EX_TOOLWINDOW)", native.get("tool_window") is True,
+              native.get("ex_style_names"))
+        check("the panel is topmost", native.get("topmost") is True, native.get("ex_style_names"))
+        check("the panel is not the foreground window", native.get("foreground") is False, native.get("foreground"))
+        check("no window of the program was in front while only the panel showed (the panel and the start take no "
+              "focus)", native.get("foreground_of_this_program") is False, native.get("foreground_of_this_program"))
+        check("Qt gave the panel all its styles (the program added none)", native.get("added_by_program") == "",
+              native.get("added_by_program"), soft=True)
+        check("the panel is not active", panel.get("active") is False, panel.get("active"))
+        after = facts.get("panel_after_options", {}).get("native", {})
+        check("the panel is still visible and topmost after the options window opened",
+              after.get("visible") is True and after.get("topmost") is True, after)
+        # SetForegroundWindow: Windows gives the foreground to a process that got the last input (a click in the tray
+        # menu or on the panel). The self-test opens the windows with no input of a person: a refusal proves nothing.
+        for name, window in (("options", options), ("answer", answer)):
+            native = window.get("native", {})
+            check(f"the {name} window asked for the foreground",
+                  str(native.get("activation_asked", "")).startswith("SetForegroundWindow"),
+                  native.get("activation_asked"))
+            check(f"the {name} window has a taskbar button and takes the focus",
+                  native.get("tool_window") is False and native.get("no_activate") is False, native.get("ex_style_names"))
+            check(f"the {name} window is the foreground window (no input of a person here)",
+                  native.get("foreground") is True, native.get("foreground"), soft=True)
     return found
 
 

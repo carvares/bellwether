@@ -19,6 +19,10 @@ from bellwether.platform import windows
 
 on_windows = pytest.mark.skipif(sys.platform != "win32", reason="needs Windows")
 ROOT = Path(__file__).parent.parent
+# The Python of the tests that start real processes: the interpreter itself, not the launcher of the virtual
+# environment (on Windows it runs the interpreter as a child of its own, a process more in each tree). The code of
+# these processes needs only the standard library and the platform package (from the checkout).
+PYTHON = getattr(sys, "_base_executable", sys.executable)
 
 
 def records(caplog):
@@ -471,7 +475,7 @@ def test_on_windows_a_process_that_the_event_child_starts_does_not_end_with_the_
     grandchild = (f"import os, time; open({str(tmp_path / 'pid')!r}, 'w').write(str(os.getpid())); time.sleep(30)")
     child_code = (f"import subprocess, sys, time; subprocess.Popen([sys.executable, '-c', {grandchild!r}], "
                   f"creationflags=0x8); print('started', flush=True); time.sleep(60)")
-    parent = subprocess.Popen([sys.executable, "-c", textwrap.dedent(f"""
+    parent = subprocess.Popen([PYTHON, "-c", textwrap.dedent(f"""
         import sys, time
         from bellwether.platform import windows
         process = windows.spawn_child([sys.executable, "-c", {child_code!r}])
@@ -502,7 +506,7 @@ def test_on_windows_a_killed_parent_leaves_no_event_child():
     """The parent uses spawn_child of the Windows module; it is killed (TerminateProcess: no clean-up of its own).
     The system closes the job and ends the child."""
     child_code = "import os, time; print(os.getpid(), flush=True); time.sleep(60)"
-    parent = subprocess.Popen([sys.executable, "-c", textwrap.dedent(f"""
+    parent = subprocess.Popen([PYTHON, "-c", textwrap.dedent(f"""
         import sys, time
         from bellwether.platform import windows
         process = windows.spawn_child([sys.executable, "-c", {child_code!r}])
@@ -564,7 +568,7 @@ def test_on_windows_the_wait_sees_data_and_the_end_of_a_real_pipe():
 def test_on_windows_the_window_of_a_process_is_found_by_its_pid_and_its_program_has_a_name():
     api = windows.load_win32()
     assert api is not None and api.process_name(os.getpid()).lower().startswith("python")
-    shown = subprocess.Popen([sys.executable, "-c", "import tkinter; r = tkinter.Tk(); r.title('made-up'); "
+    shown = subprocess.Popen([PYTHON, "-c", "import tkinter; r = tkinter.Tk(); r.title('made-up'); "
                                                     "r.after(20000, r.destroy); r.mainloop()"])
     try:
         end, hwnd = time.monotonic() + 10, None

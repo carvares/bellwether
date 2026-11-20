@@ -1,4 +1,5 @@
-# The Windows start script keeps its Windows line ends; the shell scripts keep theirs on every checkout.
+# The Windows scripts keep their Windows line ends and the shell scripts theirs, on every checkout.
 *.cmd text eol=crlf
 *.sh text eol=lf
-scripts/ci/fake-herdr/* text eol=lf
+scripts/ci/fake-herdr/herdr-app text eol=lf
+scripts/ci/fake-herdr/herdr-core text eol=lf

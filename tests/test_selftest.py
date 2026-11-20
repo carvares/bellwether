@@ -152,3 +152,40 @@ def test_pictures_only_on_a_ci_runner_and_the_home_folder_is_never_written(monke
     assert module.shot_command("linux", tmp_path / "a.png") is None
     command = module.shot_command("win32", Path("C:/made-up/it's.png")) if module.shutil.which("powershell") else None
     assert command is None or "'C:/made-up/it''s.png'" in command[-1]
+
+
+def windows_facts(foreground_of_program=False, added=""):
+    """Facts as the Windows module gives them (made-up agents): the panel of Qt 6.12 with its styles."""
+    panel = {"no_activate": True, "tool_window": True, "topmost": True, "foreground": False, "visible": True,
+             "foreground_of_this_program": foreground_of_program, "added_by_program": added,
+             "ex_style_names": ["WS_EX_TOPMOST", "WS_EX_TOOLWINDOW", "WS_EX_NOACTIVATE"]}
+    window = {"no_activate": False, "tool_window": False, "foreground": False,
+              "activation_asked": "SetForegroundWindow refused", "ex_style_names": ["WS_EX_WINDOWEDGE"]}
+    return {"system": "win32", "qt_platform": "windows", "shell": "plain", "messages": [],
+            "panel": {"visible": True, "active": False, "frame": [1584, 16, 320, 192], "flag_names": [
+                "Tool", "FramelessWindowHint", "WindowStaysOnTopHint", "WindowDoesNotAcceptFocus"],
+                "screen": {"geometry": [0, 0, 1920, 1080], "available": [0, 0, 1920, 1040]}},
+            "native": panel, "layouts": {letter: {"shown": True, "visible": True} for letter in "ABCDE"},
+            "options": {"visible": True, "native": dict(window)},
+            "answer": {"visible": True, "prompt": "ready", "native": dict(window)},
+            "panel_after_options": {"native": {"visible": True, "topmost": True}},
+            "tray": {"available": True, "visible": True, "items": 1}}
+
+
+def test_the_checks_of_the_windows_runner():
+    module = ci_module()
+
+    def by(facts):
+        return {status: [n for s, n, _ in module.checks(facts, "win32") if s == status] for status in ("FAIL", "WARN")}
+
+    assert by(windows_facts()) == {"FAIL": [], "WARN": ["the options window is the foreground window (no input of a "
+                                                        "person here)", "the answer window is the foreground window "
+                                                        "(no input of a person here)"]}
+    bad = windows_facts(foreground_of_program=True, added="WS_EX_NOACTIVATE")
+    bad["native"].update(no_activate=False, topmost=False)
+    bad["options"]["native"]["activation_asked"] = ""
+    assert by(bad)["FAIL"] == [
+        "the panel takes no activation (WS_EX_NOACTIVATE)", "the panel is topmost",
+        "no window of the program was in front while only the panel showed (the panel and the start take no focus)",
+        "the options window asked for the foreground"]
+    assert "Qt gave the panel all its styles (the program added none)" in by(bad)["WARN"]

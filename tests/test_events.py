@@ -1,6 +1,7 @@
 """The event source and the reads that it starts. No test runs the real herdr-core: the child is a pipe."""
 import logging
 import os
+import sys
 import threading
 import time
 
@@ -378,6 +379,7 @@ def test_an_error_in_the_thread_ends_it_with_the_stream_unhealthy_and_its_class_
     assert SECRET.decode() not in caplog.text
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals; Windows: tests/test_windows.py")
 def test_the_real_child_reads_no_input_and_ends_when_its_parent_is_killed(tmp_path):
     """The real start of a child, with a made-up program in the place of herdr-core."""
     import signal
