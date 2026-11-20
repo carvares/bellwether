@@ -15,7 +15,7 @@ from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 from . import platform
 from .answer import Answer
 from .backend import Backend
-from .client import HerdrClient, find_executables
+from .client import HerdrClient
 from .events import EventSource
 from .icons import Icons
 from .layouts import UI_PATH
@@ -99,7 +99,7 @@ def main() -> int:
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
 
-    app_path, core_path = find_executables()
+    app_path, core_path = platform.find_executables()
     # herdr-core tells of each change, so a change shows at once. Without herdr-core: one read each second.
     events = (lambda wake: EventSource([core_path, "events", "--json"], wake)) if core_path else None
     client = HerdrClient(app_path, core_path)

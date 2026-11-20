@@ -16,16 +16,14 @@ from __future__ import annotations
 import json
 import logging
 import re
-import shutil
 import subprocess
 import threading
 import time
 import unicodedata
 from dataclasses import dataclass, field
-from pathlib import Path
 
+from . import platform
 from .state import Agent, parse_app, parse_core, seen_turns
-from .window import raise_app_window
 
 log = logging.getLogger("bellwether")
 
@@ -169,13 +167,6 @@ def _title(value: object) -> str:
     return " ".join("".join(ch if ch.isprintable() else " " for ch in value[:4 * TITLE_LIMIT]).split())[:TITLE_LIMIT]
 
 
-def find_executables() -> tuple[str | None, str | None]:
-    """Return the paths of herdr-app and herdr-core. None means not found."""
-    local_core = Path.home() / ".local" / "bin" / "herdr-core"
-    core = shutil.which("herdr-core") or (str(local_core) if local_core.is_file() else None)
-    return shutil.which("herdr-app"), core
-
-
 def _run(argv: list[str], timeout: float = TIMEOUT) -> subprocess.CompletedProcess:
     return subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout)
 
@@ -186,16 +177,19 @@ def _spawn(argv: list[str]) -> subprocess.Popen:
 
 class HerdrClient:
     def __init__(self, app: str | None, core: str | None, run=_run, sleep=time.sleep, clock=time.monotonic,
-                 busctl: str = "busctl", systemd_run: str = "systemd-run", env: str = "env", spawn=_spawn) -> None:
+                 spawn=_spawn, **commands: str) -> None:
+        """`commands`: programs of the system in the place of the ones that the platform names (a test gives
+        fakes); a name that the platform does not use is an error."""
+        unknown = sorted(commands.keys() - platform.COMMANDS.keys())
+        if unknown:
+            raise TypeError(f"unknown commands: {', '.join(unknown)}")
         self._app = app
         self._core = core
         self._run = run
         self._spawn = spawn
         self._sleep = sleep
         self._clock = clock
-        self._busctl = busctl
-        self._systemd_run = systemd_run
-        self._env = env
+        self._commands = {**platform.COMMANDS, **commands}
         # The addresses of the last list of agents. A screen call takes no other address.
         self._known: frozenset[str] = frozenset()
         self._source: str | None = None  # "app", "core" or "none": where the last list came from
@@ -331,7 +325,7 @@ class HerdrClient:
             return self._failed(action, terminal, "not_this_terminal")
         argv = [self._core, *args]
         if no_caller:
-            argv = [self._env, *(part for name in _CALLER_VARIABLES for part in ("-u", name)), *argv]
+            argv = platform.clean_environment(argv, _CALLER_VARIABLES, self._commands)
         if lasting:
             done = self._lasting(argv, timeout, terminal, late)
         else:
@@ -460,21 +454,18 @@ class HerdrClient:
                 if gone is None or left() > 0:
                     raise
                 raise gone  # The time ended during one more try: the last answer of the app stands.
-        raised = raise_app_window(run, self._busctl)
+        raised = platform.raise_app(run, self._commands)
         log.info("jump agent=%s step=raise kwin=%s", key, raised)
-        # Without KWin, ask the app: plain `herdr-app` opens or raises its window. KWin is first because
-        # its result is known, and it does not depend on the focus rules of the desktop.
+        # Without the raise of the system, ask the app: plain `herdr-app` opens or raises its window. The raise of
+        # the system is first because its result is known, and it does not depend on the focus rules of the desktop.
         if not raised and self._launch(key, run) != 0:
             raise HerdrError("no_raise", "could not raise the window")
 
     def _launch(self, key: str, run) -> int | str:
-        """Run plain `herdr-app` as the desktop does: a unit of the user's systemd, with the environment of
-        the session and not of this process. The app does not end with the widget and has none of its files.
-        Return the exit code of the launcher (0: accepted), or the name of the error."""
+        """Start plain `herdr-app` outside the process tree of the widget, as the desktop does (see
+        `platform.start_app`). Return the exit code of the launcher (0: accepted), or the name of the error."""
         try:
-            code = run(
-                [self._systemd_run, "--user", "--quiet", "--collect", "--slice=app.slice", "--", self._app]
-            ).returncode
+            code = platform.start_app(run, self._app, self._commands)
         except (OSError, subprocess.SubprocessError) as exc:
             code = type(exc).__name__
         log.info("jump agent=%s step=launch exit=%s", key, code)

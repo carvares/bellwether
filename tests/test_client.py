@@ -7,7 +7,9 @@ from types import SimpleNamespace
 import pytest
 
 from bellwether import client as client_module
-from bellwether.client import HerdrClient, HerdrError, HerdrOffline, find_executables
+from bellwether.client import HerdrClient, HerdrError, HerdrOffline
+from bellwether.platform import linux
+from bellwether.platform.linux import find_executables
 from bellwether.state import Agent
 
 APP = "/fake/herdr-app"
@@ -312,6 +314,12 @@ def jump(key="t1", **desk_options):
     return client, desk
 
 
+def test_the_client_takes_only_the_commands_that_the_platform_names():
+    assert HerdrClient(APP, CORE, busctl=BUSCTL)._commands == {**linux.COMMANDS, "busctl": BUSCTL}
+    with pytest.raises(TypeError, match="unknown commands: bus_ctl"):
+        HerdrClient(APP, CORE, bus_ctl=BUSCTL)  # a misspelled fake must not leave the real program in its place
+
+
 def test_focus_with_a_visible_window_shows_the_agent_and_raises_the_window():
     client, desk = jump()
     client.focus_agent("t1")
@@ -490,7 +498,7 @@ def test_focus_asks_the_app_when_kwin_finds_no_window():
 
 def test_focus_fails_when_the_launcher_is_not_found():
     client, desk = jump(running=False)
-    client._systemd_run = "/fake/herdr-app-missing"
+    client._commands["systemd_run"] = "/fake/herdr-app-missing"
     desk_call = desk.__call__
 
     def run(argv, timeout=2.0):
@@ -604,14 +612,14 @@ def test_default_runner_uses_no_shell_and_a_timeout(monkeypatch):
 
 
 def test_find_executables(monkeypatch, tmp_path):
-    monkeypatch.setattr(client_module.Path, "home", lambda: tmp_path)
-    monkeypatch.setattr(client_module.shutil, "which", lambda name: None)
+    monkeypatch.setattr(linux.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(linux.shutil, "which", lambda name: None)
     assert find_executables() == (None, None)
     local = tmp_path / ".local" / "bin" / "herdr-core"
     local.parent.mkdir(parents=True)
     local.write_text("")
     assert find_executables() == (None, str(local))
-    monkeypatch.setattr(client_module.shutil, "which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr(linux.shutil, "which", lambda name: "/usr/bin/" + name)
     assert find_executables() == ("/usr/bin/herdr-app", "/usr/bin/herdr-core")
 
 
