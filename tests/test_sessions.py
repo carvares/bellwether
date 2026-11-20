@@ -7,6 +7,8 @@ import shutil
 import threading
 from types import SimpleNamespace
 
+from datetime import datetime, timezone
+
 import pytest
 
 from bellwether import sessions
@@ -837,3 +839,128 @@ def test_with_no_files_the_engine_asks_herdr_and_reads_no_file(watched):
     watched.clock.now += sessions.REFRESH
     watched.watch.step(AGENTS, files=False)
     assert watched.client.calls == ["t1", "t2"] and watched.machine.host.bytes_read == read
+
+
+# ----- Codex 0.170: the process has no rollout file open; it holds a lock file with the id of its thread -----
+
+THREAD_MS = 1_795_015_110_521  # the creation time that a thread id has in its first 12 hex digits
+
+
+def thread_id(ms=THREAD_MS, tail="7d93-9568-9950011f5d54"):
+    digits = f"{ms:012x}"
+    return f"{digits[:8]}-{digits[8:]}-{tail}"
+
+
+def thread_rollout(machine, records, thread, ms=THREAD_MS):
+    day = datetime.fromtimestamp(ms / 1000)
+    path = (machine.home / ".codex" / "sessions" / f"{day:%Y}" / f"{day:%m}" / f"{day:%d}"
+            / f"rollout-{day:%Y-%m-%dT%H-%M-%S}-{thread}.jsonl")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(records)
+    return path
+
+
+def lock_of(machine, thread):
+    return str(machine.home / ".codex" / "thread-writer-locks" / f"{thread}.lock")
+
+
+def thread_meta(source="user"):
+    return (b'{"timestamp":"2026-11-19T19:38:25.774Z","type":"session_meta","payload":{"id":"x","thread_source":"'
+            + source.encode() + b'","base_instructions":"' + MARKER.encode() + b'"}}\n')
+
+
+def config(machine, text):
+    (machine.home / ".codex").mkdir(exist_ok=True)
+    (machine.home / ".codex" / "config.toml").write_text(text)
+
+
+def arguments(machine, pid, *words):
+    (machine.proc / str(pid) / "cmdline").write_bytes(b"".join(word.encode() + b"\0" for word in words))
+
+
+def test_the_model_of_a_codex_session_from_the_rollout_file_of_the_thread_that_the_process_locks(machine):
+    thread = thread_id()
+    path = thread_rollout(machine, thread_meta() + turn("gpt-5.2-codex") + user() + turn("gpt-5.6-terra"), thread)
+    machine.process(900, files=["/dev/null", lock_of(machine, thread)])
+    facts = read_codex(machine.host, [900])
+    assert (facts.model, facts.reason, facts.pid) == ("gpt-5.6-terra", "ok", 900)
+    assert facts.started_ms == int(datetime(2026, 11, 19, 19, 38, 25, 774000, timezone.utc).timestamp() * 1000)
+    assert facts.mark.path == str(path)
+    assert MARKER not in repr(facts)
+
+
+def test_a_helper_thread_of_the_process_is_not_the_session(machine):
+    """Codex also locks the threads of its review helpers: only a thread of the user counts."""
+    mine, helper = thread_id(), thread_id(THREAD_MS + 5, "7fb2-ad05-f7e930c0ae87")
+    thread_rollout(machine, thread_meta() + turn("gpt-5.6-terra"), mine)
+    thread_rollout(machine, thread_meta("guardian_review") + turn("codex-auto-review"), helper, THREAD_MS + 5)
+    machine.process(900, files=[lock_of(machine, helper), lock_of(machine, mine)])
+    assert read_codex(machine.host, [900]).model == "gpt-5.6-terra"
+
+
+def test_two_threads_of_the_user_in_one_process_give_no_model(machine):
+    first, second = thread_id(), thread_id(THREAD_MS + 5, "7fb2-ad05-f7e930c0ae87")
+    thread_rollout(machine, thread_meta() + turn("gpt-5.6-terra"), first)
+    thread_rollout(machine, thread_meta() + turn("gpt-5.2-codex"), second, THREAD_MS + 5)
+    machine.process(900, files=[lock_of(machine, first), lock_of(machine, second)])
+    assert read_codex(machine.host, [900]) == SessionFacts(reason="several_rollouts")
+
+
+def test_a_rollout_file_of_an_other_day_or_an_other_thread_is_not_taken(machine):
+    thread = thread_id()
+    thread_rollout(machine, thread_meta() + turn("gpt-5.2-codex"), thread_id(tail="0000-0000-000000000000"))
+    thread_rollout(machine, thread_meta() + turn("gpt-5.2-codex"), thread, THREAD_MS + 40 * 86_400_000)
+    machine.process(900, files=[lock_of(machine, thread)])
+    assert read_codex(machine.host, [900]).model is None
+
+
+@pytest.mark.parametrize("words, text, model, reason", [
+    (("codex", "--no-daemon"), 'model = "gpt-5.6-terra"\nmodel_reasoning_effort = "medium"\n', "gpt-5.6-terra", "config_default"),
+    (("codex",), 'other = 1\n', None, "no_session"),
+    (("codex",), 'model = 7\n', None, "no_session"),
+    (("codex",), 'model = "two words"\n', None, "no_session"),
+    (("codex",), 'broken [[[\n', None, "no_session"),
+    (("codex",), None, None, "no_session"),
+    # An argument can name an other model, a profile or a setting: the file does not say what runs then.
+    (("codex", "-m", "gpt-6-sol"), 'model = "gpt-5.6-terra"\n', None, "no_session"),
+    (("codex", "--model=gpt-6-sol"), 'model = "gpt-5.6-terra"\n', None, "no_session"),
+    (("codex", "-c", "model=x"), 'model = "gpt-5.6-terra"\n', None, "no_session"),
+    (("codex", "--profile", "work"), 'model = "gpt-5.6-terra"\n', None, "no_session"),
+    (("codex", "-p", "work"), 'model = "gpt-5.6-terra"\n', None, "no_session"),
+    (("codex", "--oss"), 'model = "gpt-5.6-terra"\n', None, "no_session"),
+    ((), 'model = "gpt-5.6-terra"\n', None, "no_session"),  # the arguments cannot be read
+])
+def test_a_codex_session_with_no_turn_yet_has_the_model_of_the_settings_file(machine, words, text, model, reason):
+    """Before the first turn Codex has written no rollout file: the model is the one of its settings file, when
+    no argument of the process can change it."""
+    thread = thread_id()
+    if text is not None:
+        config(machine, text)
+    machine.process(900, files=[lock_of(machine, thread)])
+    if words:
+        arguments(machine, 900, *words)
+    facts = read_codex(machine.host, [900])
+    assert (facts.model, facts.reason, facts.started_ms) == (model, reason, None)
+    assert facts.pid == (900 if model else 0)
+
+
+def test_the_lock_of_the_foreground_process_counts_before_those_of_its_children(machine):
+    mine, other = thread_id(), thread_id(THREAD_MS + 5, "7fb2-ad05-f7e930c0ae87")
+    thread_rollout(machine, thread_meta() + turn("gpt-5.6-terra"), mine)
+    thread_rollout(machine, thread_meta() + turn("gpt-5.2-codex"), other, THREAD_MS + 5)
+    machine.process(900, children=[901], files=[lock_of(machine, mine)])
+    machine.process(901, files=[lock_of(machine, other)])
+    machine.process(800, children=[900])
+    assert read_codex(machine.host, machine.host.family(900, 800)).model == "gpt-5.6-terra"
+    # A shell in front: the Codex processes below it both count, so the two threads give no model.
+    assert read_codex(machine.host, machine.host.family(800, 800)).reason == "several_rollouts"
+
+
+def test_a_lock_file_with_an_other_name_or_in_an_other_folder_is_not_a_thread(machine):
+    thread = thread_id()
+    thread_rollout(machine, thread_meta() + turn("gpt-5.6-terra"), thread)
+    config(machine, 'model = "gpt-5.6-terra"\n')
+    machine.process(900, files=[str(machine.home / ".codex" / "thread-writer-locks" / ".coordination.lock"),
+                                str(machine.home / "other" / f"{thread}.lock")])
+    arguments(machine, 900, "codex")
+    assert read_codex(machine.host, [900]) == SessionFacts(reason="no_session")

@@ -211,6 +211,14 @@ class Host:
             order += [child for child in self.children(order[at]) if child not in order]
             at += 1
 
+    def arguments(self, pid: int) -> list[str]:
+        """The words of the command line of the process. Empty when they cannot be read."""
+        try:
+            data = (self.proc / str(pid) / "cmdline").read_bytes()[:65536]
+        except OSError:
+            return []
+        return [word.decode(errors="replace") for word in data.split(b"\0") if word]
+
     def open_files(self, pid: int) -> list[str]:
         """The files that the process has open (the names only)."""
         found = []

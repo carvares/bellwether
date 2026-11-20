@@ -26,8 +26,9 @@ import re
 import stat
 import threading
 import time
+import tomllib
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -317,18 +318,80 @@ def _first_stamp(host: Host, path: Path) -> int | None:
     return _milliseconds(int(moment.timestamp() * 1000))
 
 
+# Codex 0.170 does not keep its rollout file open. It holds one lock file for each thread that it writes, with the
+# id of the thread as its name; the rollout file of a thread has that id at the end of its name.
+_THREAD_LOCK = re.compile(r"([0-9a-f]{8}-[0-9a-f]{4}(?:-[0-9a-f]{4}){2}-[0-9a-f]{12})\.lock")
+# A thread of the person (not one of a helper that Codex starts: a review, a sub-agent). In the first line.
+_USER_THREAD = re.compile(rb'"thread_source"\s*:\s*"user"')
+THREAD_HEAD = 4096
+# An argument of Codex that can give the session an other model than the one of the settings file.
+_MODEL_ARGUMENTS = ("-m", "--model", "-c", "--config", "-p", "--profile", "--oss", "--local-provider")
+
+
+def _thread_rollouts(host: Host, thread: str) -> list[Path]:
+    """The rollout files of the thread whose first line says that it is a thread of the person. The id of a
+    thread starts with its creation time, and Codex puts a rollout file in the folder of that day: only that
+    folder and the days beside it are looked at."""
+    try:
+        made = datetime.fromtimestamp(int(thread[:8] + thread[9:13], 16) / 1000)
+    except (ValueError, OverflowError, OSError):
+        return []
+    found = []
+    for day in (made, made - timedelta(days=1), made + timedelta(days=1)):
+        folder = host.home / ".codex" / "sessions" / f"{day:%Y}" / f"{day:%m}" / f"{day:%d}"
+        try:
+            names = sorted(name for name in os.listdir(folder) if name.endswith(f"-{thread}.jsonl"))
+        except OSError:
+            continue
+        for name in names:
+            head = _head(folder / name, THREAD_HEAD) if _ROLLOUT.fullmatch(name) else ""
+            if isinstance(head, bytes):
+                host.bytes_read += len(head)
+                if _USER_THREAD.search(head.split(b"\n", 1)[0]):
+                    found.append(folder / name)
+    return found
+
+
+def _codex_default(host: Host, pid: int) -> str | None:
+    """The model of the settings file of Codex, for a session that has no turn yet. None when an argument of the
+    process can name an other model, a profile or a setting, and when the file has no valid model."""
+    words = host.arguments(pid)
+    if not words or any(word.startswith(_MODEL_ARGUMENTS) for word in words[1:]):
+        return None
+    data = _head(host.home / ".codex" / "config.toml", SMALL_FILE + 1)
+    if isinstance(data, str) or len(data) > SMALL_FILE:
+        return None
+    try:
+        model = tomllib.loads(data.decode()).get("model")
+    except (ValueError, RecursionError):  # also a text that is not UTF-8
+        return None
+    return model if isinstance(model, str) and _MODEL.fullmatch(model) else None
+
+
 def read_codex(host: Host, pids, known: SessionFacts | None = None) -> SessionFacts:
-    """The facts of the rollout file that the processes of `pids` (the foreground process first) have open. The
-    rollout files of the foreground process count when it has one; else those of all the processes. Two or more
-    files → no facts ("several_rollouts"): one is never chosen."""
-    root = str(host.home / ".codex" / "sessions") + os.sep
-    found: dict[str, int] = {}  # each rollout file, and the first process that has it open
+    """The facts of the session of the processes of `pids` (the foreground process first): of the rollout file
+    that a process has open, or of the rollout file of the thread that it holds the lock of. The files of the
+    foreground process count when it has one; else those of all the processes. Two or more files → no facts
+    ("several_rollouts"): one is never chosen. A process that holds a thread lock and has no rollout file yet (no
+    turn was made) has the model of the settings file ("config_default")."""
+    sessions = str(host.home / ".codex" / "sessions") + os.sep
+    locks = str(host.home / ".codex" / "thread-writer-locks") + os.sep
+    found: dict[str, int] = {}  # each rollout file, and the first process that has it (open, or by a thread lock)
+    threads: dict[str, int] = {}  # each thread that a process holds the lock of, and the first such process
     for index, pid in enumerate(pids):
         for name in host.open_files(pid):
-            if name.startswith(root) and _ROLLOUT.fullmatch(os.path.basename(name)):
+            base = os.path.basename(name)
+            if name.startswith(sessions) and _ROLLOUT.fullmatch(base):
                 found.setdefault(name, pid)
-        if found and index == 0:
+            elif name.startswith(locks) and os.path.dirname(name) + os.sep == locks:
+                lock = _THREAD_LOCK.fullmatch(base)
+                if lock:
+                    threads.setdefault(lock.group(1), pid)
+        if (found or threads) and index == 0:
             break
+    for thread, pid in threads.items():
+        for path in _thread_rollouts(host, thread):
+            found.setdefault(str(path), pid)
     if len(found) > 1:
         return SessionFacts(reason="several_rollouts")
     for name, pid in found.items():
@@ -337,6 +400,11 @@ def read_codex(host: Host, pids, known: SessionFacts | None = None) -> SessionFa
         model, mark = last_model(host, path, b'"type":"turn_context"', _codex_model, mine)
         if mark is not None:
             return SessionFacts(model, _first_stamp(host, path), "ok" if model else "no_model", pid, mark)
+    for pid in dict.fromkeys(threads.values()):
+        model = _codex_default(host, pid)
+        if model:
+            return SessionFacts(model, None, "config_default", pid)
+        break  # only the first process that holds a lock
     return SessionFacts(reason="no_session")
 
 
