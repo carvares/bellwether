@@ -98,7 +98,7 @@ QtObject {
     // A list shows this many rows at the most. A longer group scrolls. rowsFor() is the one place that
     // applies it. Read-only: a skin cannot change it (a test makes a controller with a different cap through an
     // initial property). It is rowLimit (8), or less when 8 rows make the panel taller than its screen at a
-    // large scale: rowRoom is the number of rows that fit. Only the window writes rowRoom (fitRows in Main.qml).
+    // large scale: rowRoom is the number of rows that fit. Only the window writes rowRoom (fitRows in PanelShell.qml).
     readonly property int rowLimit: 8
     property int rowRoom: rowLimit
     readonly property int maxAgentRows: Math.max(1, Math.min(rowLimit, rowRoom))

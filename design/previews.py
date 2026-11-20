@@ -1,5 +1,5 @@
 """Makes the pictures of the options window, bellwether/ui/previews/<letter>.png, from the REAL skins: the real
-Main.qml with each built layout, closed, with the made-up counts blocked 1, done 2, working 3, idle 4, on a dark
+panel (shells/Layer.qml) with each built layout, closed, with the made-up counts blocked 1, done 2, working 3, idle 4, on a dark
 background, cropped to the panel, 360 px wide (shown 180 px wide, so it is sharp at scale 2 too).
 
 Off screen only: no window opens on the desktop. Run from the repository root:  uv run python design/previews.py
@@ -20,7 +20,7 @@ from PySide6.QtQml import QQmlApplicationEngine  # noqa: E402
 from PySide6.QtQuick import QQuickWindow  # noqa: E402,F401
 
 from bellwether import layouts  # noqa: E402
-from bellwether.__main__ import IMPORT_PATH  # noqa: E402
+from bellwether.platform.linux import IMPORT_PATH  # noqa: E402
 from bellwether.backend import Backend  # noqa: E402
 from bellwether.state import Agent  # noqa: E402
 
@@ -46,7 +46,7 @@ def panel(letter: str, folder: Path) -> QImage:
     engine.warnings.connect(lambda ws: R.warnings.extend(w.toString() for w in ws))
     engine.rootContext().setContextProperty("backend", backend)
     engine.addImportPath(str(IMPORT_PATH))
-    engine.load(layouts.UI_PATH / "Main.qml")
+    engine.load(layouts.UI_PATH / "shells" / "Layer.qml")
     root = engine.rootObjects()[0]
     backend.apply([Agent(f"{state[0]}{n}", state, f"agent {n}", "Main") for state, count in COUNTS.items() for n in range(count)])
     settle()

@@ -1,4 +1,4 @@
-"""The model and session-time line of the agent rows, in every layout: the real Main.qml, a real backend, and
+"""The model and session-time line of the agent rows, in every layout: the real panel, a real backend, and
 made-up facts in the place of the reader of sessions."""
 import pytest
 from PySide6.QtCore import QRectF

@@ -1,4 +1,4 @@
-"""The "Answer" control of a blocked agent row, in every layout: the real Main.qml, the real backend, a fake client
+"""The "Answer" control of a blocked agent row, in every layout: the real panel (the layer shell), the real backend, a fake client
 and real pointer events. A click on it opens the prompt of that agent and asks for the answer window; the rest of
 the row still jumps. Screens are the made-up fixtures of the readers."""
 import threading
@@ -20,7 +20,7 @@ from bellwether.icons import Icons
 from bellwether.state import Agent
 from tests.audit import text_findings
 from tests.test_backend_prompt import ScreenClient, wait_for
-from tests.test_qml import LAYERSHELL_QMLDIR, OFFSCREEN_NOTE, click, rows, settle, use_screens, visible_texts, walk
+from tests.test_qml import LAYER_QML, LAYERSHELL_QMLDIR, OFFSCREEN_NOTE, click, rows, settle, use_screens, visible_texts, walk
 from tests.test_skins import spoken, wait_jump
 
 pytestmark = pytest.mark.skipif(not LAYERSHELL_QMLDIR.is_file(), reason="org.kde.layershell is not installed")
@@ -38,7 +38,7 @@ AGENTS = [
 
 
 class Panel:
-    """The panel (Main.qml) with a real backend and a client of made-up screens."""
+    """The panel (shells/Layer.qml) with a real backend and a client of made-up screens."""
 
     def __init__(self, app, tmp_path, agents=AGENTS, **more):
         self.app = app
@@ -54,7 +54,7 @@ class Panel:
         self.engine.warnings.connect(lambda errors: self.messages.extend(e.toString() for e in errors))
         self.engine.rootContext().setContextProperty("backend", self.backend)
         self.engine.addImportPath(str(IMPORT_PATH))
-        self.engine.load(UI_PATH / "Main.qml")
+        self.engine.load(LAYER_QML)
         assert self.engine.rootObjects(), self.messages
         self.root: QQuickWindow = self.engine.rootObjects()[0]
         self.opener = Answer(self.engine, self.backend)  # as the program does it: the answer window

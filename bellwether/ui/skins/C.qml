@@ -1,6 +1,6 @@
 // Layout C, "Techno / HUD": monospace numerals, thin lines, corner brackets and one cell for each agent.
 // The visual reference is design/layouts/c-hud.qml. A skin is only drawing: the state and the rules are in
-// PanelModel.qml, the pointer handling is in Main.qml (it finds the rows by their hitRole).
+// PanelModel.qml, the pointer handling is in PanelShell.qml (it finds the rows by their hitRole).
 import QtQuick
 import ".."
 

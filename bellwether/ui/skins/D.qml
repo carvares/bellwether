@@ -1,7 +1,7 @@
 // Layout D, "Signal strip": a headline with the total and the top status, one bar with the share of each
 // status, and the four statuses as a row of tabs; the agents of the open tab show below.
 // The visual reference is design/layouts/d-signal-strip.qml. A skin is only drawing: the state and the rules
-// are in PanelModel.qml, the pointer handling is in Main.qml.
+// are in PanelModel.qml, the pointer handling is in PanelShell.qml.
 import QtQuick
 import ".."
 

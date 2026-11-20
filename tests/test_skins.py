@@ -1,4 +1,4 @@
-"""Every layout (skin) through the real Main.qml, the real controller and a fake client, with real pointer events:
+"""Every layout (skin) through the real panel (the layer shell), the real controller and a fake client, with real pointer events:
 the same information and the same behaviour in each of them. Then what is special in each skin."""
 import json
 import math
@@ -900,7 +900,7 @@ def test_the_texts_of_each_layout_take_their_size_and_colour_from_its_theme_toke
     engine.warnings.connect(lambda errors: messages.extend(e.toString() for e in errors))
     engine.rootContext().setContextProperty("backend", backend)
     engine.addImportPath(str(IMPORT_PATH))
-    engine.load(ui / "Main.qml")
+    engine.load(ui / "shells" / "Layer.qml")
     try:
         root = engine.rootObjects()[0]
         backend.apply(MIXED)

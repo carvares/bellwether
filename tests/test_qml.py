@@ -1,4 +1,4 @@
-"""Smoke test of the real Main.qml, loaded the same way as bellwether/__main__.py (off screen)."""
+"""Smoke test of the real panel (the layer shell), loaded the same way as bellwether/__main__.py (off screen)."""
 import json
 import threading
 import time
@@ -20,6 +20,8 @@ from bellwether.layouts import built_skins
 from bellwether.state import STATE_COLORS, Agent
 
 LAYERSHELL_QMLDIR = Path("/usr/lib/qt6/qml/org/kde/layershell/qmldir")
+# The panel in the layer shell, as the program loads it on KDE Wayland.
+LAYER_QML = UI_PATH / "shells" / "Layer.qml"
 # layer-shell-qt says this for every window on a platform that is not Wayland. It is expected off screen.
 OFFSCREEN_NOTE = "is not a wayland window"
 # The sizes of Layout C (design/layouts/c-hud.qml): the panel, a closed panel, an agent row, the space under a list.
@@ -75,10 +77,10 @@ def window(app, fake_client, tmp_path):
     engine.warnings.connect(lambda errors: messages.extend(e.toString() for e in errors))
     engine.rootContext().setContextProperty("backend", backend)
     engine.addImportPath(str(IMPORT_PATH))
-    engine.load(UI_PATH / "Main.qml")
+    engine.load(LAYER_QML)
     try:
         roots = engine.rootObjects()
-        assert roots, f"Main.qml did not load: {messages}"
+        assert roots, f"the panel did not load: {messages}"
         assert isinstance(roots[0], QQuickWindow)
         yield roots[0], backend, messages
     finally:
@@ -722,7 +724,7 @@ STACKED = [("T", 0, 0, 1920, 1080), ("U", 0, 1080, 1920, 1080)]
 
 
 def js(root, text):
-    """The value of a JavaScript expression in Main.qml."""
+    """The value of a JavaScript expression in the panel."""
     expression = QQmlExpression(qmlContext(root), root, text)
     value = expression.evaluate()
     assert not expression.hasError(), expression.error().toString()

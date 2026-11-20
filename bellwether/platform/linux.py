@@ -329,6 +329,6 @@ def prepare_app(app) -> None:
 
 def prepare_engine(engine) -> bool:
     """Give the QML engine the import path of the window shell. True when the QML module of the shell is there: the
-    caller loads Main.qml only then."""
+    caller loads the panel only then."""
     engine.addImportPath(str(IMPORT_PATH))
     return (IMPORT_PATH / "org" / "kde" / "layershell" / "qmldir").is_file()

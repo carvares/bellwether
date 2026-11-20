@@ -1,4 +1,4 @@
-"""The custom look on the screen: the real Main.qml and the real Options.qml with the five real skins, a fake client,
+"""The custom look on the screen: the real panel and the real Options.qml with the five real skins, a fake client,
 and a font scale, a font family and colours of the user."""
 import math
 import re

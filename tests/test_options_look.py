@@ -20,7 +20,7 @@ from bellwether.options import Options
 from bellwether.state import Agent
 from tests.audit import text_findings, walk
 from tests.test_options import LETTERS, SIZE_HINTS_NOTE, cards, settle, spoken
-from tests.test_qml import LAYERSHELL_QMLDIR, OFFSCREEN_NOTE
+from tests.test_qml import LAYER_QML, LAYERSHELL_QMLDIR, OFFSCREEN_NOTE
 
 FAMILIES = ["Made Up Mono", "Made Up Sans", "Other Mono Wide", "Plain Serif"]
 ROLES = ["blocked", "done", "working", "idle", "background", "text", "frame", "accent"]
@@ -979,7 +979,7 @@ def both(app, fake_client, state_path):
     engine.warnings.connect(lambda errors: messages.extend(e.toString() for e in errors))
     engine.rootContext().setContextProperty("backend", backend)
     engine.addImportPath(str(IMPORT_PATH))
-    engine.load(UI_PATH / "Main.qml")
+    engine.load(LAYER_QML)
     try:
         (panel,) = engine.rootObjects()
         backend.apply([Agent("t1", "blocked", "rev", "Main"), Agent("t2", "working", "ana", "api / 1")])

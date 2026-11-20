@@ -101,7 +101,7 @@ def main() -> int:
     engine = QQmlApplicationEngine()
     engine.rootContext().setContextProperty("backend", backend)
     if platform.prepare_engine(engine):
-        engine.load(UI_PATH / "Main.qml")
+        engine.load(UI_PATH / "shells" / "Layer.qml")
     if not engine.rootObjects():
         logging.getLogger("bellwether").error("the QML interface did not load: it needs %s", platform.SHELL_NEEDS)
         return 1
