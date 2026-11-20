@@ -218,6 +218,8 @@ def test_the_engine_gets_the_import_path_of_the_layer_shell_module():
 LAYERSHELL_QMLDIR = Path("/usr/lib/qt6/qml/org/kde/layershell/qmldir")
 needs_layershell = pytest.mark.skipif(not LAYERSHELL_QMLDIR.is_file(), reason="org.kde.layershell is not installed")
 WITH_LAYER = {"wl_compositor", "xdg_wm_base", "zwlr_layer_shell_v1"}
+PLAIN = ("a normal window: not above other windows, it can take the focus, the compositor places it, and a drag "
+         "does not save its place")
 
 
 def never():
@@ -268,7 +270,7 @@ def test_a_platform_that_is_not_wayland_gives_the_plain_shell(engine, caplog, na
 def test_wayland_without_the_module_gives_the_plain_shell(bare_engine, caplog):
     caplog.set_level(logging.INFO, logger="bellwether")
     assert linux.shell(bare_engine, {}, "wayland", never) == "plain"
-    assert records(caplog) == [(logging.WARNING, f"the layer shell needs {linux.SHELL_NEEDS}: the plain shell")]
+    assert records(caplog) == [(logging.WARNING, f"the layer shell needs {linux.SHELL_NEEDS}: the plain shell, {PLAIN}")]
 
 
 @needs_layershell
@@ -276,7 +278,7 @@ def test_wayland_with_the_module_and_a_compositor_without_the_protocol_gives_the
     caplog.set_level(logging.INFO, logger="bellwether")
     assert linux.layer_module_loads(engine) is True
     assert linux.shell(engine, {}, "wayland", lambda: {"wl_compositor", "xdg_wm_base"}) == "plain"
-    assert records(caplog) == [(logging.WARNING, "the compositor has no zwlr_layer_shell_v1: the plain shell")]
+    assert records(caplog) == [(logging.WARNING, f"the compositor has no zwlr_layer_shell_v1: the plain shell, {PLAIN}")]
 
 
 @needs_layershell

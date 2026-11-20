@@ -9,7 +9,8 @@
 // place. While the window is hidden the request is made at once: the window shows at its place.
 // When the window system puts the window somewhere else (a window manager that keeps it inside an area), the
 // shell asks for the place again, one time, and then leaves it until the place changes.
-// A Wayland compositor does not let a program place its window: there x and y have no effect.
+// A Wayland compositor does not let a program place its window (Qt.platform.pluginName "wayland"): there the
+// window system decides, and a drag is a move of the window system (PanelShell, windowSystemPlaces).
 import QtQuick
 import QtQuick.Window
 import ".."
@@ -19,6 +20,7 @@ PanelShell {
 
     flags: Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.WindowDoesNotAcceptFocus
            | Qt.NoDropShadowWindowHint
+    windowSystemPlaces: Qt.platform.pluginName.indexOf("wayland") === 0
 
     // The number of geometry requests to the window system (for tests and scripts).
     property int placeRequests: 0
@@ -74,7 +76,7 @@ PanelShell {
 
     // The window is somewhere else than asked (after the answer of the window system: both coordinates are there).
     function checkPlace() {
-        if (placeQueued || askedAgain || dragging() || isNaN(askedX))
+        if (placeQueued || askedAgain || dragging() || isNaN(askedX) || windowSystemPlaces)
             return
         if (x !== askedX || y !== askedY) {
             askedAgain = true

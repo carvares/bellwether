@@ -53,6 +53,11 @@ Window {
     // The scale of the custom look: the skin is drawn this many times larger (0.75 to 2). The window, its place
     // and the pointer are in pixels of the screen; the skin has its own pixels (the pixels of the design).
     readonly property real panelScale: backend.scale
+    // True when the window system, not the panel, decides where the window is (a shell sets it: a plain window on
+    // Wayland). A drag is then a move of the window system, and the panel does not change or save its place.
+    property bool windowSystemPlaces: false
+    // True from the ask for such a move until the button is up again.
+    property bool systemMove: false
 
     // A window must not have the size 0 (a layer surface cannot): the window shows when it has the size of its
     // first skin.
@@ -419,6 +424,13 @@ Window {
                 return
             moved = true
             root.panel.hoverItem = null
+            if (root.windowSystemPlaces) {
+                if (!root.systemMove) {
+                    root.systemMove = true
+                    root.startSystemMove()  // false when the window system cannot: the panel then stays
+                }
+                return
+            }
             var now = Date.now()
             if (now - lastMoveMs < root.minMoveMs)
                 return
@@ -433,7 +445,10 @@ Window {
         onReleased: (mouse) => {
             if (moved) {
                 moved = false
-                root.settle()
+                if (root.windowSystemPlaces)
+                    root.systemMove = false
+                else
+                    root.settle()
                 return
             }
             var row = under(mouse, ["status", "answer", "agent"])
@@ -445,6 +460,8 @@ Window {
                 root.panel.jump(row.key)
         }
         onExited: root.panel.hoverItem = null
+        // The window system took the pointer (a move of the window system): the button is up for this handler.
+        onCanceled: { moved = false; root.systemMove = false }
         onWheel: (wheel) => {
             var list = under(wheel, ["scroll"])
             if (list)

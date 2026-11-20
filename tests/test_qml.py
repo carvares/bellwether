@@ -1440,6 +1440,30 @@ def test_a_plain_window_that_the_window_system_moves_goes_back_one_time(app, win
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
+@plain_only
+def test_on_a_window_system_that_places_the_window_a_drag_is_its_move_and_the_place_is_not_saved(app, window):
+    """Wayland with the plain shell: the compositor does not move the window for the program, so the panel asks the
+    compositor to move it (startSystemMove), and does not change or save its place."""
+    root, backend, messages = window
+    backend.apply(AGENTS)
+    use_screens(root, OFFSET, "A", 300, 400)
+    root.setProperty("windowSystemPlaces", True)  # Qt.platform.pluginName "wayland"
+    settle(app)
+    left, none = Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier
+    start = QPoint(160, 20)
+    QTest.mousePress(root, left, none, start)
+    for step in (QPoint(10, 0), QPoint(40, 30), QPoint(90, 60)):
+        QTest.mouseMove(root, start + step)
+        settle(app)
+        assert root.property("systemMove") is True and place(root) == ("A", 300, 400)
+    QTest.mouseRelease(root, left, none, start + QPoint(90, 60))
+    settle(app)
+    assert root.property("systemMove") is False and place(root) == ("A", 300, 400)
+    assert backend.saves == [] and backend._client.focused == [] and root.property("openState") == ""
+    assert (root.x(), root.y()) == (300, 400)
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
 def run_on_two_screens(tmp_path, module, *arguments):
     """Run `python -m <module> <arguments>` with two real off-screen screens: LEFT (1920 x 1080 at 0, 0) and RIGHT
     (1280 x 720 at 1920, 0). Return its JSON lines by their "step"."""

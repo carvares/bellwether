@@ -329,6 +329,9 @@ SHELL_FILES = {"layer": UI_PATH / "shells" / "Layer.qml", "plain": UI_PATH / "sh
 SHELL_VARIABLE = "BELLWETHER_SHELL"
 # The global of the compositor that gives layer surfaces (the wlr-layer-shell protocol).
 LAYER_SHELL_GLOBAL = "zwlr_layer_shell_v1"
+# What the plain shell is on Wayland, for the log line (a person can then connect the symptom to its cause).
+PLAIN_ON_WAYLAND = ("a normal window: not above other windows, it can take the focus, the compositor places it, and "
+                    "a drag does not save its place")
 
 
 def prepare_environment() -> None:
@@ -429,12 +432,12 @@ def shell(engine, environ=None, platform_name=None, compositor_globals=None) -> 
     if not (platform_name if platform_name is not None else QGuiApplication.platformName()).startswith("wayland"):
         return "plain"
     if not layer_module_loads(engine):
-        log.warning("the layer shell needs %s: the plain shell", SHELL_NEEDS)
+        log.warning("the layer shell needs %s: the plain shell, %s", SHELL_NEEDS, PLAIN_ON_WAYLAND)
         return "plain"
     names = (compositor_globals or (lambda: wayland_globals(environ)))()
     if names is None:
         log.info("the globals of the compositor could not be read: the layer shell")
     elif LAYER_SHELL_GLOBAL not in names:
-        log.warning("the compositor has no %s: the plain shell", LAYER_SHELL_GLOBAL)
+        log.warning("the compositor has no %s: the plain shell, %s", LAYER_SHELL_GLOBAL, PLAIN_ON_WAYLAND)
         return "plain"
     return "layer"
