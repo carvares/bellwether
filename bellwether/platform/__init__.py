@@ -23,6 +23,8 @@ def load(name: str) -> ModuleType:
 
 
 _system = load(sys.platform)
+# The system of this process, as sys.platform names it (for the self-test, which tells it).
+SYSTEM = sys.platform
 
 config_home = _system.config_home
 state_home = _system.state_home

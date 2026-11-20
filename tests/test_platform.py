@@ -46,13 +46,14 @@ INTERFACE = {
 }
 # The names of the package that are not members of a system.
 # The modules of the package are names of it too, once imported.
-OWN = {"load", "MODULES", "annotations", "importlib", "sys", "ModuleType", "linux", "host", "posix", "macos", "guard"}
+OWN = {"load", "MODULES", "annotations", "importlib", "sys", "ModuleType", "linux", "host", "posix", "macos", "guard",
+       "SYSTEM"}
 on_linux = pytest.mark.skipif(sys.platform != "linux", reason="needs Linux")
 
 
 def test_the_package_gives_the_members_of_the_module_of_this_system():
     assert platform.load(sys.platform) is SYSTEMS[sys.platform]
-    assert set(platform.MODULES) == set(SYSTEMS)
+    assert set(platform.MODULES) == set(SYSTEMS) and platform.SYSTEM == sys.platform
     for name in INTERFACE:
         assert getattr(platform, name) is getattr(SYSTEMS[sys.platform], name), name
 

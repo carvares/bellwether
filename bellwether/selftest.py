@@ -121,7 +121,7 @@ def run(load_panel, show: float = SHOW, step: float = STEP, out=sys.stdout, err=
     app.setApplicationName("bellwether")
     app.setQuitOnLastWindowClosed(False)
     platform.prepare_app(app)
-    facts: dict = {"system": sys.platform, "qt_platform": app.platformName(), "qt_version": qVersion()}
+    facts: dict = {"system": platform.SYSTEM, "qt_platform": app.platformName(), "qt_version": qVersion()}
     with tempfile.TemporaryDirectory(prefix="bellwether-self-test-") as folder:
         backend = Backend(MadeUpClient(), settings_path=Path(folder) / "state.json",
                           icons=Icons(Path(folder) / "app", Path(folder) / "cache"))
