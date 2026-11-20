@@ -168,8 +168,9 @@ def _title(value: object) -> str:
 
 
 def _environment(env: dict[str, str] | None) -> dict:
-    """The `env=` option only for a command that the platform gives its own environment (None: this process's)."""
-    return {} if env is None else {"env": env}
+    """The `env=` option only for a command that the platform gives its own environment (None: this process's), and
+    the options of the system for each program (Windows: no console window; none elsewhere)."""
+    return {**platform.PROCESS_OPTIONS, **({} if env is None else {"env": env})}
 
 
 def _run(argv: list[str], timeout: float = TIMEOUT, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:

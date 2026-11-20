@@ -19,7 +19,7 @@ from PySide6.QtQml import QQmlComponent
 
 from ..layouts import UI_PATH
 from .host import MAX_PROCESSES, ProcessHost  # noqa: F401  (MAX_PROCESSES: the limit of family(), for the tests)
-from .posix import lock  # noqa: F401  (the single-instance lock: fcntl.flock)
+from .posix import lock, readable  # noqa: F401  (the single-instance lock: fcntl.flock; select on pipes)
 
 
 # ----- the folders: the XDG base folders with the standard defaults -----
@@ -51,6 +51,8 @@ def runtime_dir() -> Path:
 # By role: the raise of the Herdr window, the start of the app, the command without some variables. A test of the
 # client gives fakes in their place (HerdrClient takes them as keyword arguments by role).
 COMMANDS = {"raiser": "busctl", "launcher": "systemd-run", "env_cleaner": "env"}
+# More options of each program that the client starts (Windows: no console window): none here.
+PROCESS_OPTIONS: dict = {}
 
 
 # ----- the raise of the Herdr app window -----
@@ -133,7 +135,10 @@ _PR_SET_PDEATHSIG = 1
 # The function is found and its types are set here and not in the child: between fork and exec the child
 # must not load a library or look for a symbol. None on a system without it: there only the tests import this
 # module (the logic of the other members runs with fakes on each system), and spawn_child is not used.
-_prctl = getattr(ctypes.CDLL(None), "prctl", None)
+try:
+    _prctl = getattr(ctypes.CDLL(None), "prctl", None)
+except (TypeError, OSError):  # Windows has no library of the process by the name None
+    _prctl = None
 if _prctl is not None:
     _prctl.argtypes = [ctypes.c_int, ctypes.c_ulong]
     _prctl.restype = ctypes.c_int

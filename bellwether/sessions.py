@@ -144,11 +144,28 @@ class SessionFacts:
     mark: Mark | None = field(default=None, repr=False)
 
 
+# The open of a file of a session: it does not wait (a pipe has no writer), does not take a terminal, is not given to
+# a child, and reads bytes (Windows opens in text mode without O_BINARY). A flag that a system does not have is 0.
+_OPEN_FLAGS = os.O_RDONLY
+for _name in ("O_NONBLOCK", "O_NOCTTY", "O_CLOEXEC", "O_BINARY", "O_NOINHERIT"):
+    _OPEN_FLAGS |= getattr(os, _name, 0)
+del _name
+
+
+def _seek_read(number: int, size: int, offset: int) -> bytes:
+    """`os.pread` where the system has none (Windows): a seek and a read. Each open file is used by one thread."""
+    os.lseek(number, offset, os.SEEK_SET)
+    return os.read(number, size)
+
+
+_pread = getattr(os, "pread", None) or _seek_read
+
+
 def _open_regular(path: Path) -> int | str:
     """The open file number of a regular file, or a reason code: "no_file", "not_regular". The open does not wait
     (a pipe has no writer) and does not take a terminal; a pipe or a device is closed again and never read."""
     try:
-        number = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOCTTY | os.O_CLOEXEC)
+        number = os.open(path, _OPEN_FLAGS)
     except OSError:
         return "no_file"
     try:
@@ -166,7 +183,7 @@ def _head(path: Path, size: int) -> bytes | str:
     if isinstance(number, str):
         return number
     try:
-        return os.pread(number, size, 0)
+        return _pread(number, size, 0)
     except OSError:
         return "no_file"
     finally:
@@ -212,13 +229,13 @@ def last_model(host: Host, path: Path, needle: bytes, pick, known: SessionFacts 
             return known.model, mark
         floor = 0
         # The older part is not read again when the new part starts at the start of a line.
-        if same and before.size > 0 and os.pread(number, 1, before.size - 1) == b"\n":
+        if same and before.size > 0 and _pread(number, 1, before.size - 1) == b"\n":
             floor = before.size
         stop = max(floor, size - SCAN_LIMIT)
         at, rest = size, b""
         while at > stop:
             start = max(stop, at - BLOCK)
-            data = os.pread(number, at - start, start)
+            data = _pread(number, at - start, start)
             host.bytes_read += len(data)
             lines = (data + rest).split(b"\n")
             # The first piece is the end of a line that starts before this block, but at the start of the file

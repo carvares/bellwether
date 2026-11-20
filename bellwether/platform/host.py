@@ -2,6 +2,7 @@
 with the reads of its processes (`start_ticks`, `children`, `arguments`, `open_files`)."""
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
@@ -44,3 +45,72 @@ class ProcessHost:
             yield order[at]
             order += [child for child in self.children(order[at]) if child not in order]
             at += 1
+
+
+# ----- the process host of psutil, for the systems with no /proc to read (macOS, Windows) -----
+
+# The most words of a command line and the most open files that are read of one process.
+MAX_WORDS = 4096
+MAX_FILES = 4096
+
+
+def load_psutil():
+    """The module psutil, or None when it cannot be imported."""
+    try:
+        import psutil  # noqa: PLC0415  (a dependency on macOS and Windows only)
+    except ImportError:
+        return None
+    return psutil
+
+
+class PsutilHost(ProcessHost):
+    """The home folder of the user and the processes of this machine, read through psutil (None: nothing is known,
+    so no row gets a model; one log line says so). A test gives its own home folder and a made-up psutil. Each system
+    gives `start_text`: the start of a process in the form of Claude Code's `procStart` there."""
+
+    def __init__(self, home: Path | None = None, psutil=None) -> None:
+        super().__init__(home)
+        self._psutil = psutil
+        self._errors = (OSError,) if psutil is None else (OSError, psutil.Error)
+        if psutil is None:
+            logging.getLogger("bellwether").warning(
+                "psutil cannot be imported: the rows show the time of the terminal and no model")
+
+    def start_text(self, seconds: float) -> str:
+        """The start of a process (seconds since 1970) as a text."""
+        raise NotImplementedError
+
+    def _process(self, pid: int):
+        return self._psutil.Process(pid)
+
+    def start_ticks(self, pid: int) -> str | None:
+        if self._psutil is None:
+            return None
+        try:
+            return self.start_text(self._process(pid).create_time())
+        except self._errors:
+            return None
+
+    def children(self, pid: int) -> list[int]:
+        if self._psutil is None:
+            return []
+        try:
+            return [child.pid for child in self._process(pid).children()]
+        except self._errors:
+            return []
+
+    def arguments(self, pid: int) -> list[str]:
+        if self._psutil is None:
+            return []
+        try:
+            return [str(word) for word in self._process(pid).cmdline()[:MAX_WORDS]]
+        except self._errors:
+            return []
+
+    def open_files(self, pid: int) -> list[str]:
+        if self._psutil is None:
+            return []
+        try:
+            return [str(item.path) for item in self._process(pid).open_files()[:MAX_FILES]]
+        except self._errors:
+            return []

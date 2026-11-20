@@ -47,3 +47,5 @@ SHELL_FILES = _system.SHELL_FILES
 shell = _system.shell
 prepare_window = _system.prepare_window
 window_facts = _system.window_facts
+readable = _system.readable
+PROCESS_OPTIONS = _system.PROCESS_OPTIONS

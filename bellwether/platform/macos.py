@@ -12,8 +12,8 @@ import time
 from pathlib import Path
 
 from ..layouts import UI_PATH
-from .host import ProcessHost
-from .posix import lock  # noqa: F401  (the single-instance lock: fcntl.flock works on macOS)
+from .host import MAX_FILES, MAX_WORDS, ProcessHost, PsutilHost, load_psutil  # noqa: F401  (the tests use them here)
+from .posix import lock, readable  # noqa: F401  (the single-instance lock: fcntl.flock; select on pipes)
 
 log = logging.getLogger("bellwether")
 
@@ -128,6 +128,8 @@ PROGRAM_FOLDERS = ("~/.local/bin", "/opt/homebrew/bin", "/usr/local/bin", "~/.lo
 # By role: the start of the app, and its second raise. `open` asks Launch Services, which starts the app outside
 # our process tree, with the environment of the session. An absolute path: the PATH can be short.
 COMMANDS = {"launcher": "/usr/bin/open"}
+# More options of each program that the client starts (Windows: no console window): none here.
+PROCESS_OPTIONS: dict = {}
 
 
 def _is_program(path: Path) -> bool:
@@ -464,20 +466,8 @@ def spawn_child(argv: list[str], *, popen=subprocess.Popen) -> subprocess.Popen:
 
 # ----- the process host: psutil (a dependency only where there is no /proc to read) -----
 
-def load_psutil():
-    """The module psutil, or None when it cannot be imported."""
-    try:
-        import psutil  # noqa: PLC0415  (a dependency on macOS and Windows only)
-    except ImportError:
-        return None
-    return psutil
-
-
 _DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
-# The most words of a command line and the most open files that are read of one process.
-MAX_WORDS = 4096
-MAX_FILES = 4096
 
 
 def lstart(seconds: float) -> str:
@@ -489,62 +479,19 @@ def lstart(seconds: float) -> str:
             f"{t.tm_hour:02d}:{t.tm_min:02d}:{t.tm_sec:02d} {t.tm_year}")
 
 
-class Host(ProcessHost):
-    """The home folder of the user and the processes of this machine, read through psutil (None: nothing is known,
-    so no row gets a model). A test gives its own home folder and a made-up psutil.
+class Host(PsutilHost):
+    """The process host of psutil (platform/host.py). The start of a process is in the form of Claude Code's
+    `procStart` on macOS (see `lstart`): a session file is taken only when its procStart is exactly that text for
+    the live process with its pid (the rule of sessions.py). When the form differs, no file is taken and the row
+    shows the time of the terminal, never a model of a process that it cannot prove."""
 
-    The start of a process is in the form of Claude Code's `procStart` on macOS (see `lstart`): a session file is
-    taken only when its procStart is exactly that text for the live process with its pid (the rule of sessions.py).
-    When the form differs, no file is taken and the row shows the time of the terminal, never a model of a process
-    that it cannot prove."""
-
-    def __init__(self, home: Path | None = None, psutil=None) -> None:
-        super().__init__(home)
-        self._psutil = psutil
-        self._errors = (OSError,) if psutil is None else (OSError, psutil.Error)
-
-    def _process(self, pid: int):
-        return self._psutil.Process(pid)
-
-    def start_ticks(self, pid: int) -> str | None:
-        if self._psutil is None:
-            return None
-        try:
-            return lstart(self._process(pid).create_time())
-        except self._errors:
-            return None
-
-    def children(self, pid: int) -> list[int]:
-        if self._psutil is None:
-            return []
-        try:
-            return [child.pid for child in self._process(pid).children()]
-        except self._errors:
-            return []
-
-    def arguments(self, pid: int) -> list[str]:
-        if self._psutil is None:
-            return []
-        try:
-            return [str(word) for word in self._process(pid).cmdline()[:MAX_WORDS]]
-        except self._errors:
-            return []
-
-    def open_files(self, pid: int) -> list[str]:
-        if self._psutil is None:
-            return []
-        try:
-            return [str(item.path) for item in self._process(pid).open_files()[:MAX_FILES]]
-        except self._errors:
-            return []
+    def start_text(self, seconds: float) -> str:
+        return lstart(seconds)
 
 
 def process_host(*, psutil=None) -> Host:
     """The host of this machine. Without psutil: one log line, and a host that knows no process."""
-    module = (psutil or load_psutil)()
-    if module is None:
-        log.warning("psutil cannot be imported: the rows show the time of the terminal and no model")
-    return Host(None, module)
+    return Host(None, (psutil or load_psutil)())
 
 
 # ----- the icon file of the Herdr app: the .icns of its bundle -----

@@ -43,6 +43,8 @@ INTERFACE = {
     "shell": ("function", ("engine", "environ", "platform_name", "compositor_globals")),
     "prepare_window": ("function", ("window", "role")),
     "window_facts": ("function", ("window",)),
+    "readable": ("function", ("descriptors", "timeout")),
+    "PROCESS_OPTIONS": ("options", None),
 }
 # The names of the package that are not members of a system.
 # The modules of the package are names of it too, once imported.
@@ -77,6 +79,8 @@ def test_each_member_of_each_system_has_its_kind_and_its_parameters(system, name
         assert all(p.kind is p.POSITIONAL_OR_KEYWORD for p in given[:len(parameters)])
     elif kind == "commands":
         assert member and all(isinstance(k, str) and isinstance(v, str) and v for k, v in member.items())
+    elif kind == "options":
+        assert isinstance(member, dict) and all(isinstance(k, str) for k in member)
     elif kind == "shells":
         assert set(member) <= {"layer", "plain"} and "plain" in member and all(f.is_file() for f in member.values())
     else:
@@ -109,6 +113,28 @@ def test_a_system_with_no_module_is_a_clear_import_error(name):
     with pytest.raises(ImportError) as failure:
         platform.load(name)
     assert str(failure.value) == f"bellwether does not run on this system ({name!r}): it runs on linux, darwin"
+
+
+def test_the_wait_of_the_posix_systems_sees_data_and_the_end_of_a_pipe():
+    import os
+    from bellwether.platform import posix
+    read_end, write_end = os.pipe()
+    try:
+        assert posix.readable([read_end], 0.01) == []
+        os.write(write_end, b"x")
+        assert posix.readable([read_end], 0.01) == [read_end]
+        os.read(read_end, 1)
+        os.close(write_end)
+        write_end = None
+        assert posix.readable([read_end], 0.01) == [read_end]  # the writer is gone: a read gives the end
+    finally:
+        os.close(read_end)
+        if write_end is not None:
+            os.close(write_end)
+
+
+def test_the_programs_of_the_client_get_no_more_options_on_linux_and_macos():
+    assert linux.PROCESS_OPTIONS == {} and macos.PROCESS_OPTIONS == {}
 
 
 # ----- only the package has system-specific code -----

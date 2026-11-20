@@ -32,7 +32,7 @@ _COLOR = re.compile(r"#(?:[0-9a-f]{2})?[0-9a-f]{6}", re.IGNORECASE)
 def _load(path: Path) -> dict:
     """The content of the file. Empty when the file is not there or is not a JSON object."""
     try:
-        data = json.loads(Path(path).read_text())
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
@@ -41,7 +41,7 @@ def _load(path: Path) -> dict:
 def _write(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(data))
+    temporary.write_text(json.dumps(data), encoding="utf-8")
     os.replace(temporary, path)
 
 

@@ -9,12 +9,11 @@ from __future__ import annotations
 
 import logging
 import os
-import select
 import subprocess
 import threading
 import time
 
-from .platform import spawn_child
+from .platform import readable, spawn_child
 
 log = logging.getLogger("bellwether")
 
@@ -125,7 +124,7 @@ class EventSource:
             return not announce and connected and self._clock() - began >= MIN_LIFE
 
         while not self._stop.is_set():
-            ready, _, _ = select.select([descriptor, self._stop_pipe[0]], [], [], self._quiet)
+            ready = readable([descriptor, self._stop_pipe[0]], self._quiet)
             # Here and not only at a line: the stream can end, or be silent, before its next line.
             if lived():
                 announce = True

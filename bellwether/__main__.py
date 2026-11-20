@@ -26,9 +26,25 @@ from .tray import Tray, window_icon
 LOG_PATH = state_home() / NAME / f"{NAME}.log"
 
 
+class LogFile(RotatingFileHandler):
+    """The log file, UTF-8, with one older file. A rotation that fails leaves the file as it is and the line is still
+    written: on Windows a file that an other process has open (a second start that writes "already running", a virus
+    scanner) cannot be renamed. The next line tries the rotation again."""
+
+    def __init__(self, path) -> None:
+        super().__init__(path, maxBytes=512_000, backupCount=1, encoding="utf-8")
+
+    def doRollover(self) -> None:
+        try:
+            super().doRollover()
+        except OSError:
+            if self.stream is None:
+                self.stream = self._open()
+
+
 def setup_logging() -> None:
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    handler = RotatingFileHandler(LOG_PATH, maxBytes=512_000, backupCount=1)
+    handler = LogFile(LOG_PATH)
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     logging.basicConfig(level=logging.INFO, handlers=[handler])
 
