@@ -145,8 +145,11 @@ def run(start_panel, show: float = SHOW, step: float = STEP, out=sys.stdout, err
     level = log.level
     log.setLevel(logging.INFO)
     messages: list[str] = []
+    home = str(Path.home())
+    # A warning of Qt can name a file of the checkout, and its path the name of a person: the home folder is "~".
     previous = qInstallMessageHandler(
-        lambda kind, _context, text: messages.append(text) if kind != QtMsgType.QtDebugMsg else None)
+        lambda kind, _context, text: messages.append(text.replace(home, "~") if len(home) > 1 else text)
+        if kind != QtMsgType.QtDebugMsg else None)
 
     def shown(name: str) -> None:
         print(f"self-test: shown {name}", file=err, flush=True)

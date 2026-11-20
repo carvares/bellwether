@@ -1,14 +1,18 @@
 """The self-test of a CI runner: `python -m bellwether --self-test` (made-up agents), a picture of the runner's own
-screen at each step that it announces (macOS: `screencapture`), and the checks of the facts that it prints.
+screen at each step that it announces (macOS: `screencapture`; Windows: PowerShell with System.Drawing), and the
+checks of the facts that it prints.
 
-    python scripts/ci/selftest.py <out folder>
+    python scripts/ci/selftest.py <out folder> <system of the job: darwin | win32> [--pictures]
 
 Writes <out>/self-test.json, <out>/self-test.log (its stderr) and <out>/<step>.png. Prints each check: FAIL (the
 exit code is 1), or WARN for a fact that a runner may not give (the activation of the app, the menu bar item).
+The pictures show the whole screen: they are taken only on a CI runner (CI or GITHUB_ACTIONS is "true") or with
+--pictures. The home folder in the text that it writes is "~" (a path can hold the name of a person).
 """
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -18,6 +22,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 PREFIX = "self-test: shown "
+USAGE = "usage: python scripts/ci/selftest.py <out folder> <darwin | win32> [--pictures]"
 
 # macOS (bellwether/platform/macos.py): the status window level, the collection behaviour canJoinAllSpaces |
 # stationary | ignoresCycle | fullScreenAuxiliary, the style mask bit of a non-activating panel, the accessory app.
@@ -27,20 +32,62 @@ NONACTIVATING = 1 << 7
 ACCESSORY = 1
 
 
-def capture(folder: Path, name: str, pictures: list) -> None:
-    if shutil.which("screencapture") is None:
-        return
+# Windows: the whole desktop (all screens) as a PNG, with what every Windows has (no new dependency).
+WINDOWS_SHOT = ("Add-Type -AssemblyName System.Windows.Forms, System.Drawing; "
+                "$b = [System.Windows.Forms.SystemInformation]::VirtualScreen; "
+                "$i = New-Object System.Drawing.Bitmap $b.Width, $b.Height; "
+                "$g = [System.Drawing.Graphics]::FromImage($i); "
+                "$g.CopyFromScreen($b.Left, $b.Top, 0, 0, $i.Size); "
+                "$i.Save('{path}', [System.Drawing.Imaging.ImageFormat]::Png)")
+
+
+def private(text: str) -> str:
+    """The text with the home folder as "~": a path of a checkout can hold the name of a person."""
+    home = str(Path.home())
+    return text.replace(home, "~") if len(home) > 1 else text
+
+
+def on_a_runner(environ=None) -> bool:
+    environ = os.environ if environ is None else environ
+    return "true" in (environ.get("CI", "").lower(), environ.get("GITHUB_ACTIONS", "").lower())
+
+
+def shot_command(system: str, path: Path) -> list[str] | None:
+    """The command that takes a picture of the whole screen into `path`, or None when this system has none."""
+    if system == "darwin" and shutil.which("screencapture"):
+        return ["screencapture", "-x", str(path)]
+    if system == "win32" and shutil.which("powershell"):
+        return ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                WINDOWS_SHOT.replace("{path}", str(path).replace("'", "''"))]
+    return None
+
+
+def capture(folder: Path, name: str, pictures: list, system: str) -> None:
     path = folder / f"{name}.png"
-    done = subprocess.run(["screencapture", "-x", str(path)], capture_output=True, text=True, timeout=20)
-    pictures.append({"step": name, "file": path.name, "code": done.returncode, "stderr": done.stderr.strip()[:200]})
+    command = shot_command(system, path)
+    if command is None:
+        return
+    began = time.monotonic()
+    try:
+        done = subprocess.run(command, capture_output=True, text=True, timeout=20)
+        code, err = done.returncode, done.stderr.strip()[:200]
+    except (OSError, subprocess.SubprocessError) as error:
+        code, err = type(error).__name__, ""
+    pictures.append({"step": name, "file": path.name, "code": code, "stderr": private(err),
+                     "seconds": round(time.monotonic() - began, 1)})
 
 
-def checks(facts: dict) -> list[tuple[str, str, object]]:
-    """(PASS | FAIL | WARN, the check, the value that was seen)."""
+def checks(facts: dict, system: str | None = None) -> list[tuple[str, str, object]]:
+    """(PASS | FAIL | WARN, the check, the value that was seen). `system`: the system of the job; without it the
+    checks of a system are skipped when the facts do not name it."""
     found = []
 
     def check(name, good, value, soft=False):
         found.append(("PASS" if good else "WARN" if soft else "FAIL", name, value))
+
+    if system is not None:
+        check("the facts are of the system of the job", facts.get("system") == system, facts.get("system"))
+    system = system or facts.get("system")
 
     panel, layouts, options = facts.get("panel", {}), facts.get("layouts", {}), facts.get("options", {})
     check("no error", "error" not in facts, facts.get("error"))
@@ -63,7 +110,7 @@ def checks(facts: dict) -> list[tuple[str, str, object]]:
     check("the panel is inside the available area of its screen (not under a menu bar, a Dock or a panel)",
           area[0] <= frame[0] and area[1] <= frame[1] and frame[0] + frame[2] <= area[0] + area[2]
           and frame[1] + frame[3] <= area[1] + area[3], {"frame": frame, "available": area})
-    if facts.get("system") == "darwin":
+    if system == "darwin":
         native = facts.get("native", {})
         check("Qt uses its cocoa plugin", facts.get("qt_platform") == "cocoa", facts.get("qt_platform"))
         check("pyobjc is there", native.get("pyobjc") is True, native.get("pyobjc"))
@@ -81,6 +128,8 @@ def checks(facts: dict) -> list[tuple[str, str, object]]:
         check("the panel has no shadow", native.get("has_shadow") is False, native.get("has_shadow"))
         check("the panel has the property for Qt", native.get("always_show_property") is True,
               native.get("always_show_property"))
+        check("this macOS has the private call that keeps a clicked panel from activating the app",
+              native.get("prevents_activation_call") is True, native.get("prevents_activation_call"), soft=True)
         check("the app is an accessory app (no Dock icon)", native.get("activation_policy") == ACCESSORY,
               native.get("activation_policy"))
         check("the panel is not active while the app is not", panel.get("active") is False, panel.get("active"),
@@ -109,19 +158,26 @@ def checks(facts: dict) -> list[tuple[str, str, object]]:
 
 
 def main(argv: list[str]) -> int:
-    out = Path(argv[1]).resolve()
+    if len(argv) < 3 or argv[2] not in ("darwin", "win32") or argv[3:] not in ([], ["--pictures"]):
+        print(USAGE, file=sys.stderr)
+        return 2
+    out, system = Path(argv[1]).resolve(), argv[2]
     out.mkdir(parents=True, exist_ok=True)
+    pictures_allowed = on_a_runner() or argv[3:] == ["--pictures"]
+    if not pictures_allowed:
+        print("no pictures of the screen: this is not a CI runner (CI or GITHUB_ACTIONS is not true); --pictures "
+              "takes them")
     began = time.monotonic()
     process = subprocess.Popen([sys.executable, "-m", "bellwether", "--self-test"], cwd=ROOT, text=True,
-                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                               encoding="utf-8", errors="replace", stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     pictures: list = []
     lines: list[str] = []
 
     def read_stderr():
         for line in process.stderr:
-            lines.append(line)
-            if line.startswith(PREFIX):
-                capture(out, line[len(PREFIX):].strip(), pictures)
+            lines.append(private(line))
+            if line.startswith(PREFIX) and pictures_allowed:
+                capture(out, line[len(PREFIX):].strip(), pictures, system)
 
     reader = threading.Thread(target=read_stderr)
     reader.start()
@@ -132,20 +188,21 @@ def main(argv: list[str]) -> int:
         process.kill()
         stdout, code = "", "timeout"
     reader.join(timeout=30)
-    (out / "self-test.log").write_text("".join(lines))
+    (out / "self-test.log").write_text("".join(lines), encoding="utf-8")
     print("".join(lines), end="")
     try:
         facts = json.loads(stdout)
     except ValueError:
-        print(f"FAIL the self-test printed no JSON object (exit {code}): {stdout[:2000]!r}")
+        print(f"FAIL the self-test printed no JSON object (exit {code}): {private(stdout[:2000])!r}")
         return 1
     facts["pictures"] = pictures
-    (out / "self-test.json").write_text(json.dumps(facts, indent=2, sort_keys=True))
-    print(json.dumps(facts, indent=2, sort_keys=True))
-    found = checks(facts)
+    text = private(json.dumps(facts, indent=2, sort_keys=True))
+    (out / "self-test.json").write_text(text, encoding="utf-8")
+    print(text)
+    found = checks(facts, system)
     found.insert(0, ("PASS" if code == 0 else "FAIL", "the self-test exits 0", code))
     for status, name, value in found:
-        print(f"{status} {name}" + ("" if status == "PASS" else f": {value!r}"))
+        print(f"{status} {name}" + ("" if status == "PASS" else f": {private(repr(value))}"))
     print(f"self-test: {time.monotonic() - began:.1f} s, {len(pictures)} pictures")
     return 1 if any(status == "FAIL" for status, _, _ in found) else 0
 

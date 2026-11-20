@@ -111,3 +111,44 @@ def test_the_checks_of_the_runner_fail_on_the_faults_of_run_1_and_pass_without_t
     assert failed(without_call) == ["the answer window asked the system to activate the app"]
     warned = [name for status, name, _ in checks(without_call) if status == "WARN"]
     assert "the options window made the app active (no input of a person here)" in warned
+
+
+def ci_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ci_selftest", ROOT / "scripts" / "ci" / "selftest.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_checks_fail_when_the_facts_are_not_of_the_system_of_the_job():
+    """Without the system fact every check of the system would be skipped: the job names its system."""
+    module = ci_module()
+    facts = mac_facts([688, 47, 320, 192], app_active=False)
+    assert [n for s, n, _ in module.checks(facts, "darwin") if s == "FAIL"] == []
+    del facts["system"]
+    failed = [n for s, n, _ in module.checks(facts, "darwin") if s == "FAIL"]
+    assert failed == ["the facts are of the system of the job"]
+    assert any(n == "the panel is an NSPanel" for _, n, _ in module.checks(facts, "darwin"))  # still checked
+    assert [n for s, n, _ in module.checks(mac_facts([688, 47, 320, 192], False), "win32") if s == "FAIL"][0] == (
+        "the facts are of the system of the job")
+
+
+def test_a_macos_without_the_private_call_is_a_warning():
+    module = ci_module()
+    facts = mac_facts([688, 47, 320, 192], app_active=False)
+    facts["native"]["prevents_activation_call"] = False
+    found = {n: s for s, n, _ in module.checks(facts, "darwin")}
+    assert found["this macOS has the private call that keeps a clicked panel from activating the app"] == "WARN"
+
+
+def test_pictures_only_on_a_ci_runner_and_the_home_folder_is_never_written(monkeypatch, tmp_path, capsys):
+    module = ci_module()
+    assert module.on_a_runner({"CI": "true"}) and module.on_a_runner({"GITHUB_ACTIONS": "true"})
+    assert not module.on_a_runner({}) and not module.on_a_runner({"CI": "false"})
+    monkeypatch.setattr(module.Path, "home", classmethod(lambda cls: Path("/home/made-up-person")))
+    assert module.private("file:///home/made-up-person/src/bellwether/ui/X.qml:3") == "file://~/src/bellwether/ui/X.qml:3"
+    assert module.main(["selftest.py", str(tmp_path)]) == 2 and module.main(["selftest.py", str(tmp_path), "linux"]) == 2
+    assert module.shot_command("linux", tmp_path / "a.png") is None
+    command = module.shot_command("win32", Path("C:/made-up/it's.png")) if module.shutil.which("powershell") else None
+    assert command is None or "'C:/made-up/it''s.png'" in command[-1]
