@@ -193,6 +193,26 @@ def test_without_pyobjc_or_when_appkit_fails_the_raise_is_the_reopen(caplog):
     assert records(caplog) == [(logging.INFO, "the activation of the Herdr app failed (AttributeError)")]
 
 
+def test_the_activation_of_the_raise_runs_through_the_main_thread_and_a_main_thread_that_does_not_answer_is_the_reopen(
+        caplog):
+    caplog.set_level(logging.INFO, logger="bellwether")
+    kit, run, through = make_kit(running=(True,)), Run(), []
+
+    def main_thread(function):
+        through.append(function)
+        return function()
+
+    assert macos.raise_app(run, macos.COMMANDS, appkit=lambda: kit, main_thread=main_thread) is True
+    assert len(through) == 1 and ("activateWithOptions_", 1) in kit.calls
+    kit.calls.clear()
+
+    def no_answer(function):
+        raise TimeoutError("made-up")
+
+    assert macos.raise_app(run, macos.COMMANDS, appkit=lambda: kit, main_thread=no_answer) is True  # the reopen
+    assert kit.calls == [] and records(caplog) == [(logging.INFO, "the activation of the Herdr app failed (TimeoutError)")]
+
+
 def test_the_environment_of_a_command_has_no_caller_variable_and_the_argv_is_unchanged(monkeypatch):
     monkeypatch.setenv("HC_TERMINAL_ID", "t1")
     monkeypatch.setenv("HC_SCOPE", "made-up")

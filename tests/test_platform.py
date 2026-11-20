@@ -47,6 +47,7 @@ INTERFACE = {
 # The names of the package that are not members of a system.
 # The modules of the package are names of it too, once imported.
 OWN = {"load", "MODULES", "annotations", "importlib", "sys", "ModuleType", "linux", "host", "posix", "macos", "guard",
+       "mainthread",
        "SYSTEM"}
 on_linux = pytest.mark.skipif(sys.platform != "linux", reason="needs Linux")
 

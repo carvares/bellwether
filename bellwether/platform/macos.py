@@ -184,20 +184,31 @@ def _open_argv(app: str | None, commands: dict[str, str]) -> list[str]:
     return [commands["launcher"], "-a", str(bundle)] if bundle else [commands["launcher"], "-b", BUNDLE_ID]
 
 
-def raise_app(run, commands: dict[str, str], *, appkit=None) -> bool:
+def _activate_herdr(kit) -> bool:
+    """Unhide and activate each running Herdr app (on the main thread). True when one was activated."""
+    activated = False
+    for running in kit.AppKit.NSRunningApplication.runningApplicationsWithBundleIdentifier_(BUNDLE_ID):
+        running.unhide()
+        activated = bool(running.activateWithOptions_(kit.AppKit.NSApplicationActivateAllWindows)) or activated
+    return activated
+
+
+def raise_app(run, commands: dict[str, str], *, appkit=None, main_thread=None) -> bool:
     """Bring the Herdr app to the front. Return False when that did not occur.
 
     First the running app is activated through AppKit (NSRunningApplication, by its bundle identifier: no
-    permission is needed). Then `open -b dev.herdr.app` asks Launch Services to reopen it: that also shows a
-    minimized window, which the activation alone does not. True when one of the two worked."""
+    permission is needed), on the main thread (`main_thread`: the call of mainthread.py; a test gives its own): Apple
+    documents only the properties of that class as safe on any thread, and the jump runs on a thread of its own. Then
+    `open -b dev.herdr.app` asks Launch Services to reopen it: that also shows a minimized window, which the
+    activation alone does not. True when one of the two worked."""
     activated = False
     kit = (appkit or load_appkit)()
     if kit is not None:
+        if main_thread is None:
+            from .mainthread import on_main_thread as main_thread  # noqa: PLC0415
         try:
-            for running in kit.AppKit.NSRunningApplication.runningApplicationsWithBundleIdentifier_(BUNDLE_ID):
-                running.unhide()
-                activated = bool(running.activateWithOptions_(kit.AppKit.NSApplicationActivateAllWindows)) or activated
-        except Exception as error:  # a call of AppKit that failed: the second method follows
+            activated = bool(main_thread(lambda: _activate_herdr(kit)))
+        except Exception as error:  # a call of AppKit that failed, or no answer of the main thread: the second method
             log.info("the activation of the Herdr app failed (%s)", type(error).__name__)
     try:
         reopened = run(_open_argv(None, commands)).returncode == 0
