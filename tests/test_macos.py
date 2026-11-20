@@ -422,3 +422,142 @@ def test_the_panel_of_the_program_is_made_again_and_shows_as_before(app, tmp_pat
     finally:
         del engine
         app.processEvents()
+
+
+# ----- the process host: psutil -----
+
+class PsError(Exception):
+    """The base of the errors of the made-up psutil (psutil.Error)."""
+
+
+class NoSuchProcess(PsError):
+    pass
+
+
+class AccessDenied(PsError):
+    pass
+
+
+class Proc:
+    def __init__(self, table, pid):
+        self.table, self.pid = table, pid
+
+    def _row(self):
+        row = self.table.get(self.pid)
+        if row is None:
+            raise NoSuchProcess(self.pid)
+        if row.get("denied"):
+            raise AccessDenied(self.pid)
+        return row
+
+    def create_time(self):
+        return self._row()["start"]
+
+    def children(self):
+        return [Proc(self.table, pid) for pid in self._row().get("children", ())]
+
+    def cmdline(self):
+        return self._row().get("argv", [])
+
+    def open_files(self):
+        return [SimpleNamespace(path=path, fd=3) for path in self._row().get("files", ())]
+
+
+def made_up_psutil(table):
+    return SimpleNamespace(Error=PsError, NoSuchProcess=NoSuchProcess, AccessDenied=AccessDenied,
+                           Process=lambda pid: Proc(table, pid))
+
+
+# 2026-11-20 16:18:03.75 UTC, and 2026-11-05 09:04:05 UTC (a day of the month with one digit).
+START, EARLY = 1795191483.75, 1793869445.0
+
+
+def test_the_start_of_a_process_has_the_form_of_ps_lstart_in_the_c_locale_and_utc():
+    assert macos.lstart(START) == "Fri Nov 20 16:18:03 2026"
+    assert macos.lstart(EARLY) == "Thu Nov  5 09:04:05 2026"  # %e: the day is padded with a space
+    assert macos.lstart(0) == "Thu Jan  1 00:00:00 1970"
+
+
+def test_the_host_reads_the_processes_through_psutil(tmp_path):
+    table = {700: {"start": START, "children": [701, 702], "argv": ["codex", "--no-daemon"],
+                   "files": ["/made/up/rollout.jsonl", "/dev/null"]},
+             701: {"start": EARLY}, 702: {"start": EARLY, "denied": True}}
+    host = macos.process_host(psutil=lambda: made_up_psutil(table))
+    assert isinstance(host, macos.ProcessHost) and host.home == Path.home().resolve()
+    host = macos.Host(tmp_path, made_up_psutil(table))
+    assert host.start_ticks(700) == "Fri Nov 20 16:18:03 2026" and host.start_ticks(701) == "Thu Nov  5 09:04:05 2026"
+    assert host.start_ticks(702) is None and host.start_ticks(999) is None  # denied, gone
+    assert host.children(700) == [701, 702] and host.children(999) == [] and host.children(702) == []
+    assert host.arguments(700) == ["codex", "--no-daemon"] and host.arguments(999) == []
+    assert host.open_files(700) == ["/made/up/rollout.jsonl", "/dev/null"] and host.open_files(702) == []
+    assert list(host.family(700, 700)) == [700, 701, 702]
+
+
+def test_without_psutil_the_host_knows_no_process_and_one_log_line_says_so(caplog):
+    caplog.set_level(logging.INFO, logger="bellwether")
+    host = macos.process_host(psutil=lambda: None)
+    assert (host.start_ticks(1), host.children(1), host.arguments(1), host.open_files(1)) == (None, [], [], [])
+    assert list(host.family(5, 6)) == [5, 6]
+    assert records(caplog) == [(logging.WARNING, "psutil cannot be imported: the rows show the time of the terminal "
+                                                 "and no model")]
+
+
+def claude_home(tmp_path, pid, proc_start):
+    """A made-up home with a session file of Claude Code for `pid` and its transcript."""
+    session = "0a1b2c3d-1111-2222-3333-444455556666"
+    folder = tmp_path / "home" / ".claude"
+    (folder / "sessions").mkdir(parents=True)
+    (folder / "sessions" / f"{pid}.json").write_text(json.dumps(
+        {"pid": pid, "sessionId": session, "cwd": "/made/up", "startedAt": 1_795_000_000_000, "procStart": proc_start}))
+    transcript = folder / "projects" / "-made-up" / f"{session}.jsonl"
+    transcript.parent.mkdir(parents=True)
+    transcript.write_text(json.dumps({"type": "assistant", "message": {"model": "claude-opus-5-5", "role": "assistant",
+                                                                       "content": []}}, separators=(",", ":")) + "\n")
+    return tmp_path / "home"
+
+
+@pytest.mark.parametrize("proc_start, model, reason", [
+    ("Fri Nov 20 16:18:03 2026", "claude-opus-5-5", "ok"),  # the form of ps lstart: proven for this process
+    ("Fri Nov 20 16:18:04 2026", None, "other_process"),  # an older process with this pid
+    ("Fri Nov 20 16:18:03 2026 ", None, "other_process"),  # an other form: no model, never a guess
+    ("1795191483750", None, "other_process"),
+    (1795191483, None, "other_process"),
+])
+def test_a_claude_session_counts_only_when_its_proc_start_is_the_start_of_the_live_process(
+        tmp_path, proc_start, model, reason):
+    from bellwether.sessions import read_claude
+    home = claude_home(tmp_path, 700, proc_start)
+    host = macos.Host(home, made_up_psutil({700: {"start": START}}))
+    facts = read_claude(host, host.family(700))
+    assert (facts.model, facts.reason) == (model, reason)
+
+
+@on_mac
+def test_on_a_mac_the_start_of_a_process_is_what_ps_lstart_prints():
+    """The proof on the runner: the same text as Claude Code's way to read it (`LC_ALL=C TZ=UTC ps -o lstart=`)."""
+    import os
+    done = subprocess.run(["ps", "-o", "lstart=", "-p", str(os.getpid())], capture_output=True, text=True,
+                          env={**os.environ, "LC_ALL": "C", "TZ": "UTC"}, check=True)
+    host = macos.process_host()
+    assert host.start_ticks(os.getpid()) == done.stdout.strip()
+
+
+@on_mac
+def test_on_a_mac_psutil_gives_the_children_the_arguments_and_the_open_files(tmp_path):
+    import os
+    path = tmp_path / "made-up.jsonl"
+    path.write_text("")
+    child = subprocess.Popen([sys.executable, "-c", "import sys, time; f = open(sys.argv[1]); time.sleep(30)",
+                              str(path)])
+    try:
+        host = macos.process_host()
+        import time
+        end = time.monotonic() + 10
+        while time.monotonic() < end and str(path.resolve()) not in map(os.path.realpath, host.open_files(child.pid)):
+            time.sleep(0.1)
+        assert child.pid in host.children(os.getpid())
+        assert host.arguments(child.pid)[-1] == str(path)
+        assert str(path.resolve()) in map(os.path.realpath, host.open_files(child.pid))
+    finally:
+        child.kill()
+        child.wait()
