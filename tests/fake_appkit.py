@@ -143,5 +143,10 @@ def make_kit(running=(True,), window=None, has_activate=True):
     appkit = SimpleNamespace(**CONSTANTS,
                              NSRunningApplication=SimpleNamespace(runningApplicationsWithBundleIdentifier_=running_apps),
                              NSApplication=SimpleNamespace(sharedApplication=lambda: app), NSPanel="NSPanel")
+    # The app in front (the one with the keyboard): a test changes `kit.front.pid` (None: no app in front).
+    front = SimpleNamespace(pid=501)
+    workspace = SimpleNamespace(frontmostApplication=lambda: None if front.pid is None else SimpleNamespace(
+        processIdentifier=lambda: front.pid))
+    appkit.NSWorkspace = SimpleNamespace(sharedWorkspace=lambda: workspace)
     return SimpleNamespace(AppKit=appkit, objc=SimpleNamespace(objc_object=objc_object), calls=calls, app=app,
-                           window=window)
+                           window=window, front=front)

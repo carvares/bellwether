@@ -234,6 +234,16 @@ def clean_environment(argv: list[str], names, commands: dict[str, str]) -> tuple
 ALWAYS_SHOW = "_q_macAlwaysShowToolWindow"
 
 
+# Whether the private `_setPreventsActivation:` was missing (a later macOS can drop it): one log line, one time.
+_missing_private_call: list[bool] = []
+
+
+def _no_private_call() -> None:
+    if not _missing_private_call:
+        _missing_private_call.append(True)
+        log.warning("this macOS has no _setPreventsActivation: (private): a click on the panel may activate the program")
+
+
 def _panel_behaviour(appkit) -> int:
     """On every Space, also beside an app in full screen, not in the window cycle and not moved by Mission Control."""
     return (appkit.NSWindowCollectionBehaviorCanJoinAllSpaces | appkit.NSWindowCollectionBehaviorFullScreenAuxiliary
@@ -280,13 +290,15 @@ def _prepare_panel(window, kit) -> None:
     try:
         appkit = kit.AppKit
         panel = native_window(window, kit)
-        panel.setLevel_(appkit.NSStatusWindowLevel)  # above the floating windows of other apps, under the menu bar
+        panel.setLevel_(appkit.NSStatusWindowLevel)  # 25: above the floating windows of other apps and the menu bar (24)
         panel.setCollectionBehavior_(_panel_behaviour(appkit))
         # A click does not activate the app (the keyboard stays where the person types). The style mask alone is not
         # enough after the window exists (AppKit, as found by Wine): the private call is used when it is there.
         panel.setStyleMask_(panel.styleMask() | appkit.NSWindowStyleMaskNonactivatingPanel)
         if panel.respondsToSelector_("_setPreventsActivation:"):
             panel._setPreventsActivation_(True)
+        else:
+            _no_private_call()
         if panel.respondsToSelector_("setBecomesKeyOnlyIfNeeded:"):
             panel.setBecomesKeyOnlyIfNeeded_(True)
         panel.setHidesOnDeactivate_(False)
@@ -301,6 +313,9 @@ def _prepare_panel(window, kit) -> None:
 # A property of the window: the calls that asked the system to make this app active at the last show ("activate",
 # "activate, activateIgnoringOtherApps", "activateIgnoringOtherApps", "raise"), for the self-test.
 ACTIVATION = "bellwetherActivation"
+# A property of the window: why the second way was not taken at the last show ("" when it was taken or not needed):
+# "other app in front" (the person went to an other app during the wait). For the self-test.
+SECOND_WAY_SKIPPED = "bellwetherSecondWaySkipped"
 # Milliseconds after `activate` until the second way, when the app is not active then.
 SECOND_WAY_MS = 300
 
@@ -310,19 +325,33 @@ def _later(milliseconds: int, function) -> None:
     QTimer.singleShot(milliseconds, function)
 
 
+def frontmost(kit) -> int | None:
+    """The pid of the app in front (the one that has the keyboard), or None when it cannot be read."""
+    try:
+        app = kit.AppKit.NSWorkspace.sharedWorkspace().frontmostApplication()
+        return None if app is None else int(app.processIdentifier())
+    except Exception:  # an answer of AppKit that is not there: nothing known
+        return None
+
+
 def activate_app(window, kit, later=_later) -> None:
     """Ask the system to make this app the active app and `window` its key window, so that the keyboard goes to it.
     macOS 14 and later activate by cooperation (`activate`): the system gives the activation to an app that asks
     while the person acts in it (a click in the tray menu or on the panel opens these windows) and can refuse it
     otherwise. So when the app is still not active SECOND_WAY_MS later, the older `activateIgnoringOtherApps:` asks
-    again (deprecated, still there). Each way ends with `makeKeyAndOrderFront:`. Without pyobjc: Qt's raise, which
-    also asks for the activation. The calls are kept on the window (ACTIVATION)."""
+    again (deprecated, still there; it gets past the cooperation) — only when nothing changed in that time: the same
+    app is in front as at the request and the window still shows. When the person went to an other app, the program
+    does not take the keyboard from it (the number keys of the answer window answer an agent). Each way ends with
+    `makeKeyAndOrderFront:`. Without pyobjc: Qt's raise, which also asks for the activation. The calls are kept on the
+    window (ACTIVATION, SECOND_WAY_SKIPPED)."""
     if kit is None:
         window.raise_()
         window.setProperty(ACTIVATION, "raise")
         return
+    window.setProperty(SECOND_WAY_SKIPPED, "")
     try:
         app = kit.AppKit.NSApplication.sharedApplication()
+        front = frontmost(kit)
         if app.respondsToSelector_("activate"):
             app.activate()
             call = "activate"
@@ -342,6 +371,9 @@ def activate_app(window, kit, later=_later) -> None:
     def second_way() -> None:
         try:
             if app.isActive() or not window.isVisible():
+                return
+            if front is None or frontmost(kit) != front:
+                window.setProperty(SECOND_WAY_SKIPPED, "other app in front")
                 return
             app.activateIgnoringOtherApps_(True)
             native_window(window, kit).makeKeyAndOrderFront_(None)
@@ -376,7 +408,8 @@ def window_facts(window, *, appkit=None) -> dict:
     kit = (appkit or load_appkit)()
     if kit is None:
         return {"pyobjc": False, "always_show_property": bool(window.property(ALWAYS_SHOW)),
-                "activation_asked": str(window.property(ACTIVATION) or "")}
+                "activation_asked": str(window.property(ACTIVATION) or ""),
+                "second_way_skipped": str(window.property(SECOND_WAY_SKIPPED) or "")}
     appkit_ = kit.AppKit
     native = native_window(window, kit)
     app = appkit_.NSApplication.sharedApplication()
@@ -397,6 +430,8 @@ def window_facts(window, *, appkit=None) -> dict:
         "always_show_property": bool(window.property(ALWAYS_SHOW)),
         "activation_policy": int(app.activationPolicy()),
         "activation_asked": str(window.property(ACTIVATION) or ""),
+        "second_way_skipped": str(window.property(SECOND_WAY_SKIPPED) or ""),
+        "prevents_activation_call": bool(native.respondsToSelector_("_setPreventsActivation:")),
         "app_active": bool(app.isActive()),
     }
 
