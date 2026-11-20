@@ -1,0 +1,178 @@
+"""`python -m bellwether --self-test`: the program with made-up agents (no Herdr needed), and ONE JSON object on
+stdout with the facts of its real windows. For a machine that nobody of the project can look at (the GitHub runners
+of macOS and Windows).
+
+It shows the panel for about 3 seconds, then each layout and the options window. Before the wait of each step it
+writes one line to stderr, "self-test: shown <step>": a script can take a picture of the screen then. Then it prints
+the facts and exits (0, or 1 when the panel did not load). It takes no lock, writes no log file, and reads and writes
+no setting of the user: the settings file is in a temporary folder. The log lines go to stderr. Every name and text
+of the agents is made up.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+from PySide6.QtCore import QtMsgType, Qt, qInstallMessageHandler, qVersion
+from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtWidgets import QApplication, QSystemTrayIcon
+
+from . import layouts, platform
+from .backend import Backend
+from .icons import Icons
+from .options import Options
+from .state import Agent
+from .tray import Tray
+
+# The seconds that the panel shows first, and that each later step shows.
+SHOW = 3.0
+STEP = 1.5
+# Made-up agents: one of each status, programs with and without an icon.
+AGENTS = [
+    Agent("t1", "blocked", "made-up reviewer", "Main", "claude-code"),
+    Agent("t2", "working", "made-up builder", "api / one", "codex"),
+    Agent("t3", "working", "", "api / one", "opencode"),
+    Agent("t4", "done", "made-up writer", "docs", "claude-code"),
+    Agent("t5", "idle", "made-up planner", "Main", "gemini"),
+    Agent("t6", "idle", "", "docs", ""),
+]
+
+
+class MadeUpClient:
+    """In the place of the Herdr client: the made-up agents, and a jump that does nothing."""
+
+    def list_agents(self) -> list[Agent]:
+        return list(AGENTS)
+
+    def focus_agent(self, key: str) -> None:
+        pass
+
+
+def wait(app, seconds: float) -> None:
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        app.processEvents()
+        time.sleep(0.01)
+
+
+TYPE_MASK = 0xFF  # Qt.WindowType_Mask: the type of the window; the bits above it are its hints
+
+
+def flag_names(flags) -> list[str]:
+    """The type of the window (for example "Tool") and the name of each hint (for example "FramelessWindowHint")."""
+    value = int(flags.value if hasattr(flags, "value") else flags)
+    members = Qt.WindowType.__members__.items()
+    kind = [name for name, flag in members if flag.value == value & TYPE_MASK and name != "Widget"][:1]
+    hints = [name for name, flag in members if flag.value > TYPE_MASK and flag.value & value == flag.value
+             and bin(flag.value).count("1") == 1]
+    return kind + sorted(set(hints))
+
+
+def rect(r) -> list[int]:
+    return [r.x(), r.y(), r.width(), r.height()]
+
+
+def qt_facts(window) -> dict:
+    """The facts of a window as Qt has them."""
+    screen = window.screen()
+    return {
+        "visible": window.isVisible(),
+        "exposed": window.isExposed(),
+        "active": window.isActive(),
+        "flags": int(window.flags().value),
+        "flag_names": flag_names(window.flags()),
+        "frame": rect(window.frameGeometry()),
+        "geometry": rect(window.geometry()),
+        "screen": None if screen is None else {"name": screen.name(), "geometry": rect(screen.geometry()),
+                                               "available": rect(screen.availableGeometry()),
+                                               "ratio": screen.devicePixelRatio()},
+    }
+
+
+def native_facts(window) -> dict:
+    try:
+        return platform.window_facts(window)
+    except Exception as error:  # the facts of the system: a failure is a fact too
+        return {"error": type(error).__name__}
+
+
+def run(load_panel, show: float = SHOW, step: float = STEP, out=sys.stdout, err=sys.stderr) -> int:
+    """`load_panel`: the load of the panel of the program (`__main__.load_panel`), with its shell rule."""
+    began = time.monotonic()
+    log = logging.getLogger("bellwether")
+    handler = logging.StreamHandler(err)
+    handler.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
+    log.addHandler(handler)
+    level = log.level
+    log.setLevel(logging.INFO)
+    messages: list[str] = []
+    previous = qInstallMessageHandler(
+        lambda kind, _context, text: messages.append(text) if kind != QtMsgType.QtDebugMsg else None)
+
+    def shown(name: str) -> None:
+        print(f"self-test: shown {name}", file=err, flush=True)
+
+    platform.prepare_environment()
+    app = QApplication.instance() or QApplication(sys.argv[:1])
+    app.setApplicationName("bellwether")
+    app.setQuitOnLastWindowClosed(False)
+    platform.prepare_app(app)
+    facts: dict = {"system": sys.platform, "qt_platform": app.platformName(), "qt_version": qVersion()}
+    with tempfile.TemporaryDirectory(prefix="bellwether-self-test-") as folder:
+        backend = Backend(MadeUpClient(), settings_path=Path(folder) / "state.json",
+                          icons=Icons(Path(folder) / "app", Path(folder) / "cache"))
+        engine = QQmlApplicationEngine()
+        engine.rootContext().setContextProperty("backend", backend)
+        facts["shell"] = load_panel(engine)
+        tray = None
+        try:
+            if not engine.rootObjects():
+                facts["error"] = "the QML interface did not load"
+                return 1
+            panel = engine.rootObjects()[0]
+            platform.prepare_window(panel, "panel")
+            backend.apply(AGENTS)
+            options = Options(engine)
+            facts["tray"] = {"available": QSystemTrayIcon.isSystemTrayAvailable(), "visible": False}
+            if facts["tray"]["available"]:
+                tray = Tray(backend, panel, app, options.open)
+                facts["tray"]["visible"] = tray.findChild(QSystemTrayIcon).isVisible()
+            wait(app, 0.5)
+            shown(f"panel-{backend.layout}")
+            wait(app, show)
+            facts["panel"] = qt_facts(panel)
+            facts["native"] = native_facts(panel)
+            facts["layouts"] = {}
+            for letter, _slug, _name in layouts.LAYOUTS:
+                backend.setLayout(letter)
+                panel.setProperty("openState", "working")  # a layout with a group open: the rows show
+                wait(app, 0.5)
+                facts["layouts"][letter] = {"shown": backend.layout == letter, "visible": panel.isVisible(),
+                                            "size": [panel.width(), panel.height()]}
+                shown(f"layout-{letter}")
+                wait(app, step)
+            options.open()
+            wait(app, 0.5)
+            window = engine.rootObjects()[-1]
+            facts["options"] = {**qt_facts(window), "native": native_facts(window)}
+            facts["panel_after_options"] = {"active": panel.isActive(), "native": native_facts(panel)}
+            shown("options")
+            wait(app, step)
+            window.close()
+            wait(app, 0.2)
+        finally:
+            facts["messages"] = messages[:20]
+            facts["seconds"] = round(time.monotonic() - began, 1)
+            print(json.dumps(facts, sort_keys=True), file=out, flush=True)
+            del tray
+            del engine
+            backend.stop()
+            app.processEvents()
+            qInstallMessageHandler(previous)
+            log.removeHandler(handler)
+            log.setLevel(level)
+    return 0 if "error" not in facts else 1

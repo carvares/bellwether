@@ -79,6 +79,9 @@ def load_panel(engine) -> str:
 
 
 def main() -> int:
+    if sys.argv[1:] == ["--self-test"]:  # made-up agents and the facts of the windows as JSON: see selftest.py
+        from .selftest import run  # noqa: PLC0415
+        return run(load_panel)
     # The lock comes first: a widget that runs (of the old name too) still uses its folders.
     lock = take_single_instance_lock()
     if lock is None:
