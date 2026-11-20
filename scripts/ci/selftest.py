@@ -41,10 +41,12 @@ WINDOWS_SHOT = ("Add-Type -AssemblyName System.Windows.Forms, System.Drawing; "
                 "$i.Save('{path}', [System.Drawing.Imaging.ImageFormat]::Png)")
 
 
-def private(text: str) -> str:
-    """The text with the home folder as "~": a path of a checkout can hold the name of a person."""
-    home = str(Path.home())
-    return text.replace(home, "~") if len(home) > 1 else text
+def private(text: str, home=None) -> str:
+    """The text with the home folder as "~" in each form a path takes (bellwether/selftest.py, `without_home`): a
+    path of a checkout can hold the name of a person."""
+    sys.path.insert(0, str(ROOT))
+    from bellwether.selftest import without_home  # noqa: PLC0415
+    return without_home(text, home)
 
 
 def on_a_runner(environ=None) -> bool:
@@ -102,6 +104,10 @@ def checks(facts: dict, system: str | None = None) -> list[tuple[str, str, objec
     answer = facts.get("answer", {})
     check("the answer window is visible with the made-up prompt", answer.get("visible") is True
           and answer.get("prompt") == "ready", {k: answer.get(k) for k in ("visible", "prompt", "error")})
+    for name, window in (("options", options), ("answer", answer)):
+        check(f"the body of the {name} window is opaque (an other app's text cannot show through it)",
+              window.get("opaque_dialogs") is True and window.get("body_alpha") == 1.0,
+              {k: window.get(k) for k in ("opaque_dialogs", "body_alpha")})
     check("no Qt warning", facts.get("messages") == [], facts.get("messages"), soft=True)
     tray = facts.get("tray", {})
     check("the tray item is there", tray.get("visible") is True, tray, soft=True)

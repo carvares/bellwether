@@ -111,6 +111,22 @@ def test_the_system_prepares_the_window_one_time_when_it_is_made(app, desk, monk
     assert calls == [(window, "answer")]
 
 
+def test_with_the_plain_shell_the_body_is_opaque_and_with_the_layer_shell_it_has_the_opacity_of_the_panel(app, desk):
+    """Windows run 1: the text of a console window showed through the answer window. The plain shell (an other app
+    can be behind) draws the body with no transparency; the layer shell keeps the look the person chose."""
+    d = desk()
+    window = d.answer_for("t1")
+    background = QColor(d.backend.colors["background"])
+    assert background.alphaF() < 1  # the made-up look has some transparency
+    assert d.backend.opaqueDialogs is False
+    assert QColor(d.one("isFrame").property("color")).name(QColor.NameFormat.HexArgb) == d.backend.colors["background"]
+    d.backend.opaqueDialogs = True
+    settle(app)
+    frame = QColor(d.one("isFrame").property("color"))
+    assert frame.alphaF() == 1 and frame.name() == background.name()  # the same colour, opaque
+    assert window.isVisible()
+
+
 # ----- ready: the question and one button for each option -----
 
 @pytest.mark.parametrize("letter", LETTERS)
@@ -665,11 +681,11 @@ ANSWER_FILES = [layouts.UI_PATH / "Answer.qml", *((layouts.UI_PATH / "controls")
 
 def test_every_text_of_the_answer_window_is_plain_text_and_nothing_is_logged():
     for file in ANSWER_FILES:
-        text = file.read_text()
+        text = file.read_text(encoding="utf-8")
         assert "console." not in text and "print(" not in text, file.name
         assert len(re.findall(r"^\s*Text \{", text, re.M)) == text.count("textFormat: Text.PlainText"), file.name
         assert "Text.RichText" not in text and "Text.StyledText" not in text and "Text.AutoText" not in text
-    window = ANSWER_FILES[0].read_text()
+    window = ANSWER_FILES[0].read_text(encoding="utf-8")
     # The window sends only through these two slots, each from one function that the person starts.
     assert window.count("backend.answer(") == 1 and window.count("backend.answerText(") == 1
     # Two timers: the guard of the pointer and the quiet time of the number keys after a new question.
@@ -677,7 +693,7 @@ def test_every_text_of_the_answer_window_is_plain_text_and_nothing_is_logged():
 
 
 def test_the_window_has_every_fixed_message_from_the_engine_and_none_of_its_own():
-    window = ANSWER_FILES[0].read_text()
+    window = ANSWER_FILES[0].read_text(encoding="utf-8")
     for message in MESSAGES.values():
         assert message not in window
 

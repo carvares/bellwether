@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sys
 import tempfile
 import time
@@ -20,6 +21,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QtMsgType, Qt, qInstallMessageHandler, qVersion
 from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtQuick import QQuickWindow  # noqa: F401  (the windows of the engine are QQuickWindows to Python)
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
 from . import layouts, platform
@@ -128,6 +130,30 @@ def qt_facts(window) -> dict:
     }
 
 
+def body_alpha(window) -> float | None:
+    """The opacity of the colour that the body of a window draws (its item with `isFrame`), 0 to 1. A picture of the
+    screen cannot tell it: the screen has no alpha."""
+    items = [window.contentItem()]
+    while items:
+        item = items.pop()
+        if item.property("isFrame"):
+            return round(item.property("color").alphaF(), 3)
+        items += item.childItems()
+    return None
+
+
+def without_home(text: str, home=None) -> str:
+    """The text with the home folder of the person as "~" (a path of a checkout holds the name of a person): in each
+    form a path can take in a text — the separators of Windows or forward slashes (a file URL), and any case of the
+    letters (Windows paths have no case). `home`: for a test (None: the home folder of this process)."""
+    home = str(Path.home() if home is None else home).rstrip("/\\")
+    if len(home.strip("/\\:")) < 2:  # no home folder, or a root: nothing to hide
+        return text
+    for form in dict.fromkeys((home, home.replace("\\", "/"), home.replace("/", "\\"))):
+        text = re.sub(re.escape(form), "~", text, flags=re.IGNORECASE)
+    return text
+
+
 def native_facts(window) -> dict:
     try:
         return platform.window_facts(window)
@@ -145,11 +171,9 @@ def run(start_panel, show: float = SHOW, step: float = STEP, out=sys.stdout, err
     level = log.level
     log.setLevel(logging.INFO)
     messages: list[str] = []
-    home = str(Path.home())
     # A warning of Qt can name a file of the checkout, and its path the name of a person: the home folder is "~".
     previous = qInstallMessageHandler(
-        lambda kind, _context, text: messages.append(text.replace(home, "~") if len(home) > 1 else text)
-        if kind != QtMsgType.QtDebugMsg else None)
+        lambda kind, _context, text: messages.append(without_home(text)) if kind != QtMsgType.QtDebugMsg else None)
 
     def shown(name: str) -> None:
         print(f"self-test: shown {name}", file=err, flush=True)
@@ -198,7 +222,8 @@ def run(start_panel, show: float = SHOW, step: float = STEP, out=sys.stdout, err
             options.open()
             wait(app, 0.5)
             window = engine.rootObjects()[-1]
-            facts["options"] = {**qt_facts(window), "native": native_facts(window)}
+            facts["options"] = {**qt_facts(window), "native": native_facts(window), "body_alpha": body_alpha(window),
+                                "opaque_dialogs": backend.opaqueDialogs}
             facts["panel_after_options"] = {"active": panel.isActive(), "native": native_facts(panel)}
             shown("options")
             wait(app, step)
@@ -212,7 +237,8 @@ def run(start_panel, show: float = SHOW, step: float = STEP, out=sys.stdout, err
                 facts["answer"] = {"error": "the answer window did not open"}
             else:
                 facts["answer"] = {**qt_facts(answer.window), "native": native_facts(answer.window),
-                                   "prompt": backend.prompt.get("state")}
+                                   "prompt": backend.prompt.get("state"), "body_alpha": body_alpha(answer.window),
+                                   "opaque_dialogs": backend.opaqueDialogs}
                 shown("answer")
                 wait(app, step)
                 answer.window.close()

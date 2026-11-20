@@ -323,8 +323,8 @@ def test_agent_rows_show_the_icon_of_the_program_and_no_program_word(app, window
     folder = tmp_path / "app" / "icons"
     folder.mkdir(parents=True)
     square = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path %sd="M2 2h20v20H2z"/></svg>'
-    (folder / "pi.svg").write_text(square % "")  # a black glyph: it must show in the text colour
-    (folder / "claude.svg").write_text(square % 'fill="#d97757" ')  # a picture: it shows as it is
+    (folder / "pi.svg").write_text(square % "", encoding="utf-8")  # a black glyph: it must show in the text colour
+    (folder / "claude.svg").write_text(square % 'fill="#d97757" ', encoding="utf-8")  # a picture: it shows as it is
     backend.apply([
         Agent("t1", "working", "rev", "Main", "pi"),
         Agent("t2", "working", "", "Main", "claude-code"),
@@ -365,7 +365,7 @@ def test_an_icon_copy_that_was_deleted_shows_again_with_no_warning(app, window, 
     root, backend, messages = window
     folder = tmp_path / "app" / "icons"
     folder.mkdir(parents=True)
-    (folder / "pi.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M2 2h20v20H2z"/></svg>')
+    (folder / "pi.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M2 2h20v20H2z"/></svg>', encoding="utf-8")
     backend.apply([Agent("t1", "working", "", "Main", "pi")])
     settle(app)
     click(app, root, rows(root, "status")[2])
@@ -891,7 +891,7 @@ def test_move_to_next_screen_keeps_the_distance_to_the_nearer_edges(app, window,
 @both_shells
 def test_move_to_next_screen_keeps_the_default_corner_and_saves_only_the_screen(app, window, tmp_path):
     root, backend, messages = window
-    (tmp_path / "state.json").write_text('{"x": 9, "y": 9, "screen": "A", "layout": "C"}')
+    (tmp_path / "state.json").write_text('{"x": 9, "y": 9, "screen": "A", "layout": "C"}', encoding="utf-8")
     use_screens(root, OFFSET, "A", 0, 0)
     root.setProperty("atDefault", True)
     js(root, "root.clampPosition()")
@@ -900,11 +900,11 @@ def test_move_to_next_screen_keeps_the_default_corner_and_saves_only_the_screen(
     # No place in the file: at the next start the panel is at the default corner again, and it follows the
     # width of the screen and of the layout.
     assert (backend.saves, backend.screens) == ([], ["B"])
-    assert json.loads((tmp_path / "state.json").read_text()) == {"screen": "B", "layout": "C"}
+    assert json.loads((tmp_path / "state.json").read_text(encoding="utf-8")) == {"screen": "B", "layout": "C"}
     root.setProperty("atDefault", False)  # a panel that the person moved saves its place
     js(root, "root.moveToNextScreen()")
     assert backend.screens == ["B", "A"] and len(backend.saves) == 1
-    assert json.loads((tmp_path / "state.json").read_text())["x"] == backend.saves[0][0]
+    assert json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))["x"] == backend.saves[0][0]
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
@@ -1101,7 +1101,7 @@ def test_a_panel_that_the_compositor_closes_shows_again_and_a_hidden_panel_stays
 )
 def test_the_start_uses_the_saved_screen_and_place(app, tmp_path, request, shell, saved, at_default, x, y):
     name = app.primaryScreen().name()
-    (tmp_path / "state.json").write_text(saved % name if "%s" in saved else saved)
+    (tmp_path / "state.json").write_text(saved % name if "%s" in saved else saved, encoding="utf-8")
     root, backend, messages = request.getfixturevalue("window")
     settle(app)
     default_x = root.screen().size().width() - WIDTH - 16
@@ -1136,7 +1136,7 @@ def test_a_different_layout_shows_in_the_same_window_and_keeps_the_place_the_scr
     assert place(root) == ("B", 700, 300) and root.property("openState") == "idle"
     assert [r.property("stateName") for r in rows(root, "status")] == ["blocked", "done", "working", "idle"]
     assert len(rows(root, "agent")) == 12
-    assert json.loads((tmp_path / "state.json").read_text()) == {"layout": "T"}
+    assert json.loads((tmp_path / "state.json").read_text(encoding="utf-8")) == {"layout": "T"}
     assert backend.saves == []  # the place did not change: it is not saved again
 
     backend.setLayout("C")
@@ -1206,7 +1206,7 @@ def test_a_bigger_skin_is_kept_on_the_screen_and_the_default_corner_follows_the_
 
 
 def test_a_start_shows_the_saved_layout(app, tmp_path, request):
-    (tmp_path / "state.json").write_text('{"x": 120, "y": 48, "layout": "T"}')
+    (tmp_path / "state.json").write_text('{"x": 120, "y": 48, "layout": "T"}', encoding="utf-8")
     root, backend, messages = request.getfixturevalue("window")
     backend.apply(AGENTS)
     settle(app)
@@ -1224,18 +1224,18 @@ def test_a_skin_that_does_not_load_gives_the_default_layout(app, window, tmp_pat
     settle(app)
     assert backend.layout == "C" and (root.width(), root.height()) == (WIDTH, CLOSED + 2 * AGENT_ROW + LIST_END)
     assert root.isVisible() and root.property("openState") == "working"
-    assert json.loads((tmp_path / "state.json").read_text()) == {"layout": "X"}  # only in memory: the file stays
+    assert json.loads((tmp_path / "state.json").read_text(encoding="utf-8")) == {"layout": "X"}  # only in memory: the file stays
     assert any("Broken.qml" in m for m in messages)  # Qt says why the file did not load
 
 
 def test_a_start_with_a_saved_skin_that_does_not_load_shows_the_default_layout(app, tmp_path, request):
-    (tmp_path / "state.json").write_text('{"layout": "X"}')
+    (tmp_path / "state.json").write_text('{"layout": "X"}', encoding="utf-8")
     root, backend, messages = request.getfixturevalue("window")
     assert not root.isVisible()  # no window without a skin: a layer surface must have a size
     settle(app)
     assert backend.layout == "C" and (root.width(), root.height()) == (WIDTH, OFFLINE)
     assert root.isVisible() and root.property("started") is True
-    assert json.loads((tmp_path / "state.json").read_text()) == {"layout": "X"}
+    assert json.loads((tmp_path / "state.json").read_text(encoding="utf-8")) == {"layout": "X"}
 
 
 @both_shells
@@ -1411,7 +1411,7 @@ def test_no_shell_asks_for_the_focus(name):
     """The panel never takes the keyboard: no QML of the panel window asks for the focus or for the front. (The
     off-screen platform makes every window that shows the active one, so a test of the active window proves
     nothing here: the flag WindowDoesNotAcceptFocus and this rule are the test; the real runs show the rest.)"""
-    text = (UI_PATH / "shells" / name).read_text()
+    text = (UI_PATH / "shells" / name).read_text(encoding="utf-8")
     assert [word for word in ("requestActivate", "forceActiveFocus", "raise()", "focus: true") if word in text] == []
 
 
@@ -1572,7 +1572,7 @@ def test_a_screen_change_of_each_shell_is_in_its_order(tmp_path, name, wanted):
     """Two real screens (off screen, in a process of its own) and a recording double of the shell. The layer shell
     hides the window, sets the place, the screen and surfaceScreen, and shows it again (a layer surface gets its
     output when it is made). The plain shell sets the screen before the geometry, and stays visible."""
-    (tmp_path / "state.json").write_text('{"x": 100, "y": 50, "screen": "RIGHT"}')
+    (tmp_path / "state.json").write_text('{"x": 100, "y": 50, "screen": "RIGHT"}', encoding="utf-8")
     steps = run_on_two_screens(tmp_path, "tests.shell_order", name, str(tmp_path / "state.json"))
     assert steps["start"]["qtScreen"] == "RIGHT" and steps["start"]["window"] == [2020, 50]  # the saved screen
     for step, to, x in (("next screen", "LEFT", 100), ("next screen again", "RIGHT", 2020)):
@@ -1594,7 +1594,7 @@ def run_on_two_screens(tmp_path, module, *arguments):
     config.write_text(json.dumps({"screens": [
         {"name": "LEFT", "x": 0, "y": 0, "width": 1920, "height": 1080, "logicalDpi": 96, "logicalBaseDpi": 96, "dpr": 1},
         {"name": "RIGHT", "x": 1920, "y": 0, "width": 1280, "height": 720, "logicalDpi": 96, "logicalBaseDpi": 96, "dpr": 1},
-    ]}))
+    ]}), encoding="utf-8")
     done = subprocess.run(
         [sys.executable, "-m", module, *arguments], capture_output=True, text=True, timeout=60,
         cwd=Path(__file__).parent.parent, env={**os.environ, "QT_QPA_PLATFORM": f"offscreen:configfile={config}"})
@@ -1669,6 +1669,8 @@ def test_the_start_of_the_panel_gives_the_plain_shell_the_work_area_of_each_scre
         wanted = {screen.name(): none for screen in app.screens()} if chosen == "plain" else {}
         assert json.loads(js(root, "JSON.stringify(root.reserved)")) == wanted
         assert prepared == ["panel"] and root.property("refreshRate") > 0
+        # The answer and the options window: opaque where an other app can be behind them (the plain shell).
+        assert backend.opaqueDialogs is (chosen == "plain")
     finally:
         del engine
         app.processEvents()
@@ -1691,7 +1693,7 @@ def test_without_the_layer_shell_module_only_the_layer_cases_are_skipped(tmp_pat
     assert shell_for("plain", missing) == "plain"
     with pytest.raises(pytest.skip.Exception):
         shell_for("layer", missing)
-    (tmp_path / "qmldir").write_text("module org.kde.layershell\n")
+    (tmp_path / "qmldir").write_text("module org.kde.layershell\n", encoding="utf-8")
     assert shell_for("layer", missing) == "layer"
 
 

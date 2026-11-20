@@ -123,8 +123,11 @@ def load_panel(engine) -> str:
 
 def start_panel(engine, app) -> str:
     """Load the panel (load_panel) and prepare its window: the set-up of the system, the refresh rate, and for the
-    plain shell the work area of the screens. Return the shell."""
+    plain shell the work area of the screens and opaque answer and options windows. Return the shell."""
     shell = load_panel(engine)
+    backend = engine.rootContext().contextProperty("backend")
+    if backend is not None:
+        backend.opaqueDialogs = shell == "plain"
     if engine.rootObjects():
         window = engine.rootObjects()[0]
         platform.prepare_window(window, "panel")

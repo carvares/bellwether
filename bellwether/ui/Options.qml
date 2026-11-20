@@ -159,7 +159,9 @@ Window {
         readonly property bool isFrame: true
         anchors.fill: parent
         radius: options.theme.radius
-        color: options.theme.panelColor
+        // Opaque where an other app's window can be behind this one (the plain shell): decisions and settings must be
+        // readable. The panel colour with its opacity on the layer shell.
+        color: backend.opaqueDialogs ? options.theme.solid(options.theme.panelColor) : options.theme.panelColor
         border.width: options.theme.frameWidth
         border.color: options.theme.frameColor
 

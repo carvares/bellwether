@@ -39,6 +39,9 @@ def test_the_self_test_shows_each_step_and_gives_the_facts_of_the_windows(app, m
     assert facts["tray"] == {"available": False, "visible": False, "items": 0}  # no tray off screen
     assert facts["answer"]["visible"] is True and facts["answer"]["prompt"] == "ready"
     assert facts["answer"]["native"] == {} and facts["answer"]["flag_names"][0] == "Window"
+    # The plain shell: the bodies of the answer and the options window are opaque (the panel keeps its opacity).
+    assert [facts[name]["body_alpha"] for name in ("options", "answer")] == [1.0, 1.0]
+    assert facts["options"]["opaque_dialogs"] is True
     assert [m for m in facts["messages"] if m != OFFSCREEN] == [] and "error" not in facts
     assert "INFO shell: plain" in err.getvalue()
 
@@ -89,8 +92,8 @@ def mac_facts(frame, app_active, items=1):
                 "Tool", "FramelessWindowHint", "WindowStaysOnTopHint", "WindowDoesNotAcceptFocus"],
                 "screen": {"geometry": [0, 0, 1024, 768], "available": [0, 31, 1024, 674]}},
             "native": native, "layouts": {letter: {"shown": True, "visible": True} for letter in "ABCDE"},
-            "options": {"visible": True, "native": asked},
-            "answer": {"visible": True, "prompt": "ready", "native": asked},
+            "options": {"visible": True, "native": asked, "body_alpha": 1.0, "opaque_dialogs": True},
+            "answer": {"visible": True, "prompt": "ready", "native": asked, "body_alpha": 1.0, "opaque_dialogs": True},
             "panel_after_options": {"native": {"visible": True}},
             "tray": {"available": True, "visible": True, "items": items}}
 
@@ -146,8 +149,9 @@ def test_pictures_only_on_a_ci_runner_and_the_home_folder_is_never_written(monke
     module = ci_module()
     assert module.on_a_runner({"CI": "true"}) and module.on_a_runner({"GITHUB_ACTIONS": "true"})
     assert not module.on_a_runner({}) and not module.on_a_runner({"CI": "false"})
-    monkeypatch.setattr(module.Path, "home", classmethod(lambda cls: Path("/home/made-up-person")))
-    assert module.private("file:///home/made-up-person/src/bellwether/ui/X.qml:3") == "file://~/src/bellwether/ui/X.qml:3"
+    assert module.private("file:///home/made-up-person/src/bellwether/ui/X.qml:3", "/home/made-up-person") == (
+        "file://~/src/bellwether/ui/X.qml:3")
+    assert module.private(f"made-up {Path.home()} line") == "made-up ~ line"  # the home folder of this system
     assert module.main(["selftest.py", str(tmp_path)]) == 2 and module.main(["selftest.py", str(tmp_path), "linux"]) == 2
     assert module.shot_command("linux", tmp_path / "a.png") is None
     command = module.shot_command("win32", Path("C:/made-up/it's.png")) if module.shutil.which("powershell") else None
@@ -166,8 +170,9 @@ def windows_facts(foreground_of_program=False, added=""):
                 "Tool", "FramelessWindowHint", "WindowStaysOnTopHint", "WindowDoesNotAcceptFocus"],
                 "screen": {"geometry": [0, 0, 1920, 1080], "available": [0, 0, 1920, 1040]}},
             "native": panel, "layouts": {letter: {"shown": True, "visible": True} for letter in "ABCDE"},
-            "options": {"visible": True, "native": dict(window)},
-            "answer": {"visible": True, "prompt": "ready", "native": dict(window)},
+            "options": {"visible": True, "native": dict(window), "body_alpha": 1.0, "opaque_dialogs": True},
+            "answer": {"visible": True, "prompt": "ready", "native": dict(window), "body_alpha": 1.0,
+                       "opaque_dialogs": True},
             "panel_after_options": {"native": {"visible": True, "topmost": True}},
             "tray": {"available": True, "visible": True, "items": 1}}
 
@@ -189,3 +194,20 @@ def test_the_checks_of_the_windows_runner():
         "no window of the program was in front while only the panel showed (the panel and the start take no focus)",
         "the options window asked for the foreground"]
     assert "Qt gave the panel all its styles (the program added none)" in by(bad)["WARN"]
+    see_through = windows_facts()
+    see_through["answer"]["body_alpha"] = 0.94  # as run 1 of the Windows runner drew it
+    assert by(see_through)["FAIL"] == ["the body of the answer window is opaque (an other app's text cannot show "
+                                       "through it)"]
+
+
+@pytest.mark.parametrize("home, text, wanted", [
+    ("/home/made-up-person", "file:///home/made-up-person/src/X.qml:3: made-up", "file://~/src/X.qml:3: made-up"),
+    ("/home/made-up-person", "/home/made-up-person/a and /home/other/b", "~/a and /home/other/b"),
+    ("C:\\Users\\Made-Up", "C:\\Users\\Made-Up\\src\\bellwether\\ui\\X.qml", "~\\src\\bellwether\\ui\\X.qml"),
+    ("C:\\Users\\Made-Up", "file:///C:/Users/Made-Up/src/X.qml:3", "file:///~/src/X.qml:3"),
+    ("C:\\Users\\Made-Up", "c:\\users\\made-up\\x and C:/USERS/MADE-UP/y", "~\\x and ~/y"),
+    ("C:\\Users\\Made-Up\\", "C:\\Users\\Made-Up\\x", "~\\x"),
+    ("/", "/etc/made-up", "/etc/made-up"),  # no home folder to hide
+])
+def test_the_home_folder_is_never_written_in_any_form_of_a_path(home, text, wanted):
+    assert selftest.without_home(text, home) == wanted
