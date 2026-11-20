@@ -136,6 +136,12 @@ Window {
         return best
     }
 
+    // The pointer at (x, y) of `item` in the whole desktop, or null when the shell does not know it (the layer shell:
+    // a layer surface has no place in a desktop). A shell gives its own.
+    function desktopPoint(item, x, y) {
+        return null
+    }
+
     // Where a drag can put a panel of w × h that wants to be at (gx, gy) of the desktop: the nearest place where
     // the four corners of the panel are on a screen. So the panel goes across an edge that two screens share,
     // and it stops at an edge that has no screen behind it.
@@ -458,8 +464,13 @@ Window {
             lastMoveMs = now
             root.atDefault = false
             // The panel follows the pointer on all the screens. The window stays on its screen until the release.
-            var place = root.dragPlace(root.screens(), root.home.x + root.posX + dx, root.home.y + root.posY + dy,
-                                       root.width, root.height)
+            // Where the shell knows the pointer in the desktop, the panel keeps the point of the press under it;
+            // else the move of the pointer is added to the place of the panel.
+            var at = root.desktopPoint(pointerArea, mouse.x, mouse.y)
+            var place = at ? root.dragPlace(root.screens(), Math.round(at.x - startX), Math.round(at.y - startY),
+                                            root.width, root.height)
+                : root.dragPlace(root.screens(), root.home.x + root.posX + dx, root.home.y + root.posY + dy,
+                                 root.width, root.height)
             root.posX = place.x - root.home.x
             root.posY = place.y - root.home.y
         }

@@ -951,6 +951,68 @@ def test_a_drag_to_the_other_screen_leaves_the_panel_there(app, window, shell):
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
+# A monitor at 150 % (1920 × 1080 pixels) left of one at 100 %, as Qt 6 gives them on Windows and macOS: the area of
+# each screen in Qt's coordinates starts at its place in pixels and has its size in Qt's pixels, so there is a gap from
+# 1280 to 1920 that is on no screen.
+MIXED = [("WIDE", 0, 0, 1280, 720), ("NEAR", 1920, 0, 1280, 720)]
+# Qt's map of a point of the panel to the desktop with these screens: the pixels of the monitor of the window, then
+# the screen under that pixel (QWindow::mapToGlobal, QHighDpi::fromNativeGlobalPosition).
+QT_MIXED_MAP = """root.pointerMap = function(item, x, y) {
+    var p = item.mapToItem(null, x, y)
+    var wide = root.x < 1280
+    var nx = (wide ? root.x * 1.5 : root.x) + p.x * (wide ? 1.5 : 1)
+    var ny = (wide ? root.y * 1.5 : root.y) + p.y * (wide ? 1.5 : 1)
+    return nx < 1920 ? Qt.point(nx / 1.5, ny / 1.5) : Qt.point(nx, ny)
+}"""
+
+
+def at_pixel(root, pixel):
+    """The point of the window under the pointer at `pixel` of the desktop (in pixels of the monitors)."""
+    wide = root.x() < 1280
+    scale = 1.5 if wide else 1.0
+    origin = QPointF(root.x() * scale, root.y() * scale) if wide else QPointF(root.x(), root.y())
+    return ((pixel - origin) / scale).toPoint()
+
+
+@pytest.mark.parametrize("shell", ["plain"], indirect=True)
+def test_a_drag_crosses_the_gap_between_monitors_of_different_scales(app, window):
+    """The pointer moves from the 150 % monitor onto the 100 % one: the panel follows it there (with a move of the
+    pointer in the pixels of the window it would stop at the edge of the gap). At the release it is a panel of the
+    other monitor, with the point of the press under the pointer."""
+    root, backend, messages = window
+    use_screens(root, MIXED, "WIDE", 900, 300)
+    js(root, QT_MIXED_MAP)
+    settle(app)
+    assert (root.x(), root.y()) == (900, 300)
+    left, none = Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier
+    press = QPointF(1350 + 150, 450 + 30)  # the pixel under the point (100, 20) of the panel
+    QTest.mouseMove(root, at_pixel(root, press))
+    QTest.mousePress(root, left, none, at_pixel(root, press))
+    settle(app)
+    seen = []
+    for pixel_x in (1700, 1900, 2000, 2100):
+        time.sleep(0.03)
+        QTest.mouseMove(root, at_pixel(root, QPointF(pixel_x, 480)))
+        settle(app)
+        seen.append(place(root))
+    assert seen[:2] == [("WIDE", 960, 300), ("WIDE", 960, 300)]  # at the edge of the gap: the pointer is on WIDE
+    assert seen[2:] == [("WIDE", 1920, 460), ("WIDE", 2000, 460)]  # on NEAR: under the pointer (2000 - 100, 480 - 20)
+    QTest.mouseRelease(root, left, none, at_pixel(root, QPointF(2100, 480)))
+    settle(app)
+    assert place(root) == ("NEAR", 80, 460) and backend.saves[-1] == (80, 460)
+    assert (root.x(), root.y()) == (2000, 460)
+    # QTest says so of a pointer past the window (the real pointer is held by the window during a drag).
+    assert [m for m in messages if OFFSCREEN_NOTE not in m and "occurs outside target window" not in m] == []
+
+
+@both_shells
+def test_only_the_plain_shell_knows_the_pointer_in_the_desktop(app, window, shell):
+    """The layer shell (a layer surface has no place in a desktop) adds the move of the pointer, as before."""
+    root, _backend, _messages = window
+    known = js(root, "root.desktopPoint(root.contentItem, 5, 6) !== null")
+    assert known is (shell == "plain")
+
+
 @both_shells
 def test_a_drag_stops_at_an_edge_with_no_screen_behind_it(app, window):
     root, backend, messages = window

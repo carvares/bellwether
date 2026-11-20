@@ -36,6 +36,16 @@ PanelShell {
     property bool askedAgain: false
     property bool placeQueued: false
 
+    // The pointer in the whole desktop, as Qt maps a point of an item (a test gives a map of its own). With monitors of
+    // different scales Qt 6 leaves gaps between the areas of the screens in its coordinates (a monitor at 150 % left
+    // of one at 100 %): a move in the pixels of the window cannot cross a gap, but Qt maps a point by the screen under
+    // it, so the pointer is on the other monitor at once.
+    property var pointerMap: function(item, x, y) { return item.mapToGlobal(x, y) }
+
+    function desktopPoint(item, x, y) {
+        return windowSystemPlaces ? null : pointerMap(item, x, y)
+    }
+
     // A screen change first, then the geometry: a new screen that is not part of the same desktop makes Qt make
     // the window again, and the geometry must go to that window; on one desktop Qt picks the same screen from the
     // geometry. Both in one step, before the next frame.
