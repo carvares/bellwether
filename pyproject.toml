@@ -5,6 +5,10 @@ description = "Floating status widget for Herdr agents"
 requires-python = ">=3.12"
 dependencies = [
     "pyside6-essentials==6.12.*",
+    # macOS: the native window of the panel, the activation policy, the raise of the Herdr app (platform/macos.py).
+    "pyobjc-framework-cocoa>=10.3; sys_platform == 'darwin'",
+    # Where there is no /proc to read: the process host of the model line (platform/macos.py).
+    "psutil>=6; sys_platform != 'linux'",
 ]
 
 [dependency-groups]

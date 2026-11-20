@@ -653,3 +653,12 @@ def test_each_font_list_has_the_macos_families_at_its_end(file, linux, mac):
     lists = re.findall(r"Fonts\.first\(\s*\[([^\]]*)\]", text)
     assert len(lists) == 1
     assert re.findall(r'"([^"]+)"', lists[0]) == linux + mac
+
+
+def test_pyobjc_and_psutil_are_dependencies_only_where_they_are_used():
+    import tomllib
+    project = tomllib.loads((Path(macos.__file__).parents[2] / "pyproject.toml").read_text())["project"]
+    marks = {d.split(";")[0].split(">")[0].split("=")[0].strip(): d.split(";")[1].strip() if ";" in d else None
+             for d in project["dependencies"]}
+    assert marks["pyobjc-framework-cocoa"] == "sys_platform == 'darwin'"
+    assert marks["psutil"] == "sys_platform != 'linux'"
