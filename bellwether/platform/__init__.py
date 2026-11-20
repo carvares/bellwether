@@ -41,3 +41,5 @@ SHELL_NEEDS = _system.SHELL_NEEDS
 prepare_environment = _system.prepare_environment
 prepare_app = _system.prepare_app
 prepare_engine = _system.prepare_engine
+SHELL_FILES = _system.SHELL_FILES
+shell = _system.shell

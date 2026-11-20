@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ctypes
+import ctypes.util
 import fcntl
 import json
 import logging
@@ -12,7 +13,9 @@ import signal
 import subprocess
 from pathlib import Path
 
-from PySide6.QtGui import QImageReader
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QGuiApplication, QImageReader
+from PySide6.QtQml import QQmlComponent
 
 from ..layouts import UI_PATH
 
@@ -306,17 +309,24 @@ def app_icon_file(desktop_dirs=None, icon_dirs=None) -> Path | None:
     return find_app_icon(desktop_dirs, icon_dirs)
 
 
-# ----- the set-up of Qt: the Wayland plugin and the layer shell -----
+# ----- the set-up of Qt and the window shell: the layer shell on Wayland, else the plain shell -----
 
 # Holds only a link to the system module org.kde.layershell. The Qt of the wheel does not find it alone.
 IMPORT_PATH = UI_PATH / "imports"
-# What the window shell needs when it does not load, for the log line.
+# What the layer shell needs when it does not load, for the log line.
 SHELL_NEEDS = "the QML module org.kde.layershell (package layer-shell-qt)"
+# The QML file of each window shell. The root object of each is the panel window.
+SHELL_FILES = {"layer": UI_PATH / "shells" / "Layer.qml", "plain": UI_PATH / "shells" / "Plain.qml"}
+# The environment variable that chooses a shell (for a test, or a person on a desktop where the rule is wrong).
+SHELL_VARIABLE = "BELLWETHER_SHELL"
+# The global of the compositor that gives layer surfaces (the wlr-layer-shell protocol).
+LAYER_SHELL_GLOBAL = "zwlr_layer_shell_v1"
 
 
 def prepare_environment() -> None:
-    """Before the QApplication: the Wayland plugin of Qt, unless the person chose a plugin."""
-    os.environ.setdefault("QT_QPA_PLATFORM", "wayland")
+    """Before the QApplication: the Wayland plugin of Qt first and the X11 plugin when there is no Wayland
+    compositor, unless the person chose a plugin."""
+    os.environ.setdefault("QT_QPA_PLATFORM", "wayland;xcb")
 
 
 def prepare_app(app) -> None:
@@ -327,8 +337,96 @@ def prepare_app(app) -> None:
         )
 
 
-def prepare_engine(engine) -> bool:
-    """Give the QML engine the import path of the window shell. True when the QML module of the shell is there: the
-    caller loads the panel only then."""
+def prepare_engine(engine) -> None:
+    """Give the QML engine the import path of the layer shell module (before shell() and before the load)."""
     engine.addImportPath(str(IMPORT_PATH))
-    return (IMPORT_PATH / "org" / "kde" / "layershell" / "qmldir").is_file()
+
+
+def layer_module_loads(engine) -> bool:
+    """True when the QML module org.kde.layershell loads in `engine`."""
+    component = QQmlComponent(engine)
+    component.setData(b"import QtQml\nimport org.kde.layershell\nQtObject {}\n", QUrl())
+    return component.isReady()
+
+
+_GLOBAL = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_char_p, ctypes.c_uint32)
+_GLOBAL_REMOVE = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32)
+
+
+class _RegistryListener(ctypes.Structure):
+    _fields_ = [("global_", _GLOBAL), ("global_remove", _GLOBAL_REMOVE)]
+
+
+def wayland_globals(environ=None) -> set[str] | None:
+    """The names of the interfaces that the Wayland compositor gives (the globals of its registry), read on a
+    connection of our own to $WAYLAND_DISPLAY, which is closed again. None when it cannot be read: no
+    libwayland-client, no compositor, or WAYLAND_SOCKET (a connection that only one client may take)."""
+    environ = os.environ if environ is None else environ
+    if environ.get("WAYLAND_SOCKET"):
+        return None
+    try:
+        lib = ctypes.CDLL(ctypes.util.find_library("wayland-client") or "libwayland-client.so.0")
+    except OSError:
+        return None
+    lib.wl_display_connect.restype = ctypes.c_void_p
+    lib.wl_display_connect.argtypes = [ctypes.c_char_p]
+    lib.wl_display_roundtrip.argtypes = [ctypes.c_void_p]
+    lib.wl_display_disconnect.argtypes = [ctypes.c_void_p]
+    lib.wl_proxy_marshal_array_constructor.restype = ctypes.c_void_p
+    lib.wl_proxy_marshal_array_constructor.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p,
+                                                       ctypes.c_void_p]
+    lib.wl_proxy_add_listener.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+    lib.wl_proxy_destroy.argtypes = [ctypes.c_void_p]
+    name = environ.get("WAYLAND_DISPLAY")
+    display = lib.wl_display_connect(name.encode() if name else None)
+    if not display:
+        return None
+    names: set[str] = set()
+    # The functions stay referenced here until the end: the library calls them during the round trip.
+    listener = _RegistryListener(
+        _GLOBAL(lambda _data, _registry, _name, interface, _version: names.add(interface.decode("ascii", "replace"))),
+        _GLOBAL_REMOVE(lambda _data, _registry, _name: None))
+    try:
+        # wl_display.get_registry (request 1). Its one argument is the new object, which the library makes.
+        new_id = (ctypes.c_uint64 * 1)(0)
+        interface = ctypes.addressof(ctypes.c_char.in_dll(lib, "wl_registry_interface"))
+        registry = lib.wl_proxy_marshal_array_constructor(display, 1, new_id, interface)
+        if not registry:
+            return None
+        try:
+            lib.wl_proxy_add_listener(registry, ctypes.addressof(listener), None)
+            if lib.wl_display_roundtrip(display) < 0:
+                return None
+        finally:
+            lib.wl_proxy_destroy(registry)
+    finally:
+        lib.wl_display_disconnect(display)
+    return names
+
+
+def shell(engine, environ=None, platform_name=None, compositor_globals=None) -> str:
+    """The window shell of the panel: "layer" when the Qt platform is Wayland, the QML module org.kde.layershell
+    loads in `engine` (after prepare_engine) and the compositor gives zwlr_layer_shell_v1; else "plain". When the
+    globals of the compositor cannot be read, the module and the platform decide (the layer shell, as before).
+    BELLWETHER_SHELL=layer or plain chooses the shell; another value is ignored with one log line.
+    The other arguments are for a test: the environment, the name of the Qt platform (else the one of the
+    application), and the function that gives the globals of the compositor (else wayland_globals)."""
+    environ = os.environ if environ is None else environ
+    log = logging.getLogger("bellwether")
+    chosen = environ.get(SHELL_VARIABLE, "")
+    if chosen in SHELL_FILES:
+        return chosen
+    if chosen:
+        log.warning("%s=%r is not layer or plain: ignored", SHELL_VARIABLE, chosen[:40])
+    if not (platform_name if platform_name is not None else QGuiApplication.platformName()).startswith("wayland"):
+        return "plain"
+    if not layer_module_loads(engine):
+        log.warning("the layer shell needs %s: the plain shell", SHELL_NEEDS)
+        return "plain"
+    names = (compositor_globals or (lambda: wayland_globals(environ)))()
+    if names is None:
+        log.info("the globals of the compositor could not be read: the layer shell")
+    elif LAYER_SHELL_GLOBAL not in names:
+        log.warning("the compositor has no %s: the plain shell", LAYER_SHELL_GLOBAL)
+        return "plain"
+    return "layer"

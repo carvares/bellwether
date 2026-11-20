@@ -1,5 +1,6 @@
 """Smoke test of the real panel (the layer shell), loaded the same way as bellwether/__main__.py (off screen)."""
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -1349,3 +1350,27 @@ def test_the_plain_window_goes_to_the_screen_of_the_panel_and_qt_follows_it_duri
         "released": (["RIGHT", 0, 300], [1920, 300], "RIGHT", "RIGHT"),
     }
     assert all(s["visible"] for s in steps.values())
+
+
+@pytest.mark.parametrize("variable, chosen", [(None, "plain"), ("plain", "plain"), ("layer", "layer")])
+def test_the_program_loads_the_panel_in_the_shell_of_the_rule_and_writes_the_shell_in_the_log(
+        app, fake_client, tmp_path, caplog, monkeypatch, variable, chosen):
+    """As bellwether/__main__.py does it. Off screen the platform is not Wayland: the rule gives the plain shell."""
+    from bellwether.__main__ import load_panel
+    if variable is None:
+        monkeypatch.delenv("BELLWETHER_SHELL", raising=False)
+    else:
+        monkeypatch.setenv("BELLWETHER_SHELL", variable)
+    caplog.set_level(logging.INFO, logger="bellwether")
+    backend = Backend(fake_client, settings_path=tmp_path / "state.json", icons=Icons(tmp_path / "app", tmp_path / "cache"))
+    engine = QQmlApplicationEngine()
+    engine.rootContext().setContextProperty("backend", backend)
+    try:
+        assert load_panel(engine) == chosen
+        (root,) = engine.rootObjects()
+        assert bool(root.flags() & Qt.WindowType.WindowStaysOnTopHint) is (chosen == "plain")
+        assert root.property("posX") is not None and root.property("openState") == ""
+        assert [r.getMessage() for r in caplog.records if r.getMessage().startswith("shell:")] == [f"shell: {chosen}"]
+    finally:
+        del engine
+        app.processEvents()

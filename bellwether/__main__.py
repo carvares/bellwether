@@ -68,6 +68,16 @@ def follow_refresh_rate(window) -> None:
     follow()
 
 
+def load_panel(engine) -> str:
+    """Load the panel in the window shell of this system and write the shell in the log. Return the shell; the
+    panel window is engine.rootObjects()[0] when it loaded."""
+    platform.prepare_engine(engine)
+    shell = platform.shell(engine)
+    logging.getLogger("bellwether").info("shell: %s", shell)
+    engine.load(platform.SHELL_FILES[shell])
+    return shell
+
+
 def main() -> int:
     # The lock comes first: a widget that runs (of the old name too) still uses its folders.
     lock = take_single_instance_lock()
@@ -100,10 +110,11 @@ def main() -> int:
     backend = Backend(client, icons=Icons(), events=events, sessions=SessionWatch(client))
     engine = QQmlApplicationEngine()
     engine.rootContext().setContextProperty("backend", backend)
-    if platform.prepare_engine(engine):
-        engine.load(UI_PATH / "shells" / "Layer.qml")
+    shell = load_panel(engine)
     if not engine.rootObjects():
-        logging.getLogger("bellwether").error("the QML interface did not load: it needs %s", platform.SHELL_NEEDS)
+        logging.getLogger("bellwether").error(
+            "the QML interface did not load (shell: %s)%s", shell,
+            f": it needs {platform.SHELL_NEEDS}" if shell == "layer" else "")
         return 1
 
     follow_refresh_rate(engine.rootObjects()[0])

@@ -36,6 +36,8 @@ INTERFACE = {
     "prepare_environment": ("function", ()),
     "prepare_app": ("function", ("app",)),
     "prepare_engine": ("function", ("engine",)),
+    "SHELL_FILES": ("shells", None),
+    "shell": ("function", ("engine", "environ", "platform_name", "compositor_globals")),
 }
 # The names of the package that are not members of a system.
 OWN = {"load", "MODULES", "annotations", "importlib", "sys", "ModuleType", "linux"}
@@ -62,6 +64,8 @@ def test_each_member_of_the_linux_module_has_its_kind_and_its_parameters(name):
         assert tuple(inspect.signature(member).parameters) == parameters
     elif kind == "commands":
         assert member and all(isinstance(k, str) and isinstance(v, str) and v for k, v in member.items())
+    elif kind == "shells":
+        assert set(member) <= {"layer", "plain"} and "plain" in member and all(f.is_file() for f in member.values())
     else:
         assert isinstance(member, str) and member
 
@@ -185,7 +189,8 @@ def test_the_scan_finds_each_forbidden_text():
 def test_the_wayland_plugin_is_the_default_and_a_choice_of_the_person_stays(monkeypatch):
     monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
     linux.prepare_environment()
-    assert linux.os.environ["QT_QPA_PLATFORM"] == "wayland"
+    # Wayland first; the X11 plugin when no Wayland compositor answers (then the plain shell).
+    assert linux.os.environ["QT_QPA_PLATFORM"] == "wayland;xcb"
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
     linux.prepare_environment()
     assert linux.os.environ["QT_QPA_PLATFORM"] == "offscreen"
@@ -200,10 +205,146 @@ def test_a_plugin_that_is_not_wayland_gives_one_warning(caplog):
         (logging.WARNING, "the Qt platform is xcb, not wayland: the widget cannot be an overlay")]
 
 
-def test_the_engine_gets_the_import_path_and_loads_only_with_the_layer_shell_module():
+def test_the_engine_gets_the_import_path_of_the_layer_shell_module():
     paths = []
     engine = SimpleNamespace(addImportPath=paths.append)
-    ready = linux.prepare_engine(engine)
+    assert linux.prepare_engine(engine) is None
     assert paths == [str(linux.IMPORT_PATH)]
-    assert ready == (linux.IMPORT_PATH / "org" / "kde" / "layershell" / "qmldir").is_file()
     assert re.fullmatch(r"the QML module \S+ \(package \S+\)", linux.SHELL_NEEDS)
+
+
+# ----- the window shell on Linux -----
+
+LAYERSHELL_QMLDIR = Path("/usr/lib/qt6/qml/org/kde/layershell/qmldir")
+needs_layershell = pytest.mark.skipif(not LAYERSHELL_QMLDIR.is_file(), reason="org.kde.layershell is not installed")
+WITH_LAYER = {"wl_compositor", "xdg_wm_base", "zwlr_layer_shell_v1"}
+
+
+def never():
+    raise AssertionError("the globals of the compositor are not needed here")
+
+
+@pytest.fixture
+def engine(app):
+    """A QML engine with the import path of the program (the layer shell module loads in it)."""
+    from PySide6.QtQml import QQmlEngine
+    made = QQmlEngine()
+    linux.prepare_engine(made)
+    yield made
+    del made
+
+
+@pytest.fixture
+def bare_engine(app, monkeypatch):
+    """A QML engine in which the layer shell module does not load. (In this process the module can be loaded
+    already, and Qt then finds it in every engine: so the check gives False here. The check itself is tested in a
+    process of its own.)"""
+    from PySide6.QtQml import QQmlEngine
+    monkeypatch.setattr(linux, "layer_module_loads", lambda engine: False)
+    made = QQmlEngine()
+    yield made
+    del made
+
+
+def records(caplog):
+    return [(r.levelno, r.getMessage()) for r in caplog.records]
+
+
+@needs_layershell
+def test_wayland_with_the_module_and_the_protocol_gives_the_layer_shell(engine, caplog):
+    caplog.set_level(logging.INFO, logger="bellwether")
+    assert linux.shell(engine, {}, "wayland", lambda: WITH_LAYER) == "layer"
+    assert linux.shell(engine, {}, "wayland-egl", lambda: WITH_LAYER) == "layer"
+    assert records(caplog) == []
+
+
+@pytest.mark.parametrize("name", ["xcb", "offscreen", "cocoa", "windows", ""])
+def test_a_platform_that_is_not_wayland_gives_the_plain_shell(engine, caplog, name):
+    caplog.set_level(logging.INFO, logger="bellwether")
+    assert linux.shell(engine, {}, name, never) == "plain"
+    assert records(caplog) == []
+
+
+def test_wayland_without_the_module_gives_the_plain_shell(bare_engine, caplog):
+    caplog.set_level(logging.INFO, logger="bellwether")
+    assert linux.shell(bare_engine, {}, "wayland", never) == "plain"
+    assert records(caplog) == [(logging.WARNING, f"the layer shell needs {linux.SHELL_NEEDS}: the plain shell")]
+
+
+@needs_layershell
+def test_wayland_with_the_module_and_a_compositor_without_the_protocol_gives_the_plain_shell(engine, caplog):
+    caplog.set_level(logging.INFO, logger="bellwether")
+    assert linux.layer_module_loads(engine) is True
+    assert linux.shell(engine, {}, "wayland", lambda: {"wl_compositor", "xdg_wm_base"}) == "plain"
+    assert records(caplog) == [(logging.WARNING, "the compositor has no zwlr_layer_shell_v1: the plain shell")]
+
+
+@needs_layershell
+def test_when_the_globals_cannot_be_read_the_module_and_the_platform_decide(engine, caplog):
+    caplog.set_level(logging.INFO, logger="bellwether")
+    assert linux.shell(engine, {}, "wayland", lambda: None) == "layer"
+    assert records(caplog) == [(logging.INFO, "the globals of the compositor could not be read: the layer shell")]
+
+
+CHECK = """
+import sys
+from PySide6.QtGui import QGuiApplication
+from PySide6.QtQml import QQmlEngine
+from bellwether.platform import linux
+app = QGuiApplication([])
+engine = QQmlEngine()
+if sys.argv[1] == "path":
+    linux.prepare_engine(engine)
+print(linux.layer_module_loads(engine))
+"""
+
+
+@needs_layershell
+@pytest.mark.parametrize("given, loads", [("path", "True"), ("none", "False")])
+def test_the_module_loads_only_with_the_import_path_of_the_program(given, loads):
+    """In a new process: the Qt of the wheel finds the system module only through the import path of the program."""
+    import subprocess
+    done = subprocess.run([sys.executable, "-c", CHECK, given], capture_output=True, text=True, timeout=60,
+                          cwd=SOURCE.parent, env={**linux.os.environ, "QT_QPA_PLATFORM": "offscreen"})
+    assert (done.returncode, done.stdout.strip()) == (0, loads), done.stderr[-1000:]
+
+
+@pytest.mark.parametrize("value", ["layer", "plain"])
+def test_the_variable_chooses_the_shell_before_every_other_rule(bare_engine, caplog, value):
+    caplog.set_level(logging.INFO, logger="bellwether")
+    for platform_name in ("wayland", "xcb"):
+        assert linux.shell(bare_engine, {"BELLWETHER_SHELL": value}, platform_name, never) == value
+    assert records(caplog) == []
+
+
+@pytest.mark.parametrize("value", ["Plain", "LAYER", "x11", " plain", "layer-shell" * 10])
+def test_another_value_of_the_variable_is_ignored_with_one_log_line(bare_engine, caplog, value):
+    caplog.set_level(logging.INFO, logger="bellwether")
+    assert linux.shell(bare_engine, {"BELLWETHER_SHELL": value}, "xcb", never) == "plain"
+    assert records(caplog) == [(logging.WARNING, f"BELLWETHER_SHELL={value[:40]!r} is not layer or plain: ignored")]
+
+
+def test_an_empty_variable_is_the_same_as_no_variable(bare_engine, caplog):
+    caplog.set_level(logging.INFO, logger="bellwether")
+    assert linux.shell(bare_engine, {"BELLWETHER_SHELL": ""}, "xcb", never) == "plain"
+    assert records(caplog) == []
+
+
+def test_without_arguments_the_shell_reads_the_environment_and_the_platform_of_the_application(
+        engine, caplog, monkeypatch):
+    monkeypatch.delenv("BELLWETHER_SHELL", raising=False)
+    assert linux.shell(engine) == "plain"  # the tests run off screen
+    monkeypatch.setenv("BELLWETHER_SHELL", "layer")
+    assert linux.shell(engine) == "layer"
+
+
+@pytest.mark.skipif(not linux.os.environ.get("WAYLAND_DISPLAY"), reason="no Wayland compositor")
+def test_the_globals_of_the_real_compositor_are_read_on_a_connection_of_our_own():
+    names = linux.wayland_globals()
+    assert names is not None and {"wl_compositor", "wl_seat"} <= names
+    assert linux.wayland_globals() == names  # the connection was closed and a new one works
+
+
+def test_the_globals_are_none_without_a_compositor_or_with_a_socket_given_to_us():
+    assert linux.wayland_globals({"WAYLAND_DISPLAY": "p2-no-such-compositor"}) is None
+    assert linux.wayland_globals({"WAYLAND_DISPLAY": "wayland-0", "WAYLAND_SOCKET": "7"}) is None
