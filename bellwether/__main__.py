@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import signal
 import sys
 from logging.handlers import RotatingFileHandler
@@ -25,8 +24,6 @@ from .sessions import SessionWatch
 from .tray import Tray, window_icon
 
 LOG_PATH = state_home() / NAME / f"{NAME}.log"
-# Holds only a link to the system module org.kde.layershell. The Qt of the wheel does not find it alone.
-IMPORT_PATH = UI_PATH / "imports"
 
 
 def setup_logging() -> None:
@@ -87,15 +84,12 @@ def main() -> int:
     for level, line in moves:
         logging.getLogger("bellwether").log(level, line)
 
-    os.environ.setdefault("QT_QPA_PLATFORM", "wayland")
+    platform.prepare_environment()
     app = QApplication(sys.argv)
     app.setApplicationName("bellwether")
     app.setQuitOnLastWindowClosed(False)
     app.setWindowIcon(window_icon())  # for the taskbar entry of the answer and the options window
-    if app.platformName() != "wayland":
-        logging.getLogger("bellwether").warning(
-            "the Qt platform is %s, not wayland: the widget cannot be an overlay", app.platformName()
-        )
+    platform.prepare_app(app)
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     signal.signal(signal.SIGTERM, signal.SIG_DFL)
 
@@ -106,13 +100,10 @@ def main() -> int:
     backend = Backend(client, icons=Icons(), events=events, sessions=SessionWatch(client))
     engine = QQmlApplicationEngine()
     engine.rootContext().setContextProperty("backend", backend)
-    engine.addImportPath(str(IMPORT_PATH))
-    if (IMPORT_PATH / "org" / "kde" / "layershell" / "qmldir").is_file():
+    if platform.prepare_engine(engine):
         engine.load(UI_PATH / "Main.qml")
     if not engine.rootObjects():
-        logging.getLogger("bellwether").error(
-            "the QML interface did not load: it needs the QML module org.kde.layershell (package layer-shell-qt)"
-        )
+        logging.getLogger("bellwether").error("the QML interface did not load: it needs %s", platform.SHELL_NEEDS)
         return 1
 
     follow_refresh_rate(engine.rootObjects()[0])

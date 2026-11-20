@@ -13,7 +13,8 @@ from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtTest import QTest
 
 from bellwether import layouts
-from bellwether.__main__ import IMPORT_PATH, UI_PATH
+from bellwether.__main__ import UI_PATH
+from bellwether.platform.linux import IMPORT_PATH
 from bellwether.backend import Backend
 from bellwether.state import STATE_COLORS, Agent
 from tests.test_qml import (  # noqa: F401  (window is a fixture)

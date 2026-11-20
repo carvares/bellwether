@@ -37,3 +37,7 @@ find_executables = _system.find_executables
 spawn_child = _system.spawn_child
 process_host = _system.process_host
 app_icon_file = _system.app_icon_file
+SHELL_NEEDS = _system.SHELL_NEEDS
+prepare_environment = _system.prepare_environment
+prepare_app = _system.prepare_app
+prepare_engine = _system.prepare_engine

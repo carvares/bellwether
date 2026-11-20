@@ -12,7 +12,8 @@ from PySide6.QtCore import qInstallMessageHandler
 from PySide6.QtTest import QTest
 
 from bellwether import layouts
-from bellwether.__main__ import IMPORT_PATH, UI_PATH
+from bellwether.__main__ import UI_PATH
+from bellwether.platform.linux import IMPORT_PATH
 from bellwether.answer import Answer
 from bellwether.backend import Backend
 from bellwether.icons import Icons

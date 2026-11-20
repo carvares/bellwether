@@ -12,7 +12,8 @@ from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent, QQmlExpression, 
 from PySide6.QtQuick import QQuickWindow
 from PySide6.QtTest import QTest
 
-from bellwether.__main__ import IMPORT_PATH, UI_PATH, follow_refresh_rate
+from bellwether.__main__ import UI_PATH, follow_refresh_rate
+from bellwether.platform.linux import IMPORT_PATH
 from bellwether.backend import Backend
 from bellwether.icons import Icons
 from bellwether.layouts import built_skins

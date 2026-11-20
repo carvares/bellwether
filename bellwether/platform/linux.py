@@ -4,6 +4,7 @@ from __future__ import annotations
 import ctypes
 import fcntl
 import json
+import logging
 import os
 import re
 import shutil
@@ -12,6 +13,8 @@ import subprocess
 from pathlib import Path
 
 from PySide6.QtGui import QImageReader
+
+from ..layouts import UI_PATH
 
 
 # ----- the folders: the XDG base folders with the standard defaults -----
@@ -301,3 +304,31 @@ def app_icon_file(desktop_dirs=None, icon_dirs=None) -> Path | None:
     if desktop_dirs is None or icon_dirs is None:
         desktop_dirs, icon_dirs = default_dirs()
     return find_app_icon(desktop_dirs, icon_dirs)
+
+
+# ----- the set-up of Qt: the Wayland plugin and the layer shell -----
+
+# Holds only a link to the system module org.kde.layershell. The Qt of the wheel does not find it alone.
+IMPORT_PATH = UI_PATH / "imports"
+# What the window shell needs when it does not load, for the log line.
+SHELL_NEEDS = "the QML module org.kde.layershell (package layer-shell-qt)"
+
+
+def prepare_environment() -> None:
+    """Before the QApplication: the Wayland plugin of Qt, unless the person chose a plugin."""
+    os.environ.setdefault("QT_QPA_PLATFORM", "wayland")
+
+
+def prepare_app(app) -> None:
+    """After the QApplication: a log line when the plugin is not Wayland (the layer surface needs it)."""
+    if app.platformName() != "wayland":
+        logging.getLogger("bellwether").warning(
+            "the Qt platform is %s, not wayland: the widget cannot be an overlay", app.platformName()
+        )
+
+
+def prepare_engine(engine) -> bool:
+    """Give the QML engine the import path of the window shell. True when the QML module of the shell is there: the
+    caller loads Main.qml only then."""
+    engine.addImportPath(str(IMPORT_PATH))
+    return (IMPORT_PATH / "org" / "kde" / "layershell" / "qmldir").is_file()
