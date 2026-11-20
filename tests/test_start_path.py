@@ -100,3 +100,39 @@ def test_the_event_source_waits_through_the_wait_of_the_platform(monkeypatch):
         os.close(child.write_end)
         for descriptor in source._stop_pipe:
             os.close(descriptor)
+
+
+def text_io_without_encoding(text):
+    """The lines of `read_text`, `write_text` and `open` (not binary) calls with no `encoding=` in the source `text`."""
+    import ast
+    found = []
+    for node in ast.walk(ast.parse(text)):
+        if not isinstance(node, ast.Call):
+            continue
+        named = {keyword.arg for keyword in node.keywords}
+        call = node.func
+        if isinstance(call, ast.Attribute) and call.attr in ("read_text", "write_text") and "encoding" not in named:
+            found.append(node.lineno)
+        elif isinstance(call, ast.Name) and call.id == "open" and "encoding" not in named:
+            mode = node.args[1] if len(node.args) > 1 else next(
+                (keyword.value for keyword in node.keywords if keyword.arg == "mode"), None)
+            if not (isinstance(mode, ast.Constant) and "b" in str(mode.value)):
+                found.append(node.lineno)
+    return found
+
+
+def test_every_text_read_and_write_of_the_program_and_its_scripts_names_its_encoding():
+    """Windows reads and writes text in the encoding of its locale (cp1252) when none is named."""
+    from pathlib import Path
+    root = Path(__file__).parent.parent
+    files = sorted([*(root / "bellwether").rglob("*.py"), *(root / "scripts").rglob("*.py")])
+    assert len(files) > 25
+    found = [f"{path.relative_to(root)}:{line}" for path in files
+             for line in text_io_without_encoding(path.read_text(encoding="utf-8"))]
+    assert found == []
+
+
+def test_the_scan_of_the_encodings_finds_each_form():
+    assert text_io_without_encoding("p.read_text()\np.write_text('x')\nopen(p)\nopen(p, 'w')\n") == [1, 2, 3, 4]
+    assert text_io_without_encoding("p.read_text(encoding='utf-8')\nopen(p, 'rb')\nopen(p, mode='ab')\n"
+                                    "open(p, 'w', encoding='utf-8')\np.read_bytes()\n") == []

@@ -34,7 +34,7 @@ def gone(pid):
     stat = Path(f"/proc/{pid}/stat")
     if stat.exists():
         try:
-            return stat.read_text().rsplit(")", 1)[1].split()[0] == "Z"
+            return stat.read_text(encoding="utf-8").rsplit(")", 1)[1].split()[0] == "Z"
         except (OSError, IndexError):
             return True
     done = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True)
@@ -118,7 +118,7 @@ def test_the_check_of_the_parent_ends_the_command_and_gives_1(tmp_path):
     code = guard.run(os.getpid(), quiet, poll=0.05, grace=1.0,
                      alive=lambda: checks.append(1) or len(checks) < 4 or not marker.exists())
     assert code == 1 and time.monotonic() - began < 5
-    assert wait_gone([int(marker.read_text())], 2), "the command lives on after the end of its parent"
+    assert wait_gone([int(marker.read_text(encoding="utf-8"))], 2), "the command lives on after the end of its parent"
 
 
 def test_the_watcher_sleeps_between_two_checks_and_does_not_poll_in_between(tmp_path):

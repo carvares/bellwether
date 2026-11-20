@@ -132,7 +132,7 @@ def fire(backend):
 
 
 def saved(path):
-    return json.loads(path.read_text()) if path.exists() else None
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
 
 
 def focused(window):
@@ -1062,7 +1062,7 @@ def test_the_window_opens_with_every_value_custom_a_font_that_is_gone_and_a_role
         app, fake_client, state_path, caplog):
     start = {"layout": "B", "scale": 1.75, "fontScale": 1.3, "fontFamily": "A Font That Is Gone",
              "colors": {**CUSTOM, "sparkle": "#123456"}}
-    state_path.write_text(json.dumps(start))
+    state_path.write_text(json.dumps(start), encoding="utf-8")
     messages = []
     previous = qInstallMessageHandler(lambda mode, context, text: messages.append(text))
     window, backend, warnings, engine = make(app, fake_client, state_path)
@@ -1122,7 +1122,7 @@ SIZE_FORMS = [rf"{SIZE}", rf"Math\.min\({SIZE},\s*{SIZE}\)", rf"\w+\.\w+\s*\?\s*
 def test_no_control_file_has_a_text_size_or_a_look_of_qt_quick_controls():
     assert len(CONTROL_FILES) == 16
     for file in CONTROL_FILES:
-        text = file.read_text()
+        text = file.read_text(encoding="utf-8")
         assert "QtQuick.Controls" not in text, file.name
         uses = re.findall(r"\bpixelSize\b\s*(:?)\s*([^\n;}]*)", text)
         for colon, value in uses:
@@ -1130,13 +1130,13 @@ def test_no_control_file_has_a_text_size_or_a_look_of_qt_quick_controls():
             assert any(re.fullmatch(form, value.strip()) for form in SIZE_FORMS), f"{file.name}: pixelSize: {value}"
         assert "pointSize" not in text, file.name
     # The limits and the steps of the three sliders are those of the backend, not numbers of the window.
-    text = (layouts.UI_PATH / "Options.qml").read_text()
+    text = (layouts.UI_PATH / "Options.qml").read_text(encoding="utf-8")
     for member in ("scaleMin", "scaleMax", "scaleStep", "scaleDefault", "fontScaleMin", "fontScaleMax",
                    "fontScaleStep", "fontScaleDefault", "opacityMin", "opacityMax", "opacityStep", "fontFamilies",
                    "colorRoles", "lookIsCustom"):
         assert f"backend.{member}" in text, member
     for file in CONTROL_FILES:
-        assert not re.search(r"^\s*(from|to|step|defaultValue):\s*[\d.]", file.read_text(), re.M), file.name
+        assert not re.search(r"^\s*(from|to|step|defaultValue):\s*[\d.]", file.read_text(encoding="utf-8"), re.M), file.name
 
 
 # The colours that a control file may state, each with its reason. Every other colour comes from the theme.
@@ -1152,7 +1152,7 @@ COLOUR_LITERALS = {
 
 def test_no_control_file_has_a_colour_of_its_own_except_the_presets_and_the_documented_ones():
     for file in CONTROL_FILES:
-        text = file.read_text()
+        text = file.read_text(encoding="utf-8")
         if file.name == "ColorEditor.qml":  # the palette: 16 presets, its purpose
             (palette,) = re.findall(r"presets: \[([^\]]*)\]", text)
             assert len(re.findall(r'"#[0-9a-f]{6}"', palette)) == 16
@@ -1192,17 +1192,17 @@ def test_the_setting_of_the_model_line_is_in_the_layout_section_and_a_click_chan
     click(app, window, row)
     assert backend.showMeta is False and row.property("checked") is False
     assert check_state(row)[2] is False and focused(window) == "Show model and session time"
-    assert json.loads(state_path.read_text()).get("showMeta") is False
+    assert json.loads(state_path.read_text(encoding="utf-8")).get("showMeta") is False
     for which in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter):  # the keys change it too
         before = backend.showMeta
         key(app, window, which)
         assert backend.showMeta is (not before) and row.property("checked") is backend.showMeta
-    assert backend.showMeta is True and "showMeta" not in json.loads(state_path.read_text())
+    assert backend.showMeta is True and "showMeta" not in json.loads(state_path.read_text(encoding="utf-8"))
     actions = QAccessible.queryAccessibleInterface(row).actionInterface()
     assert "Toggle" in actions.actionNames()
     actions.doAction("Toggle")  # a screen reader changes it
     settle(app)
-    assert backend.showMeta is False and json.loads(state_path.read_text())["showMeta"] is False
+    assert backend.showMeta is False and json.loads(state_path.read_text(encoding="utf-8"))["showMeta"] is False
 
 
 def test_the_setting_of_the_model_line_shows_the_saved_value_when_the_window_opens(app, shown):

@@ -153,8 +153,8 @@ def test_the_lock_takes_the_first_byte_without_truncating_and_a_second_lock_is_r
     path = tmp_path / "made" / "bellwether.lock"  # the folder is made
     first = windows.lock(path, msvcrt=lambda: fake)
     assert first is not None and fake.calls == [(2, 1, 0)]
-    path.write_text("x")  # an other process wrote into it: a second open must not empty it
-    assert windows.lock(path, msvcrt=lambda: fake) is None and path.read_text() == "x"
+    path.write_text("x", encoding="utf-8")  # an other process wrote into it: a second open must not empty it
+    assert windows.lock(path, msvcrt=lambda: fake) is None and path.read_text(encoding="utf-8") == "x"
     first.close()
 
 
@@ -488,7 +488,7 @@ def test_on_windows_a_process_that_the_event_child_starts_does_not_end_with_the_
         end = time.monotonic() + 5
         while not (tmp_path / "pid").exists() and time.monotonic() < end:
             time.sleep(0.05)
-        other = int((tmp_path / "pid").read_text())
+        other = int((tmp_path / "pid").read_text(encoding="utf-8"))
         parent.kill()
         parent.wait(10)
         time.sleep(1.0)
@@ -604,7 +604,7 @@ def test_the_start_of_a_process_is_never_the_form_of_claude_code_so_a_session_gi
     folder.mkdir(parents=True)
     (folder / "700.json").write_text(json.dumps({"pid": 700, "procStartFt": "134077000000000000",
                                                  "sessionId": "0" * 8 + "-0000-0000-0000-" + "0" * 12,
-                                                 "startedAt": 1795191483000}))
+                                                 "startedAt": 1795191483000}), encoding="utf-8")
     assert sessions.read_claude(host, [700]).reason == "other_process"
 
 
@@ -620,7 +620,7 @@ def test_the_icon_is_the_svg_beside_herdr_app(tmp_path):
     app = tmp_path / "herdr-app.exe"
     app.write_bytes(b"MZ")
     assert windows.app_icon_file(which=lambda name: str(app)) is None  # no svg: the circle
-    (tmp_path / "herdr-app.svg").write_text("<svg/>")
+    (tmp_path / "herdr-app.svg").write_text("<svg/>", encoding="utf-8")
     assert windows.app_icon_file(which=lambda name: str(app)) == tmp_path / "herdr-app.svg"
     assert windows.app_icon_file(which=lambda name: None) is None or os.environ.get("LOCALAPPDATA")
 

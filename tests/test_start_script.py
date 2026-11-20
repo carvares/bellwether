@@ -22,7 +22,7 @@ def made_up_system(tmp_path, system: str, setsid: bool) -> str:
         found = shutil.which(name)
         assert found, name
         (tools / name).symlink_to(found)
-    (tools / "uname").write_text(f'#!/bin/sh\n[ "$1" = "-s" ] && echo {system}\n')
+    (tools / "uname").write_text(f'#!/bin/sh\n[ "$1" = "-s" ] && echo {system}\n', encoding="utf-8")
     (tools / "uname").chmod(0o755)
     return str(tools)
 
@@ -36,7 +36,7 @@ def start(tmp_path, old_log: bytes | None, system: str | None = None, setsid: bo
     shutil.copy(SCRIPT, root / "scripts" / "start.sh")
     python = root / ".venv" / "bin" / "python"
     python.parent.mkdir(parents=True)
-    python.write_text('#!/bin/sh\necho "made-up widget: $*"\n')
+    python.write_text('#!/bin/sh\necho "made-up widget: $*"\n', encoding="utf-8")
     python.chmod(0o755)
     if log is None:  # the log folder of the real system (`uname -s`): macOS has its Library
         darwin = system == "Darwin" or (system is None and sys.platform == "darwin")
@@ -57,7 +57,7 @@ def start(tmp_path, old_log: bytes | None, system: str | None = None, setsid: bo
 @posix
 def test_the_start_script_adds_to_a_small_start_log(tmp_path):
     log = start(tmp_path, b"an older line\n")
-    assert log.read_text() == "an older line\nmade-up widget: -m bellwether\n"
+    assert log.read_text(encoding="utf-8") == "an older line\nmade-up widget: -m bellwether\n"
 
 
 @posix
@@ -69,20 +69,20 @@ def test_the_start_script_keeps_a_start_log_of_exactly_the_limit(tmp_path):
 @posix
 def test_the_start_script_empties_a_start_log_that_is_larger_than_1_mib(tmp_path):
     log = start(tmp_path, b"x" * LIMIT + b"\n")
-    assert log.read_text() == "made-up widget: -m bellwether\n"
+    assert log.read_text(encoding="utf-8") == "made-up widget: -m bellwether\n"
 
 
 @posix
 def test_the_start_script_makes_the_start_log_when_there_is_none(tmp_path):
     log = start(tmp_path, None)
-    assert log.read_text() == "made-up widget: -m bellwether\n"
+    assert log.read_text(encoding="utf-8") == "made-up widget: -m bellwether\n"
 
 
 @posix
 def test_on_macos_the_start_log_is_in_the_logs_folder_of_the_library_and_nohup_starts_the_widget(tmp_path):
     """macOS has no setsid: nohup in the background. The XDG folder is not the log folder there."""
     log = start(tmp_path, None, system="Darwin", setsid=False)
-    assert log.read_text() == "made-up widget: -m bellwether\n"
+    assert log.read_text(encoding="utf-8") == "made-up widget: -m bellwether\n"
     assert not (tmp_path / "state").exists()
 
 
@@ -90,13 +90,13 @@ def test_on_macos_the_start_log_is_in_the_logs_folder_of_the_library_and_nohup_s
 @pytest.mark.skipif(shutil.which("setsid") is None, reason="no setsid here")
 def test_on_macos_with_a_setsid_the_start_log_is_in_the_library_too(tmp_path):
     log = start(tmp_path, b"an older line\n", system="Darwin", setsid=True)
-    assert log.read_text() == "an older line\nmade-up widget: -m bellwether\n"
+    assert log.read_text(encoding="utf-8") == "an older line\nmade-up widget: -m bellwether\n"
 
 
 @posix
 def test_on_linux_without_setsid_nohup_starts_the_widget_and_the_log_stays_in_the_xdg_folder(tmp_path):
     log = start(tmp_path, None, system="Linux", setsid=False)
-    assert log.read_text() == "made-up widget: -m bellwether\n"
+    assert log.read_text(encoding="utf-8") == "made-up widget: -m bellwether\n"
     assert not (tmp_path / "home" / "Library").exists()
 
 

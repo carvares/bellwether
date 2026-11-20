@@ -508,7 +508,7 @@ def test_a_real_process_is_killed_and_gone_when_the_call_returns(tmp_path):
     and the call returns after it ended."""
     script = tmp_path / "fake-core"
     pid_file = tmp_path / "pid"
-    script.write_text(f"#!/bin/sh\necho $$ > {pid_file}\nexec sleep 30\n")
+    script.write_text(f"#!/bin/sh\necho $$ > {pid_file}\nexec sleep 30\n", encoding="utf-8")
     script.chmod(0o755)
     runner = Runner(done({}))
     client = HerdrClient(None, str(script), run=runner)
@@ -519,7 +519,7 @@ def test_a_real_process_is_killed_and_gone_when_the_call_returns(tmp_path):
     began = time.monotonic()
     assert client.send_text("t1", "text", cancel=cancel) == Failure("cancelled")
     assert time.monotonic() - began < 3.0
-    pid = int(pid_file.read_text())
+    pid = int(pid_file.read_text(encoding="utf-8"))
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)
 
@@ -597,7 +597,7 @@ def test_a_real_key_process_lives_past_the_deadline_and_is_reaped(tmp_path, monk
     process runs on, and its end is told."""
     monkeypatch.setattr("bellwether.client.PRESS_TIMEOUT", 0.2)
     script = tmp_path / "fake-core"
-    script.write_text("#!/bin/sh\nsleep 0.8\nexit 0\n")
+    script.write_text("#!/bin/sh\nsleep 0.8\nexit 0\n", encoding="utf-8")
     script.chmod(0o755)
     client = HerdrClient(None, str(script), run=Runner(done({})))
     client._known = frozenset({"t1"})

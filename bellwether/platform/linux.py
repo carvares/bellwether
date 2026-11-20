@@ -176,7 +176,7 @@ class Host(ProcessHost):
     def start_ticks(self, pid: int) -> str | None:
         """The start of the process as /proc has it (field 22 of `stat`, in clock ticks since the boot)."""
         try:
-            text = (self.proc / str(pid) / "stat").read_text(errors="replace")
+            text = (self.proc / str(pid) / "stat").read_text(errors="replace", encoding="utf-8")
         except OSError:
             return None
         fields = text.rsplit(")", 1)[-1].split()  # the name of a process can have spaces and brackets
@@ -190,7 +190,7 @@ class Host(ProcessHost):
             return found
         for task in tasks[:MAX_TASKS]:
             try:
-                found += [int(word) for word in (task / "children").read_text().split() if word.isdigit()]
+                found += [int(word) for word in (task / "children").read_text(encoding="utf-8").split() if word.isdigit()]
             except OSError:
                 continue
         return found

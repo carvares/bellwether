@@ -152,7 +152,7 @@ def test_every_adversarial_screen_has_an_expected_result():
 @pytest.mark.parametrize("name", list(EXPECTED))
 def test_an_adversarial_screen_gives_nothing_or_a_true_prompt(name):
     app, expected = EXPECTED[name]
-    prompt = parse(app, (FIXTURES / f"{name}.txt").read_text())
+    prompt = parse(app, (FIXTURES / f"{name}.txt").read_text(encoding="utf-8"))
     if expected is None:
         assert prompt is None
         return
@@ -183,7 +183,7 @@ def test_a_full_label_line_and_a_description_cannot_be_told_apart_on_the_screen(
     label_and_description = [f"❯ 1. {first}", *textwrap.wrap("Deletesnothing; the made-up files stay.", width,
                                                              initial_indent="     ", subsequent_indent="     ")]
     assert long_label == label_and_description
-    lines = (FIXTURES / "v10-question-desc-into-label.txt").read_text().split("\n")
+    lines = (FIXTURES / "v10-question-desc-into-label.txt").read_text(encoding="utf-8").split("\n")
     assert lines[lines.index(long_label[0]):][:2] == long_label
 
 
@@ -199,7 +199,7 @@ def test_a_full_label_line_and_a_description_cannot_be_told_apart_on_the_screen(
     ("made_-", "`made_-\n     x` (p)", "`made_- x` (p)"),
 ], ids=["word", "digits", "double-dash", "lone-dash", "lone-dash-v16", "backtick-dash", "underscore-dash"])
 def test_a_wrapped_codex_label_loses_the_space_only_after_a_hyphen_between_letters_or_digits(command, wrapped, label):
-    screen = (FIXTURES / "v16-codex-hyphen-prefix.txt").read_text()
+    screen = (FIXTURES / "v16-codex-hyphen-prefix.txt").read_text(encoding="utf-8")
     screen = screen.replace("  $ git - C made-up", f"  $ {command}").replace("`git -\n     C made-up` (p)", wrapped)
     prompt = parse("codex", screen)
     assert prompt is not None

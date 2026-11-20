@@ -53,7 +53,7 @@ def fire(timer):
 
 
 def saved(path):
-    return json.loads(path.read_text()) if path.exists() else None
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
 
 
 # ----- the values, their limits and their defaults -----
@@ -92,14 +92,14 @@ def test_the_default_colours_of_every_real_theme_file_are_read(app, fake_client,
 
 def test_the_theme_colours_of_a_file_that_cannot_be_read_are_those_of_layout_c(tmp_path):
     assert layouts.theme_colors(tmp_path / "NoTheme.qml") == layouts.FALLBACK_COLORS
-    (tmp_path / "ZTheme.qml").write_text('ThemeBase { readonly property color textColor: text("#010203") }')
+    (tmp_path / "ZTheme.qml").write_text('ThemeBase { readonly property color textColor: text("#010203") }', encoding="utf-8")
     with pytest.raises(layouts.ThemeColorError, match="panelColor"):  # a file that can be read: no colour of C
         layouts.theme_colors(tmp_path / "ZTheme.qml")
     (tmp_path / "ZTheme.qml").write_text("""ThemeBase {
         readonly property color panelColor: background("#0A0B0C")
         readonly property color textColor: text("#010203")
         readonly property color frameColor: "#040506"
-        readonly property color accentColor: accent("#070809") }""")
+        readonly property color accentColor: accent("#070809") }""", encoding="utf-8")
     assert layouts.theme_colors(tmp_path / "ZTheme.qml") == {
         "background": "#ff0a0b0c", "text": "#010203", "frame": "#040506", "accent": "#070809"}
     assert layouts.FALLBACK_COLORS == {role: C_DEFAULTS[role] for role in ROLES[4:]}
@@ -275,7 +275,7 @@ def test_the_look_the_place_and_the_layout_do_not_drop_each_other(app, fake_clie
 
 
 def test_a_look_that_cannot_be_saved_still_applies_and_gives_one_log_line(app, fake_client, tmp_path, caplog):
-    (tmp_path / "file").write_text("")
+    (tmp_path / "file").write_text("", encoding="utf-8")
     backend = make(fake_client, tmp_path / "file" / "state.json")  # the folder cannot be made
     with caplog.at_level(logging.INFO, logger="bellwether"):
         assert backend.setScale(1.5) is True
@@ -331,19 +331,19 @@ def test_a_reset_whose_save_fails_still_empties_the_file_at_the_next_save(backen
 
 def test_a_saved_look_applies_at_the_start_with_no_log_line_and_no_write(app, fake_client, path, caplog):
     text = json.dumps({"x": 1, "y": 2, "scale": 1.5, "fontScale": 0.9, "fontFamily": "Made Up Mono", "colors": CUSTOM})
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
     with caplog.at_level(logging.INFO, logger="bellwether"):
         backend = make(fake_client, path)
     assert (backend.scale, backend.fontScale, backend.fontFamily) == (1.5, 0.9, "Made Up Mono")
     assert backend.colors == backend.colorOverrides == CUSTOM
-    assert caplog.records == [] and path.read_text() == text and not backend._look_timer.isActive()
+    assert caplog.records == [] and path.read_text(encoding="utf-8") == text and not backend._look_timer.isActive()
 
 
 def test_a_saved_look_with_bad_values_gives_the_defaults_for_them_and_one_log_line_with_the_keys(
         app, fake_client, path, caplog):
     text = json.dumps({"scale": "huge", "fontScale": 1.2, "fontFamily": "Not On This System",
                        "colors": {"text": "white", "idle": "#00ff00", "secret name": "#000000"}})
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
     with caplog.at_level(logging.INFO, logger="bellwether"):
         backend = make(fake_client, path)
     assert (backend.scale, backend.fontScale, backend.fontFamily) == (1.0, 1.2, "")
@@ -351,7 +351,7 @@ def test_a_saved_look_with_bad_values_gives_the_defaults_for_them_and_one_log_li
     assert [r.getMessage() for r in caplog.records] == [
         "the saved custom look has values that cannot be used: scale, colors.text, colors, fontFamily"]
     assert "secret" not in caplog.text and "white" not in caplog.text and "Not On" not in caplog.text
-    assert path.read_text() == text  # the file stays as it is
+    assert path.read_text(encoding="utf-8") == text  # the file stays as it is
 # ----- the program icons follow the text colour -----
 
 GLYPH = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M2 2h20v20H2z"/></svg>'
@@ -364,33 +364,33 @@ def icon_file(backend):
 
 def test_a_new_text_colour_makes_new_program_icons_and_removes_the_old_copies(app, fake_client, tmp_path, path):
     (tmp_path / "app" / "icons").mkdir(parents=True)
-    (tmp_path / "app" / "icons" / "pi.svg").write_text(GLYPH)
+    (tmp_path / "app" / "icons" / "pi.svg").write_text(GLYPH, encoding="utf-8")
     cache = tmp_path / "cache"
     backend = make(fake_client, path, icons=Icons(tmp_path / "app", cache))
     backend.apply([Agent("t1", "working", "ana", "", "pi")])
     first = icon_file(backend)
-    assert TEXT_COLOR in first.read_text() and first.parent == cache
+    assert TEXT_COLOR in first.read_text(encoding="utf-8") and first.parent == cache
     changes = []
     backend.changed.connect(lambda: changes.append(icon_file(backend)))
     backend.setColor("text", "#112233")
     second = icon_file(backend)
-    assert changes == [second] and second != first and "#112233" in second.read_text() and TEXT_COLOR not in second.read_text()
+    assert changes == [second] and second != first and "#112233" in second.read_text(encoding="utf-8") and TEXT_COLOR not in second.read_text(encoding="utf-8")
     assert sorted(cache.iterdir()) == [second]  # the copy in the old colour is gone: the cache does not grow
     backend.setColor("accent", "#445566")  # a different role: the icons stay
     assert changes == [second]
     backend.resetColor("text")
-    assert icon_file(backend).read_text() == first.read_text() and sorted(cache.iterdir()) == [icon_file(backend)]
-    path.write_text(json.dumps({"colors": {"text": "#abcdef"}}))  # a saved text colour: the icons have it at the start
+    assert icon_file(backend).read_text(encoding="utf-8") == first.read_text(encoding="utf-8") and sorted(cache.iterdir()) == [icon_file(backend)]
+    path.write_text(json.dumps({"colors": {"text": "#abcdef"}}), encoding="utf-8")  # a saved text colour: the icons have it at the start
     later = make(fake_client, path, icons=Icons(tmp_path / "app", cache))
     later.apply([Agent("t1", "working", "ana", "", "pi")])
-    assert "#abcdef" in icon_file(later).read_text()
+    assert "#abcdef" in icon_file(later).read_text(encoding="utf-8")
 
 
 # ----- a save changes only what the user changed -----
 
 def test_a_font_family_that_is_not_installed_now_stays_in_the_file_when_a_different_value_changes(
         app, fake_client, path, caplog):
-    path.write_text(json.dumps({"fontFamily": "Made Up Serif", "fontScale": 1.2, "colors": {"text": "#ffffff"}}))
+    path.write_text(json.dumps({"fontFamily": "Made Up Serif", "fontScale": 1.2, "colors": {"text": "#ffffff"}}), encoding="utf-8")
     backend = make(fake_client, path)  # this system does not have "Made Up Serif" now
     assert backend.fontFamily == "" and backend.lookIsCustom is True
     backend.setScale(1.5), backend.setColor("idle", "#00ff00")
@@ -407,7 +407,7 @@ def test_a_font_family_that_is_not_installed_now_stays_in_the_file_when_a_differ
 def test_a_colour_role_of_a_later_version_and_a_bad_value_stay_in_the_file_when_other_values_change(
         app, fake_client, path):
     start = {"scale": "big", "colors": {"sparkle": "#123456", "text": "#ffffff", "done": "green"}, "later": [1]}
-    path.write_text(json.dumps(start))
+    path.write_text(json.dumps(start), encoding="utf-8")
     backend = make(fake_client, path)
     backend.setFontScale(1.2)
     backend.stop()
@@ -425,7 +425,7 @@ def test_a_colour_role_of_a_later_version_and_a_bad_value_stay_in_the_file_when_
 
 def test_reset_everything_removes_the_four_keys_from_the_file_with_all_that_they_hold(app, fake_client, path):
     path.write_text(json.dumps({"x": 3, "y": 4, "scale": 1.5, "fontFamily": "Made Up Serif",
-                                "colors": {"sparkle": "#123456", "text": "#ffffff"}}))
+                                "colors": {"sparkle": "#123456", "text": "#ffffff"}}), encoding="utf-8")
     backend = make(fake_client, path)
     backend.resetLook()
     backend.stop()

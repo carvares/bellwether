@@ -54,35 +54,35 @@ def test_on_a_fresh_machine_nothing_moves_and_nothing_is_made(homes):
 
 def test_the_old_folders_get_the_new_name_with_their_content(homes):
     (homes["config"] / "herdr-float").mkdir()
-    (homes["config"] / "herdr-float" / "state.json").write_text('{"x": 5, "y": 6, "screen": "DP-1"}')
+    (homes["config"] / "herdr-float" / "state.json").write_text('{"x": 5, "y": 6, "screen": "DP-1"}', encoding="utf-8")
     (homes["state"] / "herdr-float").mkdir()
-    (homes["state"] / "herdr-float" / "herdr-float.log").write_text("old log\n")
-    (homes["state"] / "herdr-float" / "start.log").write_text("old start log\n")
+    (homes["state"] / "herdr-float" / "herdr-float.log").write_text("old log\n", encoding="utf-8")
+    (homes["state"] / "herdr-float" / "start.log").write_text("old start log\n", encoding="utf-8")
     (homes["cache"] / "herdr-float" / "icons").mkdir(parents=True)
-    (homes["cache"] / "herdr-float" / "icons" / "pi-e8eaed.svg").write_text("<svg/>")
+    (homes["cache"] / "herdr-float" / "icons" / "pi-e8eaed.svg").write_text("<svg/>", encoding="utf-8")
     lines = paths.move_old_folders()
     assert lines == [(logging.INFO, f"moved the {kind} folder herdr-float to bellwether") for kind in KINDS]
     assert tree(homes["config"]) == ["bellwether", "bellwether/state.json"]
     assert tree(homes["state"]) == ["bellwether", "bellwether/herdr-float.log", "bellwether/start.log"]
     assert tree(homes["cache"]) == ["bellwether", "bellwether/icons", "bellwether/icons/pi-e8eaed.svg"]
-    assert (homes["state"] / "bellwether" / "herdr-float.log").read_text() == "old log\n"
+    assert (homes["state"] / "bellwether" / "herdr-float.log").read_text(encoding="utf-8") == "old log\n"
     assert paths.move_old_folders() == []  # the second start has nothing to move
 
 
 def test_an_existing_new_folder_wins_and_the_old_one_is_not_touched(homes):
     for base in homes.values():
         (base / "herdr-float").mkdir()
-        (base / "herdr-float" / "old.txt").write_text("old")
+        (base / "herdr-float" / "old.txt").write_text("old", encoding="utf-8")
         (base / "bellwether").mkdir()
-        (base / "bellwether" / "new.txt").write_text("new")
+        (base / "bellwether" / "new.txt").write_text("new", encoding="utf-8")
     assert paths.move_old_folders() == []
     for base in homes.values():
         assert tree(base) == ["bellwether", "bellwether/new.txt", "herdr-float", "herdr-float/old.txt"]
-        assert (base / "bellwether" / "new.txt").read_text() == "new"
+        assert (base / "bellwether" / "new.txt").read_text(encoding="utf-8") == "new"
 
 
 def test_only_the_folders_that_exist_move_and_an_old_file_is_not_a_folder(homes):
-    (homes["config"] / "herdr-float").write_text("a file, not a folder")
+    (homes["config"] / "herdr-float").write_text("a file, not a folder", encoding="utf-8")
     (homes["cache"] / "herdr-float").mkdir()
     assert paths.move_old_folders() == [(logging.INFO, "moved the cache folder herdr-float to bellwether")]
     assert tree(homes["config"]) == ["herdr-float"]
@@ -92,7 +92,7 @@ def test_only_the_folders_that_exist_move_and_an_old_file_is_not_a_folder(homes)
 
 def test_a_move_that_fails_gives_one_line_and_the_start_continues_with_defaults(homes):
     (homes["config"] / "herdr-float").mkdir()
-    (homes["config"] / "herdr-float" / "state.json").write_text('{"x": 5, "y": 6}')
+    (homes["config"] / "herdr-float" / "state.json").write_text('{"x": 5, "y": 6}', encoding="utf-8")
     homes["config"].chmod(0o555)  # the rename in this folder fails: PermissionError
     try:
         lines = paths.move_old_folders()
@@ -106,13 +106,13 @@ def test_a_move_that_fails_gives_one_line_and_the_start_continues_with_defaults(
 
 def test_a_state_file_of_the_old_format_loads_after_the_move(homes):
     (homes["config"] / "herdr-float").mkdir()
-    (homes["config"] / "herdr-float" / "state.json").write_text(json.dumps({"x": 120, "y": 48}))  # x and y only
+    (homes["config"] / "herdr-float" / "state.json").write_text(json.dumps({"x": 120, "y": 48}), encoding="utf-8")  # x and y only
     paths.move_old_folders()
     assert load_position(homes["config"] / "bellwether" / "state.json") == (120, 48, "")
 
 
 def held(path):
-    handle = open(path, "w")
+    handle = open(path, "w", encoding="utf-8")
     fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
     return handle
 
@@ -170,7 +170,7 @@ def test_with_a_widget_running_the_start_exits_and_moves_and_makes_nothing(homes
 def test_an_old_folder_that_is_a_link_keeps_its_target_under_the_new_name(homes, tmp_path):
     target = tmp_path / "elsewhere"
     target.mkdir()
-    (target / "state.json").write_text('{"x": 5, "y": 6}')
+    (target / "state.json").write_text('{"x": 5, "y": 6}', encoding="utf-8")
     (homes["config"] / "herdr-float").symlink_to(target)
     assert paths.move_old_folders() == [(logging.INFO, "moved the config folder herdr-float to bellwether")]
     new = homes["config"] / "bellwether"
@@ -181,7 +181,7 @@ def test_an_old_folder_that_is_a_link_keeps_its_target_under_the_new_name(homes,
 
 def test_a_new_folder_that_is_a_link_to_nothing_is_not_replaced(homes, tmp_path):
     (homes["config"] / "herdr-float").mkdir()
-    (homes["config"] / "herdr-float" / "state.json").write_text('{"x": 5, "y": 6}')
+    (homes["config"] / "herdr-float" / "state.json").write_text('{"x": 5, "y": 6}', encoding="utf-8")
     (homes["config"] / "bellwether").symlink_to(tmp_path / "not-there")
     assert paths.move_old_folders() == []
     assert (homes["config"] / "bellwether").is_symlink() and not (homes["config"] / "bellwether").exists()

@@ -24,7 +24,7 @@ def records(caplog):
 # ----- the module imports on every system -----
 
 def test_the_module_imports_no_module_of_macos_at_its_top():
-    tree = ast.parse(Path(macos.__file__).read_text())
+    tree = ast.parse(Path(macos.__file__).read_text(encoding="utf-8"))
     top = [alias.name for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom))
            for alias in node.names] + [node.module for node in tree.body if isinstance(node, ast.ImportFrom) and node.module]
     assert not {"AppKit", "objc", "Foundation", "Quartz", "psutil"} & set(top)
@@ -88,7 +88,7 @@ def test_with_pyobjc_qt_does_not_make_the_program_a_foreground_app_that_it_activ
 
 def program(path):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("#!/bin/sh\n")
+    path.write_text("#!/bin/sh\n", encoding="utf-8")
     path.chmod(0o755)
     return path
 
@@ -108,7 +108,7 @@ def test_without_path_the_programs_are_found_in_the_known_folders_and_the_bundle
     bundled = program(apps / "Herdr.app" / "Contents" / "MacOS" / "Herdr")
     core = program(brew / "herdr-core")
     (local / "herdr-core").parent.mkdir()
-    (local / "herdr-core").write_text("not a program")  # no x bit: not taken
+    (local / "herdr-core").write_text("not a program", encoding="utf-8")  # no x bit: not taken
     assert macos.find_executables(which=lambda name: None, folders=folders, bundle_folders=bundles) == (
         str(bundled), str(core))
     linked = local / "herdr-app"
@@ -632,11 +632,11 @@ def claude_home(tmp_path, pid, proc_start):
     folder = tmp_path / "home" / ".claude"
     (folder / "sessions").mkdir(parents=True)
     (folder / "sessions" / f"{pid}.json").write_text(json.dumps(
-        {"pid": pid, "sessionId": session, "cwd": "/made/up", "startedAt": 1_795_000_000_000, "procStart": proc_start}))
+        {"pid": pid, "sessionId": session, "cwd": "/made/up", "startedAt": 1_795_000_000_000, "procStart": proc_start}), encoding="utf-8")
     transcript = folder / "projects" / "-made-up" / f"{session}.jsonl"
     transcript.parent.mkdir(parents=True)
     transcript.write_text(json.dumps({"type": "assistant", "message": {"model": "claude-opus-5-5", "role": "assistant",
-                                                                       "content": []}}, separators=(",", ":")) + "\n")
+                                                                       "content": []}}, separators=(",", ":")) + "\n", encoding="utf-8")
     return tmp_path / "home"
 
 
@@ -670,7 +670,7 @@ def test_on_a_mac_the_start_of_a_process_is_what_ps_lstart_prints():
 def test_on_a_mac_psutil_gives_the_children_the_arguments_and_the_open_files(tmp_path):
     import os
     path = tmp_path / "made-up.jsonl"
-    path.write_text("")
+    path.write_text("", encoding="utf-8")
     child = subprocess.Popen([sys.executable, "-c", "import sys, time; f = open(sys.argv[1]); time.sleep(30)",
                               str(path)])
     try:
@@ -774,7 +774,7 @@ UI = Path(macos.__file__).parent.parent / "ui"
 def test_each_font_list_has_the_macos_and_then_the_windows_families_at_its_end(file, linux, mac, windows):
     """The Linux families first: a Linux desktop picks the same font as before (the same pixels)."""
     import re
-    text = (UI / file).read_text()
+    text = (UI / file).read_text(encoding="utf-8")
     lists = re.findall(r"Fonts\.first\(\s*\[([^\]]*)\]", re.sub(r"/\*.*?\*/", "", text))
     assert len(lists) == 1
     assert re.findall(r'"([^"]+)"', lists[0]) == linux + mac + windows
@@ -782,7 +782,7 @@ def test_each_font_list_has_the_macos_and_then_the_windows_families_at_its_end(f
 
 def test_pyobjc_and_psutil_are_dependencies_only_where_they_are_used():
     import tomllib
-    project = tomllib.loads((Path(macos.__file__).parents[2] / "pyproject.toml").read_text())["project"]
+    project = tomllib.loads((Path(macos.__file__).parents[2] / "pyproject.toml").read_text(encoding="utf-8"))["project"]
     marks = {d.split(";")[0].split(">")[0].split("=")[0].strip(): d.split(";")[1].strip() if ";" in d else None
              for d in project["dependencies"]}
     assert marks["pyobjc-framework-cocoa"] == "sys_platform == 'darwin'"

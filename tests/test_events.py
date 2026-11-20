@@ -405,7 +405,7 @@ def test_the_real_child_reads_no_input_and_ends_when_its_parent_is_killed(tmp_pa
 
         def gone() -> bool:
             try:  # A child that ended has no /proc entry, or it is a zombie that waits for its new parent.
-                with open(f"/proc/{pid}/stat") as stat:
+                with open(f"/proc/{pid}/stat", encoding="utf-8") as stat:
                     return stat.read().rsplit(")", 1)[1].split()[0] == "Z"
             except OSError:
                 return True

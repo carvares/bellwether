@@ -476,7 +476,7 @@ def test_a_program_icon_has_the_pixels_of_its_size_on_the_screen(app, window, tm
     """The window draws the skin larger at a scale above 1: an icon of 16 px then needs more than 16 pixels."""
     root, backend, messages = window
     (tmp_path / "app" / "icons").mkdir(parents=True)
-    (tmp_path / "app" / "icons" / "pi.svg").write_text(GLYPH)
+    (tmp_path / "app" / "icons" / "pi.svg").write_text(GLYPH, encoding="utf-8")
     backend.setLayout(letter)
     backend.apply([Agent("t1", "working", "ana", "docs", "pi")])
     use_screens(root, OFFSET, "B", 0, 0)
@@ -899,11 +899,11 @@ def test_the_texts_of_each_layout_take_their_size_and_colour_from_its_theme_toke
     ui = tmp_path / "ui"
     shutil.copytree(UI_PATH, ui)
     theme = ui / "skins" / f"{letter}Theme.qml"
-    text = theme.read_text()
+    text = theme.read_text(encoding="utf-8")
     for token, value in {**DRIFT, **DRIFT_OWN}.items():
         text, n = re.subn(rf"(property \w+ {token}: )[^\n]+", lambda m: m.group(1) + json.dumps(value), text)
         assert n == 1 or (n == 0 and token in DRIFT_OWN), token
-    theme.write_text(text)
+    theme.write_text(text, encoding="utf-8")
     backend = Backend(fake_client, settings_path=tmp_path / "state.json",
                       skins={l: ui / "skins" / f"{l}.qml" for l in layouts.built_skins()})
     backend.setLayout(letter)

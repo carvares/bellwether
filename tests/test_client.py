@@ -635,7 +635,7 @@ def test_find_executables(monkeypatch, tmp_path):
     assert find_executables() == (None, None)
     local = tmp_path / ".local" / "bin" / "herdr-core"
     local.parent.mkdir(parents=True)
-    local.write_text("")
+    local.write_text("", encoding="utf-8")
     assert find_executables() == (None, str(local))
     monkeypatch.setattr(linux.shutil, "which", lambda name: "/usr/bin/" + name)
     assert find_executables() == ("/usr/bin/herdr-app", "/usr/bin/herdr-core")

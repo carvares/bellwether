@@ -21,7 +21,7 @@ def found(desktop_dirs, icon_dirs):
 
 def write_desktop(folder, icon_line="Icon=herdr-app"):
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / "herdr-app.desktop").write_text(f"[Desktop Entry]\nType=Application\nName=Herdr\n{icon_line}\n")
+    (folder / "herdr-app.desktop").write_text(f"[Desktop Entry]\nType=Application\nName=Herdr\n{icon_line}\n", encoding="utf-8")
 
 
 def write_png(path, size):
@@ -34,7 +34,7 @@ def write_png(path, size):
 
 def write_svg(path):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(SVG)
+    path.write_text(SVG, encoding="utf-8")
     return path
 
 
@@ -90,7 +90,7 @@ def test_an_absolute_icon_path_must_be_an_svg_or_a_png_file(tree, tmp_path):
     desktop, icons = tree
     other = tmp_path / "opt" / "herdr.xpm"
     other.parent.mkdir()
-    other.write_text("/* XPM */")
+    other.write_text("/* XPM */", encoding="utf-8")
     write_desktop(desktop[1], f"Icon={other}")
     assert find_app_icon(desktop, icons) is None
     (tmp_path / "opt" / "folder.svg").mkdir()
@@ -164,7 +164,7 @@ def test_load_source_reads_svg_and_png_and_gives_none_for_a_bad_file(tmp_path, a
     assert image is not None and not image.isNull() and image.width() == image.height()
     image = load_source(write_png(tmp_path / "a.png", 20))
     assert image is not None and image.pixelColor(image.width() // 2, image.height() // 2) == QColor(GLYPH)
-    (tmp_path / "bad.svg").write_text("not an svg")
+    (tmp_path / "bad.svg").write_text("not an svg", encoding="utf-8")
     (tmp_path / "bad.png").write_bytes(b"not a png")
     assert load_source(tmp_path / "bad.svg") is None
     assert load_source(tmp_path / "bad.png") is None
@@ -235,7 +235,7 @@ def test_load_app_icon_logs_one_line_without_a_path_when_the_icon_is_missing(tmp
 def test_load_app_icon_logs_one_line_when_the_icon_cannot_be_read(tree, caplog):
     desktop, icons = tree
     (icons[1] / "scalable" / "apps").mkdir(parents=True)
-    (icons[1] / "scalable" / "apps" / "herdr-app.svg").write_text("not an svg")
+    (icons[1] / "scalable" / "apps" / "herdr-app.svg").write_text("not an svg", encoding="utf-8")
     with caplog.at_level(logging.INFO, logger="bellwether"):
         assert load_app_icon(found(desktop, icons)) is None
     assert len(caplog.records) == 1
@@ -257,7 +257,7 @@ def test_an_svg_is_clipped_by_the_rectangle_clip_path_it_uses(tmp_path, app):
         '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">'
         '<defs><clipPath id="tile"><rect x="4" y="4" width="24" height="24" rx="2"/></clipPath></defs>'
         '<g clip-path="url(#tile)"><rect width="32" height="32"/></g></svg>'
-    )
+    , encoding="utf-8")
     image = load_source(svg)
     side = image.width()
     assert alpha(image, side // 2, side // 2) == 255
@@ -271,7 +271,7 @@ def test_a_clip_that_keeps_less_than_half_of_the_drawing_is_not_the_tile(tmp_pat
         '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">'
         '<defs><clipPath id="part"><rect x="8" y="8" width="16" height="16"/></clipPath></defs>'
         '<g clip-path="url(#part)"><rect width="32" height="32"/></g></svg>'
-    )
+    , encoding="utf-8")
     assert appicon.CLIP_KEEPS == 0.5
     image = load_source(svg)
     side = image.width()
@@ -286,7 +286,7 @@ def test_the_plate_is_the_tone_at_the_edge_even_when_the_picture_is_bigger(app):
 
 
 def svg_file(path, body):
-    path.write_text(f'<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">{body}</svg>')
+    path.write_text(f'<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">{body}</svg>', encoding="utf-8")
     return path
 
 
@@ -413,4 +413,4 @@ def test_the_window_icon_is_the_herdr_mark_in_the_blocked_colour_or_the_circle(a
 def test_the_program_gives_its_windows_that_icon():
     from pathlib import Path
     import bellwether.__main__ as main
-    assert "app.setWindowIcon(window_icon())" in Path(main.__file__).read_text()
+    assert "app.setWindowIcon(window_icon())" in Path(main.__file__).read_text(encoding="utf-8")
