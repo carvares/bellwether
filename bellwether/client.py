@@ -134,6 +134,10 @@ class Terminal:
     pid: int = 0  # the first process of the terminal (a shell, or the agent program)
     foreground: int = 0  # the process that has the terminal now
     created_ms: int = 0  # the creation of the terminal, in milliseconds since 1970
+    # The title that the program in the terminal gave it: one line, "" when it has none. A row shows it as the name
+    # of an agent that has no name in Herdr. It can say what the person works on: not in the text form, so not in
+    # a log line.
+    title: str = field(default="", repr=False)
 
 
 class HerdrOffline(Exception):
@@ -152,6 +156,17 @@ class HerdrError(Exception):
 def _whole(value: object) -> int:
     """A positive whole number of an answer of herdr-core, or 0."""
     return value if type(value) is int and 0 < value < 2 ** 53 else 0
+
+
+# The most characters of a title that a row gets (the row cuts what does not fit).
+TITLE_LIMIT = 80
+
+
+def _title(value: object) -> str:
+    """The title of a terminal as one short line of text that can be shown. "" for an other type."""
+    if not isinstance(value, str):
+        return ""
+    return " ".join("".join(ch if ch.isprintable() else " " for ch in value[:4 * TITLE_LIMIT]).split())[:TITLE_LIMIT]
 
 
 def find_executables() -> tuple[str | None, str | None]:
@@ -218,7 +233,7 @@ class HerdrClient:
     # ----- the processes of one agent -----
 
     def terminal(self, terminal: str) -> Terminal | Failure:
-        """The processes and the creation time of a terminal of the last list: one `herdr-core get`. Nothing is
+        """The processes, the creation time and the title of a terminal of the last list: one `herdr-core get`. Nothing is
         logged here: the caller logs a reason code when it changes."""
         if not valid_address(terminal):
             return Failure("bad_address")
@@ -238,7 +253,7 @@ class HerdrClient:
             return Failure("not_this_terminal")
         foreground = data.get("foreground")
         return Terminal(_whole(data.get("pid")), _whole(foreground.get("pid") if isinstance(foreground, dict) else 0),
-                        _whole(data.get("created_ms")))
+                        _whole(data.get("created_ms")), _title(data.get("title")))
 
     # ----- the screen of one agent -----
 

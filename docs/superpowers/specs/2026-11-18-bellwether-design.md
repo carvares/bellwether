@@ -688,6 +688,17 @@ The first design had a horizontal pill and one list below it. The section "Chang
 - The widget is always visible after a start. The hidden state is not saved.
 - If the desktop has no system tray, the widget runs without an icon.
 
+## Change on 2026-11-20: the title of the terminal as the name of an agent
+
+Report of the user: the answer window showed only the address ("t3g") as what tells an agent apart. Cause: none of the user's terminals has a `name` in Herdr, so each row had the label "space / tab", and two agents of one tab had the same label. Herdr has a better text: the `title` that the program gives its terminal (Claude Code writes the subject of the session). It is only in `herdr-core get <t> --json`, not in the lists.
+
+- `HerdrClient.terminal` returns the title in `Terminal.title`: a string only, each character that cannot be printed becomes a space, runs of spaces become one, at most 80 characters (`TITLE_LIMIT`). The field is not in the text form of the value (`repr=False`), and no log line has it. The privacy rule of the screen text applies to it.
+- `SessionWatch.titles()` gives the title of each agent that Herdr was asked of. No new command for it: the titles come from the `get` of the model line. One more reason for a `get`: the status of the agent is an other than at the last look (a program gives a new title at such a time). A `get` that fails keeps the title of before; an agent that leaves the list loses it; `clear()` keeps the titles (so a change of the setting does not make the names jump).
+- `SessionWatch.step(agents, stopped, files)`: with `files` false, Herdr is asked and no session file is read (the facts have the reason `off`). The backend calls it with the value of `showMeta`, so the titles also come with the setting off. A round during which the setting changes keeps nothing, as before.
+- The row (`Backend._rows`): name = the name of Herdr, else the title. Label = name, else "space / tab" (with an icon) or the program word, else the address. With a name the detail is "space / tab". The order "agents with a name first" counts a title as a name. The spoken name uses it. The rows are told when a title is new (`_look_at_meta`).
+- The answer window takes its label from the same row function, so it shows the title, and the address after it as before.
+- Limits: a new title of a program shows at the next `get` (a new status, or 5 minutes at the most). The first list after the start shows "space / tab" until the first `get` is back (well below a second). An agent of a backend with no session watch (`sessions=None`) has no title.
+
 ## Failure cases
 
 | Case | Behaviour |

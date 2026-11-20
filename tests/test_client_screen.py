@@ -581,7 +581,8 @@ def test_terminal_gives_the_processes_and_the_creation_time_with_one_get(caplog)
     client, runner = terminal_client({"t1": done(answer)})
     del caplog.records[:]
     found = client.terminal("t1")
-    assert found == Terminal(600, 700, 1795015110521)
+    # The title is the name that a row shows when Herdr has no name: it is kept, but not in the text form.
+    assert found == Terminal(600, 700, 1795015110521, MARKER)
     assert runner.gets == [([CORE, "get", "t1", "--json"], READ_TIMEOUT)] and runner.calls == []
     assert caplog.records == [] and MARKER not in repr(found)
 
@@ -596,6 +597,17 @@ def test_terminal_takes_only_positive_whole_numbers(answer, expected):
     from bellwether.client import Terminal
     client, _ = terminal_client({"t1": done(answer)})
     assert client.terminal("t1") == Terminal(*expected)
+
+
+@pytest.mark.parametrize("title, expected", [
+    ("Made-up task", "Made-up task"),
+    ("  two\nlines\tand \x1b[31m a mark\x07  ", "two lines and [31m a mark"),
+    ("x" * 300, "x" * 80),
+    ("", ""), (None, ""), (7, ""), (["a"], ""),
+])
+def test_terminal_gives_the_title_as_one_short_line_of_text(title, expected):
+    client, _ = terminal_client({"t1": done({"address": "t1", "title": title})})
+    assert client.terminal("t1").title == expected
 
 
 @pytest.mark.parametrize("address, names, code", [

@@ -50,8 +50,11 @@ class Facts:
     def wait(self):
         return 30.0
 
-    def step(self, agents, stopped=None):
+    def step(self, agents, stopped=None, files=True):
         return False
+
+    def titles(self):
+        return {}
 
 
 @pytest.fixture

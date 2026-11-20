@@ -216,7 +216,8 @@ def test_with_the_setting_off_nothing_is_read_and_no_row_has_a_line(app, desk):
     for step in range(5):
         d.mono += 30
         d.backend.read_meta()
-    assert d.client.calls == [] and d.reads == [] and d.meta() == {"t1": "", "t2": "", "t3": ""}
+    # Herdr is still asked (the title of a terminal is the name of an agent with no name): no file is read.
+    assert d.client.calls == ["t1", "t2", "t3"] and d.reads == [] and d.meta() == {"t1": "", "t2": "", "t3": ""}
 
 
 def test_the_setting_goes_off_and_on_and_is_saved_with_the_other_keys(app, desk):
@@ -234,8 +235,10 @@ def test_the_setting_goes_off_and_on_and_is_saved_with_the_other_keys(app, desk)
     assert json.loads(d.path.read_text()) == {"x": 5, "layout": "B", "later": [1], "showMeta": False}
     assert d.watch.facts() == {} and not d.backend._age_timer.isActive()
     d.mono += 60
+    reads = list(d.reads)
     d.backend.read_meta()
-    assert d.client.calls == []
+    assert d.client.calls == ["t1", "t2", "t3"] and d.reads == reads  # Herdr for the titles: no file
+    del d.client.calls[:]
     d.backend.setShowMeta(False)  # the same value: nothing
     assert told == [False]
     d.backend._meta_wake.clear()
@@ -313,10 +316,10 @@ def test_the_thread_goes_on_after_an_unexpected_error_and_logs_its_class_only(ap
     d = desk(interval=0.02)
     step, failing = d.watch.step, [True]
 
-    def broken(agents, stopped):
+    def broken(agents, stopped, files=True):
         if failing[0]:
             raise RuntimeError("MARKER-private-session-text")
-        return step(agents, stopped)
+        return step(agents, stopped, files)
 
     d.watch.step = broken
     d.backend.start()
@@ -327,3 +330,47 @@ def test_the_thread_goes_on_after_an_unexpected_error_and_logs_its_class_only(ap
     assert [r.getMessage() for r in caplog.records if "failed" in r.getMessage()] == [
         "session facts failed: RuntimeError"]
     assert "MARKER" not in caplog.text
+
+
+# ----- the title of the terminal as the name of an agent with no name -----
+
+TITLED = [Agent("t1", "working", "rev", "Main", "claude-code"), Agent("t3", "working", "", "Space / Tab", "made-up-program"),
+          Agent("t4", "working", "", "Space / Tab", "made-up-program")]
+
+
+def titles(d, **given):
+    for key, title in given.items():
+        d.client.answer[key] = Terminal(30, 31, 0, title)
+
+
+@pytest.mark.parametrize("show", [True, False])
+def test_an_agent_with_no_name_has_the_title_of_its_terminal_as_its_name(app, desk, caplog, show):
+    caplog.set_level(logging.INFO, logger="bellwether")
+    d = desk(show=show)
+    titles(d, t1="Made-up title of a named one", t3="Made-up task three")
+    d.backend.apply(list(TITLED))
+    assert d.rows()["t3"]["label"] == "made-up-program" and d.rows()["t3"]["detail"] == "Space / Tab"
+    del d.emitted[:]
+    d.backend.read_meta()
+    app.processEvents()
+    rows = d.rows()
+    assert (rows["t3"]["label"], rows["t3"]["detail"]) == ("Made-up task three", "Space / Tab")
+    assert rows["t3"]["spoken"].startswith("Go to Made-up task three, made-up-program in Space / Tab")
+    assert rows["t1"]["label"] == "rev"  # a name of Herdr wins
+    assert rows["t4"]["label"] == "made-up-program"  # no title: as before
+    assert d.emitted == [1] and "Made-up" not in caplog.text
+    # An agent with a name, or with a title, is before one with neither.
+    assert [row["key"] for row in d.backend.groups[2]["agents"]] == ["t3", "t1", "t4"]
+
+
+def test_a_title_stays_when_the_setting_changes(app, desk):
+    d = desk()
+    titles(d, t3="Made-up task three")
+    d.backend.apply(list(TITLED))
+    d.backend.read_meta()
+    app.processEvents()
+    d.backend.setShowMeta(False)
+    assert d.rows()["t3"]["label"] == "Made-up task three"
+    d.backend.read_meta()
+    app.processEvents()
+    assert d.rows()["t3"]["label"] == "Made-up task three" and d.meta()["t1"] == ""

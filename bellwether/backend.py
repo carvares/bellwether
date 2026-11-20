@@ -149,7 +149,7 @@ class Backend(QObject):
         self._meta_thread: threading.Thread | None = None
         self._meta_failure: str | None = None
         self._meta_keys: frozenset = frozenset()  # the agents (address and program) at the last wake of the reads
-        self._meta_shown: dict[str, str] = {}  # the line of each agent at the last look
+        self._meta_shown: dict[str, tuple] = {}  # the line and the title of each agent at the last look
         self._metaRead.connect(self._look_at_meta)
         self._age_timer = QTimer(self)
         self._age_timer.setInterval(AGE_TICK)
@@ -186,16 +186,20 @@ class Backend(QObject):
         """The agent rows of one group. A row with an icon does not show the program word."""
         rows = []
         facts = self._facts()
+        titles = self._watch.titles() if self._watch is not None else {}
+        # The name of an agent: the one of Herdr, else the title that its program gave the terminal.
+        names = {a.key: a.name or titles.get(a.key, "") for a in agents}
         for a in agents:
             icon = self._icons.url(a.app) if self._icons else ""
-            spoken = "Go to " + (", ".join(filter(None, (a.name, a.app))) or a.key)
+            name = names[a.key]
+            spoken = "Go to " + (", ".join(filter(None, (name, a.app))) or a.key)
             model, age, age_spoken = self._meta(facts, a.key)
             said = ", ".join(filter(None, (model and "model " + model, age_spoken and "session age " + age_spoken)))
             rows.append({
                 "key": a.key,
                 "icon": icon,
-                "label": a.name or (a.workspace if icon else a.app) or a.key,
-                "detail": a.workspace if a.name or not icon else "",
+                "label": name or (a.workspace if icon else a.app) or a.key,
+                "detail": a.workspace if name or not icon else "",
                 "address": "",
                 "spoken": spoken + (f" in {a.workspace}" if a.workspace else "") + (said and ", " + said),
                 # The second line of the row: the model that the agent runs and the age of its session. "": the
@@ -207,7 +211,7 @@ class Backend(QObject):
                 "canAnswer": a.status == "blocked" and valid_address(a.key),
             })
         # Agents with a name first, then the order of the text that shows, then the address (t2 before t10).
-        named = {a.key for a in agents if a.name}
+        named = {key for key, name in names.items() if name}
         rows.sort(key=lambda row: (row["key"] not in named, row["label"].lower(), _natural(row["key"])))
         looks = [(row["icon"], row["label"], row["detail"]) for row in rows]
         for row, look in zip(rows, looks):
@@ -528,19 +532,24 @@ class Backend(QObject):
         self._meta_wake.set()
 
     def read_meta(self) -> None:
-        """One round of the reads of the model and the session time that are due. Runs on its worker thread. With
-        the setting off, and with no reader, nothing is read."""
-        if self._watch is None or not self._show_meta:
+        """One round of what is due for the names and the second line of the rows: Herdr is asked of the terminals
+        (their titles), and the files of the sessions are read for the model and the session time. Runs on its
+        worker thread. With the setting off no file is read."""
+        if self._watch is None:
             return
-        # The setting can go off during the round: the round then stops, and keeps nothing of what it read.
-        if self._watch.step(self._agents if self._online else [], lambda: self._stop.is_set() or not self._show_meta):
+        show = self._show_meta
+        # The setting can change during the round: the round then stops, and keeps nothing of what it read.
+        if self._watch.step(self._agents if self._online else [],
+                            lambda: self._stop.is_set() or self._show_meta != show, files=show):
             self._metaRead.emit()
 
     @Slot()
     def _look_at_meta(self) -> None:
         """The rows are told when the line of an agent is different: after a read, and when an age has a new text."""
         facts = self._facts()
-        shown = {a.key: META_MARK.join(filter(None, self._meta(facts, a.key)[:2])) for a in self._agents}
+        titles = self._watch.titles() if self._watch is not None else {}
+        shown = {a.key: (META_MARK.join(filter(None, self._meta(facts, a.key)[:2])), titles.get(a.key, ""))
+                 for a in self._agents}
         if shown != self._meta_shown:
             self._meta_shown = shown
             self.changed.emit()

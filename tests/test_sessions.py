@@ -773,3 +773,65 @@ def test_nothing_of_a_session_file_is_in_a_log_an_error_a_text_form_or_a_file(ma
     assert all(MARKER not in str(record.args) + record.getMessage() for record in caplog.records)
     after = {path: path.stat().st_mtime_ns for path in tmp_path.rglob("*") if path.is_file()}
     assert after == before  # no file was written or changed, in the home or anywhere else of the scratch folder
+
+
+# ----- the title of the terminal: the name of an agent that has no name in Herdr -----
+
+def titled(watched, **titles):
+    for key, title in titles.items():
+        old = watched.client.terminals[key]
+        watched.client.terminals[key] = Terminal(old.pid, old.foreground, old.created_ms, title)
+
+
+def test_the_engine_gives_the_title_of_each_terminal(watched, caplog):
+    caplog.set_level(logging.INFO, logger="bellwether")
+    titled(watched, t1="Made-up task one")
+    assert watched.watch.titles() == {}
+    assert watched.watch.step(AGENTS) is True
+    assert watched.watch.titles() == {"t1": "Made-up task one", "t2": ""}
+    assert "Made-up" not in caplog.text and "Made-up" not in repr(watched.watch._entries)
+
+
+def test_a_new_status_of_an_agent_is_one_get_and_a_new_title_tells_the_rows(watched):
+    titled(watched, t1="Made-up task one")
+    watched.watch.step(AGENTS)
+    del watched.client.calls[:]
+    titled(watched, t1="Made-up task two")
+    watched.clock.now += sessions.CHECK
+    assert watched.watch.step(AGENTS) is False and watched.client.calls == []  # the same status: Herdr is not asked
+    blocked = [Agent("t1", "blocked", "rev", "Main", "claude-code"), AGENTS[1]]
+    watched.clock.now += sessions.CHECK
+    assert watched.watch.step(blocked) is True and watched.client.calls == ["t1"]
+    assert watched.watch.titles()["t1"] == "Made-up task two"
+    watched.clock.now += sessions.CHECK
+    assert watched.watch.step(blocked) is False and watched.client.calls == ["t1"]
+
+
+def test_a_get_that_fails_keeps_the_title_and_an_agent_that_left_has_none(watched):
+    titled(watched, t1="Made-up task one", t2="Made-up task b")
+    watched.watch.step(AGENTS)
+    watched.client.terminals["t1"] = Failure("timeout")
+    watched.clock.now += sessions.GET_REFRESH
+    watched.watch.step(AGENTS)
+    assert watched.watch.titles() == {"t1": "Made-up task one", "t2": "Made-up task b"}
+    assert watched.watch.step(AGENTS[:1]) is True
+    assert watched.watch.titles() == {"t1": "Made-up task one"}
+
+
+def test_clear_drops_the_facts_and_keeps_the_titles(watched):
+    titled(watched, t1="Made-up task one")
+    watched.watch.step(AGENTS)
+    watched.watch.clear()
+    assert watched.watch.facts() == {} and watched.watch.titles()["t1"] == "Made-up task one"
+
+
+def test_with_no_files_the_engine_asks_herdr_and_reads_no_file(watched):
+    titled(watched, t1="Made-up task one")
+    read = watched.machine.host.bytes_read
+    assert watched.watch.step(AGENTS, files=False) is True
+    assert watched.client.calls == ["t1", "t2"] and watched.machine.host.bytes_read == read
+    assert watched.watch.titles()["t1"] == "Made-up task one"
+    assert watched.watch.facts() == {"t1": (None, None), "t2": (None, None)}
+    watched.clock.now += sessions.REFRESH
+    watched.watch.step(AGENTS, files=False)
+    assert watched.client.calls == ["t1", "t2"] and watched.machine.host.bytes_read == read

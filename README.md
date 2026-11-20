@@ -93,6 +93,8 @@ If the empty block stays in the window after that, remove it from your layout in
   - D, "Signal strip": the number of all agents, the most important status as a badge, one bar with the share of each status, and the four statuses as tabs.
   - E, "Ring": a ring with the share of each status and the number of all agents in its centre, and a list of the four counts.
 - In every layout, an agent in an open list has a second, smaller line below its name: the model that the agent runs and the age of its session, for example "Opus 5.5 · 2h 14m" (see "The model and session-time line").
+- The name of an agent row: the name that the terminal has in Herdr. When it has none, the title that the program gave the terminal (Claude Code writes what the session is about). When it has none of the two, the space and the tab ("Integuru / Claude Code"). With a name or a title, the space and the tab show after it in smaller text. The answer window uses the same name. A title is cut at 80 characters, and Bellwether never writes a title to its log.
+- Bellwether reads the title with `herdr-core get`: for an agent that is new in the list, when the status of the agent changes, when its process changes, and one time in 5 minutes. So a new title can be some minutes old. This read stays on when "Show model and session time" is off; only the session files are not read then.
 - In every layout: click a status to show its agents, click it again to close it, click an agent to open the Herdr app on that agent. A status with no agents does nothing. A list shows 8 agents at the most; turn the mouse wheel for more. The frame (in Layout C: the corner brackets) has the colour of the most important status.
 - The lines below describe Layout C.
 - The panel is a dark box, 320 px wide, with text in a monospace font (Hack, or a different monospace font if Hack is not installed).
@@ -140,7 +142,7 @@ If the empty block stays in the window after that, remove it from your layout in
 - When Bellwether cannot tell which process is the agent (for example a shell with two Claude Code processes, or a Codex process with two session files open), the row shows the time only.
 - Privacy: Bellwether takes only the model name and the time stamps from these files. It does not log, save or show any other content of a session or a transcript. It reads a transcript from its end, at most 4 MB in one read, and not again while the file did not change.
 - A screen reader says the model and the age with the name of the row ("…, model Opus 5.5, session age 2 hours 14 minutes").
-- To hide the line: clear "Show model and session time" in the options window. Bellwether then reads nothing for it. The file key is `showMeta` (see "Files").
+- To hide the line: clear "Show model and session time" in the options window. Bellwether then reads no session file and no transcript (it still asks Herdr for the title of each terminal, see "Use"). The file key is `showMeta` (see "Files").
 
 ### Options
 

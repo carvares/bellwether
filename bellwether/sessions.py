@@ -411,13 +411,16 @@ class _Entry:
     got_at: float = 0.0  # the last `herdr-core get`
     terminal: Terminal | None = None  # what that get gave; None: it failed
     alive: tuple = ()  # (pid, start ticks) of each process of this machine that the facts depend on
+    status: str = ""  # the status of the agent at the last look
 
 
 class SessionWatch:
     """The facts of the agents of the list. `step` does the reads that are due (on a worker thread). For each agent:
     a `herdr-core get` at once when it is new in the list, has an other program word, or when a process that its
-    facts depend on ended or is an other process now (checked in /proc at each step: no command); else one in
-    GET_REFRESH seconds, as a net. The files of its processes are read each `interval` seconds, with the processes
+    facts depend on ended or is an other process now (checked in /proc at each step: no command), or when its
+    status is an other (a program gives its terminal a new title at such a time); else one in GET_REFRESH seconds,
+    as a net. `titles` gives the title of each terminal from these gets: the name of an agent with no name in
+    Herdr. A title is never in a log line. The files of its processes are read each `interval` seconds, with the processes
     of the last get. `facts` gives what the rows show. Errors are reason codes: a log line has the address, the
     program word and the code, and is written when the code of an agent changes."""
 
@@ -429,6 +432,7 @@ class SessionWatch:
         self._clock = clock
         self._interval = interval
         self._entries: dict[str, _Entry] = {}
+        self._titles: dict[str, str] = {}
         self._lock = threading.Lock()
 
     def facts(self) -> dict[str, tuple[str | None, int | None]]:
@@ -436,7 +440,13 @@ class SessionWatch:
         with self._lock:
             return {key: (entry.facts.model, entry.facts.started_ms) for key, entry in self._entries.items()}
 
+    def titles(self) -> dict[str, str]:
+        """For each agent that Herdr was asked of: the title of its terminal ("": it has none)."""
+        with self._lock:
+            return dict(self._titles)
+
     def clear(self) -> None:
+        """Drop the facts: each agent is asked and read again. The titles stay until then."""
         with self._lock:
             self._entries = {}
 
@@ -449,13 +459,16 @@ class SessionWatch:
             return self._interval
         return max(0.0, min(*rests, CHECK))
 
-    def step(self, agents, stopped=lambda: False) -> bool:
+    def step(self, agents, stopped=lambda: False, files: bool = True) -> bool:
         """Check the processes of each agent and do the reads that are due. True when a value that the rows show is
-        different. A round that ends with `stopped()` true keeps nothing of what it read."""
+        different. A round that ends with `stopped()` true keeps nothing of what it read. `files` False: Herdr is
+        asked (for the titles) and no file of a session is read."""
         agents = [agent for agent in agents if valid_address(agent.key)]
         keys = {agent.key for agent in agents}
         with self._lock:
             before = dict(self._entries)
+            titles_before = dict(self._titles)
+        titles = {key: title for key, title in titles_before.items() if key in keys}
         changed = any(key not in keys and (entry.facts.model or entry.facts.started_ms)
                       for key, entry in before.items())
         after = {key: entry for key, entry in before.items() if key in keys}
@@ -473,8 +486,10 @@ class SessionWatch:
                 if now - entry.read_at < self._interval:
                     continue
                 terminal, known = None, entry.facts
-            elif now - entry.got_at >= GET_REFRESH:
+            elif now - entry.got_at >= GET_REFRESH or entry.status != agent.status:
                 terminal, known = None, entry.facts
+            elif not files:
+                continue
             elif now - entry.read_at >= self._interval:
                 terminal, known = entry.terminal, entry.facts
             else:
@@ -487,19 +502,21 @@ class SessionWatch:
                     facts = SessionFacts(reason=answer.code)
                 else:
                     terminal = answer
+                    titles[agent.key] = answer.title
             if terminal is not None:
-                facts = self._read(agent, terminal, known)
+                facts = self._read(agent, terminal, known) if files else SessionFacts(reason="off")
             shown = entry.facts if entry is not None else None
             if shown is None or shown.reason != facts.reason:
                 log.info("session facts terminal=%s app=%s reason=%s", agent.key, agent.app or "-", facts.reason)
             changed = changed or shown is None or (shown.model, shown.started_ms) != (facts.model, facts.started_ms)
             after[agent.key] = _Entry(agent.app, self._clock(), facts, got_at, terminal,
-                                      self._alive(agent, terminal, facts))
+                                      self._alive(agent, terminal, facts), agent.status)
         with self._lock:
-            if stopped():  # the setting went off, or the app quits, during the round
+            if stopped():  # the setting changed, or the app quits, during the round
                 return False
             self._entries = after
-        return changed
+            self._titles = titles
+        return changed or titles != titles_before
 
     def _alive(self, agent, terminal: Terminal | None, facts: SessionFacts) -> tuple:
         """The processes to check at each step: the foreground process of the terminal (or its first process) and

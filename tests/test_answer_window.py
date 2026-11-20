@@ -1814,3 +1814,20 @@ def test_a_move_to_the_top_that_changes_only_the_top_is_counted_and_then_the_end
     assert wait_for(app, lambda: window.property("topSeen") == d.backend.prompt["shown"], 1.0)
     key(app, window, Qt.Key.Key_End)
     assert wait_for(app, lambda: d.backend.prompt["seen"] is True)
+
+
+# ----- the name of an agent with no name in Herdr: the title of its terminal -----
+
+def test_the_window_shows_the_title_of_the_terminal_for_an_agent_with_no_name(app, desk):
+    from bellwether.client import Terminal
+    from bellwether.sessions import SessionWatch
+    agents = [Agent("t9", "blocked", "", "Space / Tab one", "claude-code"), AGENTS[2]]
+    watch = SessionWatch(None, readers={})
+    d = desk(agents=agents, sessions=watch)
+    d.client.terminal = lambda address: Terminal(0, 0, 0, "Made-up task nine" if address == "t9" else "")
+    watch._client = d.client
+    d.backend.read_meta()
+    settle(app)
+    d.answer_for("t9")
+    assert d.one("isAgentLabel").property("text") == "Made-up task nine"
+    assert d.one("isAgentAddress").property("text") == "t9"
