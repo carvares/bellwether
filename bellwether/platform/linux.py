@@ -311,11 +311,9 @@ def find_app_icon(desktop_dirs, icon_dirs) -> Path | None:
     return max(sized, key=lambda item: item[0])[1] if sized else None
 
 
-def app_icon_file(desktop_dirs=None, icon_dirs=None) -> Path | None:
-    """The icon file of the Herdr app, or None. The folders are for a test; None: the XDG folders."""
-    if desktop_dirs is None or icon_dirs is None:
-        desktop_dirs, icon_dirs = default_dirs()
-    return find_app_icon(desktop_dirs, icon_dirs)
+def app_icon_file() -> Path | None:
+    """The icon file of the Herdr app in the XDG folders, or None. (A test calls find_app_icon with its folders.)"""
+    return find_app_icon(*default_dirs())
 
 
 # ----- the set-up of Qt and the window shell: the layer shell on Wayland, else the plain shell -----

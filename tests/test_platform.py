@@ -31,7 +31,7 @@ INTERFACE = {
     "find_executables": ("function", ()),
     "spawn_child": ("function", ("argv",)),
     "process_host": ("function", ()),
-    "app_icon_file": ("function", ("desktop_dirs", "icon_dirs")),
+    "app_icon_file": ("function", ()),
     "SHELL_NEEDS": ("text", None),
     "prepare_environment": ("function", ()),
     "prepare_app": ("function", ("app",)),

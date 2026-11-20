@@ -14,6 +14,11 @@ RED, BLUE = "#f28b82", "#8ab4f8"
 SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect x="8" y="8" width="16" height="16"/></svg>'
 
 
+def found(desktop_dirs, icon_dirs):
+    """The finder of the icon file in made-up folders (the program gives platform.app_icon_file)."""
+    return lambda: find_app_icon(desktop_dirs, icon_dirs)
+
+
 def write_desktop(folder, icon_line="Icon=herdr-app"):
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "herdr-app.desktop").write_text(f"[Desktop Entry]\nType=Application\nName=Herdr\n{icon_line}\n")
@@ -131,6 +136,16 @@ def test_default_dirs_has_the_home_folder_before_the_system_folders(monkeypatch,
     ]
 
 
+def test_the_icon_file_of_the_platform_is_found_in_the_xdg_folders(monkeypatch, tmp_path, app):
+    from bellwether.platform import linux
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "mine"))
+    monkeypatch.setenv("XDG_DATA_DIRS", str(tmp_path / "usr"))
+    assert linux.app_icon_file() is None
+    write_desktop(tmp_path / "usr" / "applications")
+    svg = write_svg(tmp_path / "mine" / "icons" / "hicolor" / "scalable" / "apps" / "herdr-app.svg")
+    assert linux.app_icon_file() == svg
+
+
 @pytest.mark.parametrize("line", ["", "Icon=", "Icon=../herdr-app", "Icon=sub/herdr-app", "Icon=/missing/herdr.svg"])
 def test_find_app_icon_gives_none_for_a_bad_icon_entry(tree, line):
     desktop, icons = tree
@@ -212,7 +227,7 @@ def test_without_a_source_the_tray_icon_is_the_circle(app):
 
 def test_load_app_icon_logs_one_line_without_a_path_when_the_icon_is_missing(tmp_path, app, caplog):
     with caplog.at_level(logging.INFO, logger="bellwether"):
-        assert load_app_icon([tmp_path / "applications"], [tmp_path / "hicolor"]) is None
+        assert load_app_icon(found([tmp_path / "applications"], [tmp_path / "hicolor"])) is None
     assert len(caplog.records) == 1
     assert str(tmp_path) not in caplog.records[0].getMessage()
 
@@ -222,7 +237,7 @@ def test_load_app_icon_logs_one_line_when_the_icon_cannot_be_read(tree, caplog):
     (icons[1] / "scalable" / "apps").mkdir(parents=True)
     (icons[1] / "scalable" / "apps" / "herdr-app.svg").write_text("not an svg")
     with caplog.at_level(logging.INFO, logger="bellwether"):
-        assert load_app_icon(desktop, icons) is None
+        assert load_app_icon(found(desktop, icons)) is None
     assert len(caplog.records) == 1
     assert "herdr-app" not in caplog.records[0].getMessage()
 
@@ -231,7 +246,7 @@ def test_load_app_icon_gives_the_image_and_no_log(tree, caplog):
     desktop, icons = tree
     write_svg(icons[1] / "scalable" / "apps" / "herdr-app.svg")
     with caplog.at_level(logging.INFO, logger="bellwether"):
-        assert load_app_icon(desktop, icons) is not None
+        assert load_app_icon(found(desktop, icons)) is not None
     assert caplog.records == []
 
 
@@ -350,7 +365,7 @@ def test_any_failure_while_the_icon_loads_gives_the_circle_and_one_log_line(tree
 
     monkeypatch.setattr(appicon, "load_source", broken)
     with caplog.at_level(logging.INFO, logger="bellwether"):
-        made = TrayIcons.load(desktop, icons)
+        made = TrayIcons.load(found(desktop, icons))
     assert made.icon(RED).pixmap(64).toImage() == make_icon(RED).pixmap(64).toImage()
     assert len(caplog.records) == 1
     text = caplog.records[0].getMessage()
@@ -366,7 +381,7 @@ def test_any_failure_while_the_mark_is_made_gives_the_circle_and_one_log_line(tr
 
     monkeypatch.setattr(appicon, "mark", broken)
     with caplog.at_level(logging.INFO, logger="bellwether"):
-        made = TrayIcons.load(desktop, icons)
+        made = TrayIcons.load(found(desktop, icons))
     assert made.icon(BLUE).pixmap(64).toImage() == make_icon(BLUE).pixmap(64).toImage()
     assert len(caplog.records) == 1 and "MemoryError" in caplog.records[0].getMessage()
 
@@ -375,7 +390,7 @@ def test_tray_icons_load_gives_the_mark_of_a_good_icon_with_no_log(tree, caplog)
     desktop, icons = tree
     write_svg(icons[1] / "scalable" / "apps" / "herdr-app.svg")
     with caplog.at_level(logging.INFO, logger="bellwether"):
-        made = TrayIcons.load(desktop, icons)
+        made = TrayIcons.load(found(desktop, icons))
     red = made.icon(RED).pixmap(32).toImage()
     assert red.pixelColor(16, 16) == QColor(RED) and alpha(red, 2, 2) == 0  # the square of the test SVG
     assert caplog.records == []

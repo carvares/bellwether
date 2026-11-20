@@ -113,10 +113,10 @@ def load_source(path: Path) -> QImage | None:
     return image
 
 
-def load_app_icon(desktop_dirs=None, icon_dirs=None) -> QImage | None:
-    """The Herdr app icon, read one time at start. Logs one line (no path) when the tray must use the circle. The
-    folders are for a test (see `platform.app_icon_file`); None: the places of the system."""
-    path = platform.app_icon_file(desktop_dirs, icon_dirs)
+def load_app_icon(find=None) -> QImage | None:
+    """The Herdr app icon, read one time at start. Logs one line (no path) when the tray must use the circle.
+    `find` gives the icon file (a test gives its own); None: `platform.app_icon_file`, the places of the system."""
+    path = (find or platform.app_icon_file)()
     if path is None:
         log.info("the Herdr app icon was not found: the tray icon is a circle")
         return None
