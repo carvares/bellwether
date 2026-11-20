@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from .client import Failure, valid_address
+from .client import Failure, Terminal, valid_address
 
 log = logging.getLogger("bellwether")
 
@@ -43,8 +43,13 @@ SMALL_FILE = 64 * 1024
 MAX_PROCESSES = 32
 # The most threads of one process whose child processes are read.
 MAX_TASKS = 256
-# Seconds between two reads of the facts of one agent.
+# Seconds between two reads of the files of one agent.
 REFRESH = 30.0
+# Seconds between two checks in /proc that the processes of an agent still live (no command).
+CHECK = 5.0
+# Seconds between two `herdr-core get` of one agent whose processes live: a net for a terminal that has an other
+# foreground process while the old one lives on.
+GET_REFRESH = 300.0
 
 # A model id: letters, digits and the marks of the known ids ("claude-opus-5-5", "gpt-5.2-codex",
 # "us.anthropic.claude-opus-4-1-20250805-v1:0", "claude-opus-5-5[1m]"). Any other text is not a model.
@@ -195,20 +200,48 @@ class SessionFacts:
     mark: Mark | None = field(default=None, repr=False)
 
 
-def _json_file(path: Path) -> dict | None:
-    """A small JSON object of a file. None for no file, a file that is too large, and anything else."""
+def _open_regular(path: Path) -> int | str:
+    """The open file number of a regular file, or a reason code: "no_file", "not_regular". The open does not wait
+    (a pipe has no writer) and does not take a terminal; a pipe or a device is closed again and never read."""
     try:
-        with open(path, "rb") as file:
-            data = file.read(SMALL_FILE + 1)
+        number = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOCTTY | os.O_CLOEXEC)
     except OSError:
-        return None
+        return "no_file"
+    try:
+        if stat.S_ISREG(os.fstat(number).st_mode):
+            return number
+    except OSError:
+        pass
+    os.close(number)
+    return "not_regular"
+
+
+def _head(path: Path, size: int) -> bytes | str:
+    """At most `size` bytes from the start of a regular file, or the reason code of `_open_regular`."""
+    number = _open_regular(path)
+    if isinstance(number, str):
+        return number
+    try:
+        return os.pread(number, size, 0)
+    except OSError:
+        return "no_file"
+    finally:
+        os.close(number)
+
+
+def _json_file(path: Path) -> dict | str:
+    """A small JSON object of a regular file, or a reason code: "no_file" (also a file that is too large or is not
+    such an object), "not_regular"."""
+    data = _head(path, SMALL_FILE + 1)
+    if isinstance(data, str):
+        return data
     if len(data) > SMALL_FILE:
-        return None
+        return "no_file"
     try:
         value = json.loads(data)
     except (ValueError, RecursionError):
-        return None
-    return value if isinstance(value, dict) else None
+        return "no_file"
+    return value if isinstance(value, dict) else "no_file"
 
 
 def _milliseconds(value: object) -> int | None:
@@ -221,14 +254,11 @@ def last_model(host: Host, path: Path, needle: bytes, pick, known: SessionFacts 
     mark of this scan. `needle`: bytes that every such record has (the other lines are not parsed). With the mark
     of an earlier scan of the same file only the part after it is read, and the model of that scan stays when the
     new part has none. None and no mark: the file cannot be read."""
-    try:
-        number = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
-    except OSError:
+    number = _open_regular(path)
+    if isinstance(number, str):
         return None, None
     try:
         status = os.fstat(number)
-        if not stat.S_ISREG(status.st_mode):
-            return None, None
         size = status.st_size
         mark = Mark(str(path), status.st_dev, status.st_ino, size)
         before = known.mark if known is not None else None
@@ -284,15 +314,26 @@ def _claude_model(record: dict) -> object:
 
 
 def read_claude(host: Host, pids, known: SessionFacts | None = None) -> SessionFacts:
-    reason = "no_session"
-    for pid in pids:
+    """The facts of the Claude Code process of `pids` (the foreground process first). The foreground process with a
+    session file is the agent. Else the session files of all the processes count: two or more → no facts
+    ("several_sessions"), as which one is the agent is not known."""
+    reason, found = "no_session", []
+    for index, pid in enumerate(pids):
         session = _json_file(host.home / ".claude" / "sessions" / f"{pid}.json")
-        if session is None:
+        if isinstance(session, str):
+            if session != "no_file":
+                reason = session
             continue
         ticks = host.start_ticks(pid)
         if session.get("pid") != pid or ticks is None or str(session.get("procStart")) != ticks:
             reason = "other_process"  # the file of an older process that had this pid
             continue
+        found.append((pid, session))
+        if index == 0:
+            break
+    if len(found) > 1:
+        return SessionFacts(reason="several_sessions")
+    for pid, session in found:
         started = _milliseconds(session.get("startedAt"))
         session_id, folder = session.get("sessionId"), session.get("cwd")
         if not isinstance(session_id, str) or not _SESSION_ID.fullmatch(session_id):
@@ -319,10 +360,8 @@ def _codex_model(record: dict) -> object:
 
 def _first_stamp(host: Host, path: Path) -> int | None:
     """The time of the first line of a rollout file (UTC), from its first bytes."""
-    try:
-        with open(path, "rb") as file:
-            head = file.read(64)
-    except OSError:
+    head = _head(path, 64)
+    if isinstance(head, str):
         return None
     host.bytes_read += len(head)
     found = _FIRST_STAMP.match(head)
@@ -336,16 +375,24 @@ def _first_stamp(host: Host, path: Path) -> int | None:
 
 
 def read_codex(host: Host, pids, known: SessionFacts | None = None) -> SessionFacts:
+    """The facts of the rollout file that the processes of `pids` (the foreground process first) have open. The
+    rollout files of the foreground process count when it has one; else those of all the processes. Two or more
+    files → no facts ("several_rollouts"): one is never chosen."""
     root = str(host.home / ".codex" / "sessions") + os.sep
-    for pid in pids:
+    found: dict[str, int] = {}  # each rollout file, and the first process that has it open
+    for index, pid in enumerate(pids):
         for name in host.open_files(pid):
-            if not name.startswith(root) or not _ROLLOUT.fullmatch(os.path.basename(name)):
-                continue
-            path = Path(name)
-            mine = known if known is not None and known.pid == pid else None
-            model, mark = last_model(host, path, b'"type":"turn_context"', _codex_model, mine)
-            if mark is None:
-                continue
+            if name.startswith(root) and _ROLLOUT.fullmatch(os.path.basename(name)):
+                found.setdefault(name, pid)
+        if found and index == 0:
+            break
+    if len(found) > 1:
+        return SessionFacts(reason="several_rollouts")
+    for name, pid in found.items():
+        path = Path(name)
+        mine = known if known is not None and known.pid == pid else None
+        model, mark = last_model(host, path, b'"type":"turn_context"', _codex_model, mine)
+        if mark is not None:
             return SessionFacts(model, _first_stamp(host, path), "ok" if model else "no_model", pid, mark)
     return SessionFacts(reason="no_session")
 
@@ -359,15 +406,20 @@ READERS = {"claude-code": read_claude, "claude": read_claude, "codex": read_code
 @dataclass
 class _Entry:
     app: str
-    read_at: float
+    read_at: float  # the last read of the files
     facts: SessionFacts
+    got_at: float = 0.0  # the last `herdr-core get`
+    terminal: Terminal | None = None  # what that get gave; None: it failed
+    alive: tuple = ()  # (pid, start ticks) of each process of this machine that the facts depend on
 
 
 class SessionWatch:
-    """The facts of the agents of the list. `step` does the reads that are due (on a worker thread): for each agent
-    at most one `herdr-core get` in `interval` seconds, at once for an agent that is new in the list or has an
-    other program word, and the files of its processes. `facts` gives what the rows show. Errors are reason codes:
-    a log line has the address, the program word and the code, and is written when the code of an agent changes."""
+    """The facts of the agents of the list. `step` does the reads that are due (on a worker thread). For each agent:
+    a `herdr-core get` at once when it is new in the list, has an other program word, or when a process that its
+    facts depend on ended or is an other process now (checked in /proc at each step: no command); else one in
+    GET_REFRESH seconds, as a net. The files of its processes are read each `interval` seconds, with the processes
+    of the last get. `facts` gives what the rows show. Errors are reason codes: a log line has the address, the
+    program word and the code, and is written when the code of an agent changes."""
 
     def __init__(self, client, host: Host | None = None, readers=None, clock=time.monotonic,
                  interval: float = REFRESH) -> None:
@@ -389,14 +441,17 @@ class SessionWatch:
             self._entries = {}
 
     def wait(self) -> float:
-        """Seconds until the next read is due."""
+        """Seconds until the next step: when a read is due, and at most CHECK (the check of the processes)."""
         now = self._clock()
         with self._lock:
             rests = [entry.read_at + self._interval - now for entry in self._entries.values()]
-        return max(0.0, min(rests, default=self._interval))
+        if not rests:
+            return self._interval
+        return max(0.0, min(*rests, CHECK))
 
     def step(self, agents, stopped=lambda: False) -> bool:
-        """Read the agents that are due. True when a value that the rows show is different."""
+        """Check the processes of each agent and do the reads that are due. True when a value that the rows show is
+        different. A round that ends with `stopped()` true keeps nothing of what it read."""
         agents = [agent for agent in agents if valid_address(agent.key)]
         keys = {agent.key for agent in agents}
         with self._lock:
@@ -408,22 +463,58 @@ class SessionWatch:
             if stopped():
                 break
             entry = after.get(agent.key)
-            if entry is not None and entry.app == agent.app and self._clock() - entry.read_at < self._interval:
+            if entry is not None and entry.app != agent.app:
+                entry = None
+            now = self._clock()
+            if entry is None or not self._lives(entry):
+                # New, or an other process now: nothing of the old process is kept, and Herdr is asked at once.
+                terminal, known = None, None
+            elif entry.terminal is None:  # the last get failed
+                if now - entry.read_at < self._interval:
+                    continue
+                terminal, known = None, entry.facts
+            elif now - entry.got_at >= GET_REFRESH:
+                terminal, known = None, entry.facts
+            elif now - entry.read_at >= self._interval:
+                terminal, known = entry.terminal, entry.facts
+            else:
                 continue
-            known = entry.facts if entry is not None and entry.app == agent.app else None
-            facts = self._read(agent, known)
-            if known is None or known.reason != facts.reason:
+            got_at = entry.got_at if entry is not None else 0.0
+            if terminal is None:
+                answer = self._client.terminal(agent.key)
+                got_at = self._clock()
+                if isinstance(answer, Failure):
+                    facts = SessionFacts(reason=answer.code)
+                else:
+                    terminal = answer
+            if terminal is not None:
+                facts = self._read(agent, terminal, known)
+            shown = entry.facts if entry is not None else None
+            if shown is None or shown.reason != facts.reason:
                 log.info("session facts terminal=%s app=%s reason=%s", agent.key, agent.app or "-", facts.reason)
-            changed = changed or known is None or (known.model, known.started_ms) != (facts.model, facts.started_ms)
-            after[agent.key] = _Entry(agent.app, self._clock(), facts)
+            changed = changed or shown is None or (shown.model, shown.started_ms) != (facts.model, facts.started_ms)
+            after[agent.key] = _Entry(agent.app, self._clock(), facts, got_at, terminal,
+                                      self._alive(agent, terminal, facts))
         with self._lock:
+            if stopped():  # the setting went off, or the app quits, during the round
+                return False
             self._entries = after
         return changed
 
-    def _read(self, agent, known: SessionFacts | None) -> SessionFacts:
-        terminal = self._client.terminal(agent.key)
-        if isinstance(terminal, Failure):
-            return SessionFacts(reason=terminal.code)
+    def _alive(self, agent, terminal: Terminal | None, facts: SessionFacts) -> tuple:
+        """The processes to check at each step: the foreground process of the terminal (or its first process) and
+        the process of the facts, with their start ticks. None for an agent of an other machine."""
+        if terminal is None or "/" in agent.key:
+            return ()
+        pids = dict.fromkeys(pid for pid in (terminal.foreground or terminal.pid, facts.pid) if pid > 0)
+        return tuple((pid, self._host.start_ticks(pid)) for pid in pids)
+
+    def _lives(self, entry: _Entry) -> bool:
+        """Each process of the entry is still there, and is the same process (the same start). One small read of
+        /proc for each; a process that could not be read at the last read counts as the same while it still cannot."""
+        return all(self._host.start_ticks(pid) == ticks for pid, ticks in entry.alive)
+
+    def _read(self, agent, terminal: Terminal, known: SessionFacts | None) -> SessionFacts:
         created = terminal.created_ms or None
         if "/" in agent.key:  # an agent of an other machine: its processes and its files are not here
             return SessionFacts(None, created, "remote")

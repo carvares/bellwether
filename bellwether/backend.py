@@ -532,7 +532,8 @@ class Backend(QObject):
         the setting off, and with no reader, nothing is read."""
         if self._watch is None or not self._show_meta:
             return
-        if self._watch.step(self._agents if self._online else [], self._stop.is_set):
+        # The setting can go off during the round: the round then stops, and keeps nothing of what it read.
+        if self._watch.step(self._agents if self._online else [], lambda: self._stop.is_set() or not self._show_meta):
             self._metaRead.emit()
 
     @Slot()

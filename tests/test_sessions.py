@@ -3,6 +3,8 @@ Every file is made up and is in a scratch home; /proc is a scratch folder too. N
 import json
 import logging
 import os
+import shutil
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -177,6 +179,24 @@ def test_the_first_process_of_the_family_with_a_session_file_is_the_agent(machin
     assert (facts.model, facts.pid) == ("claude-opus-5-5", 700)
 
 
+def test_a_shell_with_two_live_claude_code_processes_gives_no_model_and_no_start(machine):
+    """The shell has the terminal, and two Claude Code processes are its children (one stopped with Ctrl-Z): which one
+    is the agent is not known, so neither is taken."""
+    machine.claude(700, assistant("claude-opus-5-5"))
+    machine.claude(701, assistant("claude-fable-5-2"), session=OTHER_SESSION, started=STARTED + 9)
+    machine.process(600, children=[700, 701])
+    facts = read_claude(machine.host, machine.host.family(600, 600))
+    assert (facts.model, facts.started_ms, facts.reason, facts.pid) == (None, None, "several_sessions", 0)
+
+
+def test_a_foreground_claude_code_process_is_the_agent_also_with_an_other_one_below_it(machine):
+    machine.claude(701, assistant("claude-fable-5-2"), session=OTHER_SESSION)
+    machine.claude(700, assistant("claude-opus-5-5"))
+    machine.process(700, children=[701])
+    machine.process(600, children=[700])
+    assert read_claude(machine.host, machine.host.family(700, 600)).model == "claude-opus-5-5"
+
+
 def test_the_child_processes_are_read_only_when_the_first_process_is_not_the_agent(machine):
     machine.claude(700, assistant("claude-opus-5-5"))
     machine.host.children = lambda pid: pytest.fail("the child processes were read")
@@ -343,6 +363,54 @@ def test_a_transcript_that_is_an_other_file_now_is_read_from_its_end_again(machi
     assert read_claude(machine.host, [700], first).model == "claude-haiku-5"
 
 
+def test_an_other_file_at_the_same_path_is_read_in_whole_also_when_a_line_ends_where_the_first_file_ended(machine):
+    """Only the number of the file tells the two files apart here: the new file is longer, a line of it ends at the
+    place where the first file ended, and its record of the assistant is before that place."""
+    path = machine.claude(700, assistant("claude-opus-5-5") + user() * 3)
+    first = read_claude(machine.host, [700])
+    size = first.mark.size
+    path.rename(path.with_suffix(".old"))  # the first file stays: the new one cannot get its number
+    head = assistant("claude-fable-5-2")
+    head += user("x" * (size - len(head) - len(user(""))))
+    assert len(head) == size and head.endswith(b"\n")
+    path.write_bytes(head + user() * 3)
+    assert read_claude(machine.host, [700], first).model == "claude-fable-5-2"
+
+
+def run_briefly(call, fifo):
+    """The value of call(), or a failure when it does not end in 2 s (a read that waits for a writer of the pipe)."""
+    done = []
+    thread = threading.Thread(target=lambda: done.append(call()), daemon=True)
+    thread.start()
+    thread.join(2)
+    if not done:
+        os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))  # lets the blocked read end
+        thread.join(2)
+        pytest.fail("the read blocked on a pipe")
+    return done[0]
+
+
+@pytest.mark.parametrize("kind", ["pipe", "device"])
+def test_a_session_file_that_is_a_pipe_or_a_device_is_a_reason_code_and_never_blocks(machine, kind):
+    machine.claude(700, assistant("claude-opus-5-5"))
+    path = machine.home / ".claude" / "sessions" / "700.json"
+    path.unlink()
+    if kind == "pipe":
+        os.mkfifo(path)
+    else:
+        os.symlink("/dev/null", path)
+    facts = run_briefly(lambda: read_claude(machine.host, [700]), path)
+    assert (facts.model, facts.started_ms, facts.reason) == (None, None, "not_regular")
+
+
+def test_the_first_line_of_a_rollout_file_that_is_a_pipe_is_not_read(machine):
+    path = machine.rollout(b"")
+    path.unlink()
+    os.mkfifo(path)
+    assert run_briefly(lambda: sessions._first_stamp(machine.host, path), path) is None
+    assert machine.host.bytes_read == 0
+
+
 def test_a_new_session_of_the_same_process_keeps_the_model_until_its_first_answer(machine):
     """After "/clear" the process has a new session id and a transcript with no answer yet."""
     machine.claude(700, assistant("claude-opus-5-5"))
@@ -380,6 +448,31 @@ def test_a_codex_process_with_no_open_rollout_file_has_no_facts(machine):
     machine.process(900, files=["/dev/null"])
     assert read_codex(machine.host, [900]) == SessionFacts(reason="no_session")
     assert read_codex(machine.host, [901]) == SessionFacts(reason="no_session")  # no such process
+
+
+OTHER_ROLLOUT = "rollout-2026-11-19T17-00-00-02b2f662-537e-8e04-a679-a061122f6e65.jsonl"
+
+
+def test_a_codex_process_with_two_open_rollout_files_has_no_model(machine):
+    """Two rollout files open (a sub-agent, a second session): which one is the agent is not known."""
+    first = machine.rollout(meta() + turn("gpt-5.2-codex"))
+    second = machine.rollout(meta() + turn("made-up-sub-model"), name=OTHER_ROLLOUT)
+    machine.process(900, files=[str(second), str(first)])
+    assert read_codex(machine.host, [900]) == SessionFacts(reason="several_rollouts")
+    assert machine.host.bytes_read == 0
+    machine.process(901, files=[str(first), str(first)])  # one file open two times is one file
+    assert read_codex(machine.host, [901]).model == "gpt-5.2-codex"
+
+
+def test_rollout_files_of_two_child_processes_give_no_model_and_one_of_the_foreground_process_is_taken(machine):
+    first = machine.rollout(meta() + turn("gpt-5.2-codex"))
+    second = machine.rollout(meta() + turn("made-up-sub-model"), name=OTHER_ROLLOUT)
+    machine.process(800, children=[900, 901])
+    machine.process(900, files=[str(first)])
+    machine.process(901, files=[str(second)])
+    assert read_codex(machine.host, machine.host.family(800, 800)).reason == "several_rollouts"
+    machine.process(902, children=[901], files=[str(first)])
+    assert read_codex(machine.host, machine.host.family(902, 800)).model == "gpt-5.2-codex"
 
 
 def test_a_file_that_is_not_a_rollout_file_of_the_home_is_not_read(machine, tmp_path):
@@ -455,26 +548,103 @@ def test_the_engine_reads_each_agent_of_the_list_one_time(watched, caplog):
         "session facts terminal=t2 app=codex reason=no_session"]
 
 
-def test_one_get_for_each_agent_in_thirty_seconds(watched, caplog):
+def test_no_get_while_the_processes_of_an_agent_live_and_one_in_five_minutes_as_a_net(watched, caplog):
+    """A step each CHECK seconds: the processes are checked in /proc, the files are read each 30 s, and Herdr is
+    asked again only after GET_REFRESH."""
     caplog.set_level(logging.INFO, logger="bellwether")
     watched.watch.step(AGENTS)
     read = watched.machine.host.bytes_read
-    for second in range(1, 30):
+    watched.clock.now = 1000.0 + sessions.CHECK
+    assert watched.watch.step(AGENTS) is False and watched.watch.wait() == sessions.CHECK
+    for second in range(10, 300, 5):
         watched.clock.now = 1000.0 + second
         assert watched.watch.step(AGENTS) is False
-    assert watched.client.calls == ["t1", "t2"] and watched.machine.host.bytes_read == read
-    assert watched.watch.wait() == pytest.approx(1.0)
-    watched.clock.now = 1030.0
-    assert watched.watch.step(AGENTS) is False  # read again, and nothing is different
-    assert watched.client.calls == ["t1", "t2", "t1", "t2"]
+    assert watched.client.calls == ["t1", "t2"]
     assert watched.machine.host.bytes_read == read  # the transcript did not change: it is not read again
     assert len(caplog.records) == 2  # a reason code that stays is logged one time
-    for minute in range(1, 11):
-        watched.clock.now = 1030.0 + 60 * minute
+    watched.clock.now = 1000.0 + sessions.GET_REFRESH
+    assert watched.watch.step(AGENTS) is False
+    assert watched.client.calls == ["t1", "t2", "t1", "t2"]
+    for second in range(305, 1200, 5):  # twenty minutes in all: 4 gets for each agent, the first one too
+        watched.clock.now = 1000.0 + second
         watched.watch.step(AGENTS)
-        watched.clock.now += 29.9
-        watched.watch.step(AGENTS)
-    assert len(watched.client.calls) == 4 + 2 * 10
+    assert len(watched.client.calls) == 2 * 4
+
+
+def test_the_files_are_read_each_thirty_seconds_with_no_get(watched):
+    watched.watch.step(AGENTS)
+    with open(watched.machine.transcript(assistant("claude-opus-5-5")), "ab") as file:
+        file.write(assistant("claude-fable-5-2"))
+    watched.clock.now += 25
+    assert watched.watch.step(AGENTS) is False and watched.watch.wait() == pytest.approx(5.0)
+    watched.clock.now += 5
+    assert watched.watch.step(AGENTS) is True and watched.watch.facts()["t1"][0] == "claude-fable-5-2"
+    assert watched.client.calls == ["t1", "t2"]
+
+
+def test_an_agent_that_ends_in_its_terminal_shows_no_old_model_after_the_next_step(watched):
+    """Claude Code ends and the shell has the terminal again: the row has the time of the terminal at the next step.
+    A new Claude Code in the same terminal shows at the next read of the files."""
+    watched.watch.step(AGENTS)
+    shutil.rmtree(watched.machine.proc / "700")
+    watched.machine.process(600)
+    watched.clock.now += sessions.CHECK
+    assert watched.watch.step(AGENTS) is True
+    assert watched.watch.facts()["t1"] == (None, CREATED) and watched.client.calls == ["t1", "t2", "t1"]
+    watched.machine.claude(701, assistant("claude-fable-5-2"), session=OTHER_SESSION, started=STARTED + 9)
+    watched.machine.process(600, children=[701])
+    watched.clock.now += sessions.CHECK
+    assert watched.watch.step(AGENTS) is False  # the shell lives: no get, and the files are not due
+    watched.clock.now += sessions.REFRESH
+    assert watched.watch.step(AGENTS) is True
+    assert watched.watch.facts()["t1"] == ("claude-fable-5-2", STARTED + 9)
+    assert watched.client.calls == ["t1", "t2", "t1"]
+
+
+def test_a_new_process_with_the_same_pid_keeps_nothing_of_the_old_one(watched):
+    """The pid came again with an other start: a new process, whose session has no answer yet. The model of the old
+    process is not kept (it is kept only after "/clear" in the same process)."""
+    watched.watch.step(AGENTS)
+    watched.machine.claude(700, user(), ticks=6000, session=OTHER_SESSION, started=STARTED + 9)
+    watched.clock.now += sessions.CHECK
+    assert watched.watch.step(AGENTS) is True
+    assert watched.watch.facts()["t1"] == (None, STARTED + 9) and watched.client.calls == ["t1", "t2", "t1"]
+
+
+def test_the_net_finds_a_new_foreground_process_while_the_old_one_lives(watched):
+    watched.watch.step(AGENTS)
+    watched.machine.claude(702, assistant("claude-fable-5-2"), session=OTHER_SESSION, started=STARTED + 9)
+    watched.client.terminals["t1"] = Terminal(600, 702, CREATED)  # 702 is not a child of the shell
+    watched.clock.now += sessions.GET_REFRESH - sessions.CHECK
+    watched.watch.step(AGENTS)
+    assert watched.watch.facts()["t1"] == ("claude-opus-5-5", STARTED)
+    watched.clock.now += sessions.CHECK
+    assert watched.watch.step(AGENTS) is True
+    assert watched.watch.facts()["t1"] == ("claude-fable-5-2", STARTED + 9)
+
+
+def test_a_failed_get_is_asked_again_after_thirty_seconds(watched):
+    watched.client.terminals["t1"] = Failure("timeout")
+    watched.watch.step(AGENTS)
+    watched.clock.now += sessions.REFRESH - 1
+    watched.watch.step(AGENTS)
+    assert watched.client.calls == ["t1", "t2"]
+    watched.clock.now += 1
+    watched.watch.step(AGENTS)
+    assert watched.client.calls == ["t1", "t2", "t1"]
+
+
+def test_a_shell_with_two_claude_code_processes_has_the_time_of_its_terminal(watched):
+    watched.machine.claude(701, assistant("claude-fable-5-2"), session=OTHER_SESSION, started=STARTED + 9)
+    watched.machine.process(600, children=[700, 701])
+    watched.watch.step(AGENTS)
+    assert watched.watch.facts()["t1"] == (None, CREATED)
+
+
+def test_a_round_that_ends_stopped_keeps_nothing_of_it(watched):
+    """The setting went off or the app quits while a round runs: what the round read is not kept."""
+    watched.watch.step(AGENTS, stopped=lambda: len(watched.client.calls) >= 1)
+    assert watched.client.calls == ["t1"] and watched.watch.facts() == {}
 
 
 def test_a_model_that_changes_in_the_session_shows_at_the_next_read(watched):

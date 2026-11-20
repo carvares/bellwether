@@ -119,7 +119,7 @@ def test_a_backend_with_no_reader_of_sessions_has_rows_with_no_line(app, fake_cl
     backend.stop()
 
 
-def test_one_get_for_each_agent_in_thirty_seconds_and_a_new_agent_at_once(app, desk):
+def test_a_get_for_a_new_agent_at_once_and_then_only_as_a_net_in_five_minutes(app, desk):
     d = desk()
     d.backend.apply(list(AGENTS[:2]))
     d.backend.read_meta()
@@ -134,13 +134,13 @@ def test_one_get_for_each_agent_in_thirty_seconds_and_a_new_agent_at_once(app, d
     d.backend.read_meta()
     assert d.client.calls == ["t1", "t2", "t3"]
     d.mono = 130.0
-    d.backend.read_meta()
-    assert d.client.calls == ["t1", "t2", "t3", "t1", "t2"]
-    for minute in range(10):  # ten minutes: two gets for each agent in each minute
+    d.backend.read_meta()  # the files are read again, Herdr is not asked
+    assert d.client.calls == ["t1", "t2", "t3"] and d.reads == ["claude-code", "codex"] * 2
+    for minute in range(10):  # ten minutes: a get for each agent in five minutes, as a net
         for second in range(0, 60, 5):
             d.mono = 200.0 + 60 * minute + second
             d.backend.read_meta()
-    assert len(d.client.calls) == 5 + 3 * 2 * 10
+    assert d.client.calls == ["t1", "t2", "t3"] + ["t1", "t2", "t3"] * 2
 
 
 def test_a_new_process_of_an_agent_shows_its_model_after_the_read(app, desk):
@@ -245,6 +245,20 @@ def test_the_setting_goes_off_and_on_and_is_saved_with_the_other_keys(app, desk)
     d.backend.read_meta()  # at once, not 30 seconds later
     app.processEvents()
     assert d.client.calls == ["t1", "t2", "t3"] and d.meta()["t1"] == "Opus 5.5 · 2h 14m"
+
+
+def test_the_setting_goes_off_during_a_round_and_the_round_stops_and_keeps_nothing(app, desk):
+    d = desk()
+    d.backend.apply(list(AGENTS))
+
+    def read_and_turn_off(host, pids, known):  # the person clicks the check box while the first agent is read
+        d.backend.setShowMeta(False)
+        return d.read("claude-code", STARTED)
+
+    d.watch._readers["claude-code"] = read_and_turn_off
+    d.backend.read_meta()
+    app.processEvents()
+    assert d.client.calls == ["t1"] and d.watch.facts() == {} and d.meta() == {"t1": "", "t2": "", "t3": ""}
 
 
 def test_the_setting_is_restored_at_the_next_start(app, desk, tmp_path):
