@@ -634,3 +634,22 @@ def test_the_tray_takes_the_largest_image_of_an_icns(tmp_path, app):
                                          (b"icp5", png(32, "#00ff00"))])
     image = load_source(path)
     assert image.width() == 256 and image.pixelColor(128, 128) == QColor("#0000ff")
+
+
+# ----- the fonts: the macOS families come after the Linux ones, so Linux keeps its fonts -----
+
+UI = Path(macos.__file__).parent.parent / "ui"
+
+
+@pytest.mark.parametrize("file, linux, mac", [
+    *[(f"skins/{letter}Theme.qml", ["Adwaita Sans", "Inter", "Noto Sans", "DejaVu Sans"], ["SF Pro", "Helvetica Neue"])
+      for letter in "ABDE"],
+    *[(file, ["Hack", "JetBrains Mono", "DejaVu Sans Mono", "Liberation Mono", "Noto Sans Mono"], ["SF Mono", "Menlo"])
+      for file in ("skins/CTheme.qml", "controls/TextView.qml")],
+])
+def test_each_font_list_has_the_macos_families_at_its_end(file, linux, mac):
+    import re
+    text = (UI / file).read_text()
+    lists = re.findall(r"Fonts\.first\(\s*\[([^\]]*)\]", text)
+    assert len(lists) == 1
+    assert re.findall(r'"([^"]+)"', lists[0]) == linux + mac

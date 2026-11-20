@@ -269,7 +269,8 @@ def families(backend):
     """A proportional and a monospace family of this system that the user can choose, both not the font of a theme."""
     from PySide6.QtGui import QFontDatabase
     listed = backend.fontFamilies
-    themes = {"Adwaita Sans", "Inter", "Noto Sans", "DejaVu Sans", "Hack", "JetBrains Mono", "DejaVu Sans Mono"}
+    themes = {"Adwaita Sans", "Inter", "Noto Sans", "DejaVu Sans", "Hack", "JetBrains Mono", "DejaVu Sans Mono",
+              "SF Pro", "Helvetica Neue", "SF Mono", "Menlo"}  # (the last four: macOS)
     serif = next((f for f in ("DejaVu Serif", "Liberation Serif", "Noto Serif") if f in listed), None) or next(
         f for f in listed if f not in themes and not QFontDatabase.isFixedPitch(f))
     mono = next((f for f in ("Liberation Mono", "Adwaita Mono", "Noto Sans Mono") if f in listed), None) or next(

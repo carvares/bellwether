@@ -39,7 +39,8 @@ Rectangle {
         : below > 0 ? count(below, "more line") + " below" : above > 0 ? count(above, "line") + " above" : ""
     // A monospace font of the system. The font family of the custom look is not used here: columns must line up.
     readonly property string mono: Fonts.first(
-        ["Hack", "JetBrains Mono", "DejaVu Sans Mono", "Liberation Mono", "Noto Sans Mono"], "monospace")
+        ["Hack", "JetBrains Mono", "DejaVu Sans Mono", "Liberation Mono", "Noto Sans Mono", /* macOS: */ "SF Mono",
+         "Menlo"], "monospace")
 
     function count(n, word) {
         return n + " " + (n === 1 ? word : word + "s")
