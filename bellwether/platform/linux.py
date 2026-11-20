@@ -2,15 +2,16 @@
 from __future__ import annotations
 
 import ctypes
-import ctypes.util
 import fcntl
 import json
 import logging
 import os
 import re
+import select
 import shutil
 import signal
 import subprocess
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QUrl
@@ -362,55 +363,111 @@ def layer_module_loads(engine) -> bool:
 
 _GLOBAL = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_char_p, ctypes.c_uint32)
 _GLOBAL_REMOVE = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32)
+_DONE = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32)
 
 
 class _RegistryListener(ctypes.Structure):
     _fields_ = [("global_", _GLOBAL), ("global_remove", _GLOBAL_REMOVE)]
 
 
-def wayland_globals(environ=None) -> set[str] | None:
+class _CallbackListener(ctypes.Structure):
+    _fields_ = [("done", _DONE)]
+
+
+# The names of the library, tried in this order with no search (ctypes.util.find_library starts ldconfig).
+WAYLAND_LIBRARIES = ("libwayland-client.so.0", "libwayland-client.so")
+# The longest time that the read of the globals may take at the start, in seconds.
+GLOBALS_TIMEOUT = 1.0
+
+
+def _wayland_library(names):
+    for name in names:
+        try:
+            lib = ctypes.CDLL(name)
+        except OSError:
+            continue
+        void, pointer = None, ctypes.c_void_p
+        for function, result, arguments in (
+                ("wl_display_connect", pointer, [ctypes.c_char_p]),
+                ("wl_display_disconnect", void, [pointer]),
+                ("wl_display_get_fd", ctypes.c_int, [pointer]),
+                ("wl_display_flush", ctypes.c_int, [pointer]),
+                ("wl_display_prepare_read", ctypes.c_int, [pointer]),
+                ("wl_display_cancel_read", void, [pointer]),
+                ("wl_display_read_events", ctypes.c_int, [pointer]),
+                ("wl_display_dispatch_pending", ctypes.c_int, [pointer]),
+                ("wl_proxy_marshal_array_constructor", pointer, [pointer, ctypes.c_uint32, pointer, pointer]),
+                ("wl_proxy_add_listener", ctypes.c_int, [pointer, pointer, pointer]),
+                ("wl_proxy_destroy", void, [pointer])):
+            getattr(lib, function).restype = result  # AttributeError: a library without the function
+            getattr(lib, function).argtypes = arguments
+        return lib
+    return None
+
+
+def wayland_globals(environ=None, libraries=WAYLAND_LIBRARIES, timeout=GLOBALS_TIMEOUT) -> set[str] | None:
     """The names of the interfaces that the Wayland compositor gives (the globals of its registry), read on a
-    connection of our own to $WAYLAND_DISPLAY, which is closed again. None when it cannot be read: no
-    libwayland-client, no compositor, or WAYLAND_SOCKET (a connection that only one client may take)."""
+    connection of our own to $WAYLAND_DISPLAY, which is closed again. None when they cannot be read: no
+    libwayland-client (or one without a function that is used), no compositor, WAYLAND_SOCKET (a connection that
+    only one client may take), an error of the connection, or no answer in `timeout` seconds. Never an exception.
+
+    The read: wl_display.get_registry and wl_display.sync, then the events until the answer to the sync (the
+    compositor sends every global before it). The wait for events is a poll() of the socket with a time limit, not
+    wl_display_roundtrip, which waits with no limit: a compositor that does not answer makes the start at most
+    `timeout` slower, and the rule then keeps the layer shell (the globals are not known)."""
     environ = os.environ if environ is None else environ
     if environ.get("WAYLAND_SOCKET"):
         return None
     try:
-        lib = ctypes.CDLL(ctypes.util.find_library("wayland-client") or "libwayland-client.so.0")
-    except OSError:
+        lib = _wayland_library(libraries)
+        if lib is None:
+            return None
+        registry_interface = ctypes.addressof(ctypes.c_char.in_dll(lib, "wl_registry_interface"))
+        callback_interface = ctypes.addressof(ctypes.c_char.in_dll(lib, "wl_callback_interface"))
+    except (AttributeError, ValueError, OSError):
         return None
-    lib.wl_display_connect.restype = ctypes.c_void_p
-    lib.wl_display_connect.argtypes = [ctypes.c_char_p]
-    lib.wl_display_roundtrip.argtypes = [ctypes.c_void_p]
-    lib.wl_display_disconnect.argtypes = [ctypes.c_void_p]
-    lib.wl_proxy_marshal_array_constructor.restype = ctypes.c_void_p
-    lib.wl_proxy_marshal_array_constructor.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p,
-                                                       ctypes.c_void_p]
-    lib.wl_proxy_add_listener.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
-    lib.wl_proxy_destroy.argtypes = [ctypes.c_void_p]
     name = environ.get("WAYLAND_DISPLAY")
     display = lib.wl_display_connect(name.encode() if name else None)
     if not display:
         return None
     names: set[str] = set()
-    # The functions stay referenced here until the end: the library calls them during the round trip.
-    listener = _RegistryListener(
+    done = []
+    # The functions stay referenced here until the end: the library calls them while it reads the events.
+    registry_listener = _RegistryListener(
         _GLOBAL(lambda _data, _registry, _name, interface, _version: names.add(interface.decode("ascii", "replace"))),
         _GLOBAL_REMOVE(lambda _data, _registry, _name: None))
+    callback_listener = _CallbackListener(_DONE(lambda _data, _callback, _serial: done.append(True)))
+    proxies = []
     try:
-        # wl_display.get_registry (request 1). Its one argument is the new object, which the library makes.
-        new_id = (ctypes.c_uint64 * 1)(0)
-        interface = ctypes.addressof(ctypes.c_char.in_dll(lib, "wl_registry_interface"))
-        registry = lib.wl_proxy_marshal_array_constructor(display, 1, new_id, interface)
-        if not registry:
-            return None
-        try:
-            lib.wl_proxy_add_listener(registry, ctypes.addressof(listener), None)
-            if lib.wl_display_roundtrip(display) < 0:
+        # wl_display.get_registry (request 1) and wl_display.sync (request 0). The one argument of each is the new
+        # object, which the library makes.
+        for request, interface, listener in ((1, registry_interface, registry_listener),
+                                              (0, callback_interface, callback_listener)):
+            proxy = lib.wl_proxy_marshal_array_constructor(display, request, (ctypes.c_uint64 * 1)(0), interface)
+            if not proxy:
                 return None
-        finally:
-            lib.wl_proxy_destroy(registry)
+            proxies.append(proxy)
+            lib.wl_proxy_add_listener(proxy, ctypes.addressof(listener), None)
+        poller = select.poll()
+        poller.register(lib.wl_display_get_fd(display), select.POLLIN)
+        end = time.monotonic() + timeout
+        while not done:
+            while lib.wl_display_prepare_read(display) != 0:  # events in the queue: give them first
+                if lib.wl_display_dispatch_pending(display) < 0:
+                    return None
+            if done:
+                lib.wl_display_cancel_read(display)
+                break
+            left = end - time.monotonic()
+            # The requests are a few bytes: a flush that cannot send them all is an error here.
+            if lib.wl_display_flush(display) < 0 or left <= 0 or not poller.poll(max(1, int(left * 1000))):
+                lib.wl_display_cancel_read(display)
+                return None
+            if lib.wl_display_read_events(display) < 0 or lib.wl_display_dispatch_pending(display) < 0:
+                return None
     finally:
+        for proxy in proxies:
+            lib.wl_proxy_destroy(proxy)
         lib.wl_display_disconnect(display)
     return names
 

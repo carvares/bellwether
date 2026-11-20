@@ -347,6 +347,30 @@ def test_the_globals_of_the_real_compositor_are_read_on_a_connection_of_our_own(
     assert linux.wayland_globals() == names  # the connection was closed and a new one works
 
 
+def test_a_library_without_a_function_or_no_library_gives_none_and_no_search_of_the_library(monkeypatch):
+    import ctypes.util
+    monkeypatch.setattr(ctypes.util, "find_library", lambda name: pytest.fail("find_library starts ldconfig"))
+    assert linux.wayland_globals(libraries=("libc.so.6",)) is None  # a library with no wl_display_connect
+    assert linux.wayland_globals(libraries=("libbellwether-not-there.so",)) is None
+    assert linux.wayland_globals(libraries=()) is None
+
+
+def test_a_compositor_that_does_not_answer_gives_none_within_the_time_limit(tmp_path):
+    """A socket that takes the connection and never answers: the read ends after its time limit."""
+    import socket
+    import time
+    path = tmp_path / "wl"
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(str(path))
+    server.listen(1)
+    try:
+        began = time.monotonic()
+        assert linux.wayland_globals({"WAYLAND_DISPLAY": str(path)}, timeout=0.3) is None
+        assert 0.25 <= time.monotonic() - began < 2
+    finally:
+        server.close()
+
+
 def test_the_globals_are_none_without_a_compositor_or_with_a_socket_given_to_us():
     assert linux.wayland_globals({"WAYLAND_DISPLAY": "p2-no-such-compositor"}) is None
     assert linux.wayland_globals({"WAYLAND_DISPLAY": "wayland-0", "WAYLAND_SOCKET": "7"}) is None
