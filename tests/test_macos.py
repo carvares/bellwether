@@ -376,23 +376,55 @@ def test_when_appkit_fails_the_panel_is_made_again_with_one_log_line(caplog):
 @pytest.mark.parametrize("role", ["answer", "options"])
 def test_the_answer_and_the_options_window_activate_the_app_at_each_show(role):
     kit, window = make_kit(), QtWindow(visible=False)
-    macos.prepare_window(window, role, appkit=lambda: kit)
-    assert kit.calls == [] and window.calls == []  # nothing until it shows; no change of the native window
+    macos.prepare_window(window, role, appkit=lambda: kit, later=lambda ms, function: function())
+    assert kit.calls == [] and window.calls == []  # nothing until it shows
     window.show()
     window.hide()
     window.visibleChanged.emit(False)
     window.show()
-    assert kit.calls == [("activate",), ("activate",)]
+    assert kit.calls == [("activate",), ("objc_object", 0x7f00), ("makeKeyAndOrderFront_", None)] * 2
+    assert window.properties["bellwetherActivation"] == "activate"
 
 
 def test_an_older_macos_activates_the_app_the_old_way_and_without_pyobjc_qt_raises_the_window():
     kit, window = make_kit(has_activate=False), QtWindow(visible=True)
-    macos.prepare_window(window, "options", appkit=lambda: kit)  # already shown: activated at once
-    assert kit.calls == [("activateIgnoringOtherApps_", True)]
+    macos.prepare_window(window, "options", appkit=lambda: kit, later=None)  # shown: at once; no second way
+    assert kit.calls == [("activateIgnoringOtherApps_", True), ("objc_object", 0x7f00), ("makeKeyAndOrderFront_", None)]
+    assert window.properties["bellwetherActivation"] == "activateIgnoringOtherApps"
     plain = QtWindow(visible=False)
     macos.prepare_window(plain, "answer", appkit=lambda: None)
     plain.show()
-    assert plain.calls == [("show",), ("raise_",)]
+    assert plain.calls == [("show",), ("raise_",), ("setProperty", "bellwetherActivation", "raise")]
+
+
+def test_when_the_system_refuses_the_activation_the_older_call_asks_again_after_300_ms():
+    """macOS 14 and later can refuse `activate` with no input of the person (the self-test of the runner)."""
+    kit, window = make_kit(), QtWindow(visible=False)
+    kit.app.activate = lambda: kit.calls.append(("activate",))  # refused: the app stays inactive
+    waits = []
+    macos.prepare_window(window, "options", appkit=lambda: kit,
+                         later=lambda ms, function: (waits.append(ms), function()))
+    window.show()
+    assert waits == [300]
+    assert kit.calls == [("activate",), ("objc_object", 0x7f00), ("makeKeyAndOrderFront_", None),
+                         ("activateIgnoringOtherApps_", True), ("objc_object", 0x7f00), ("makeKeyAndOrderFront_", None)]
+    assert window.properties["bellwetherActivation"] == "activate, activateIgnoringOtherApps"
+    kit.calls.clear()
+    window.hide()
+    window.visible = False
+    kit.app.activate = lambda: kit.calls.append(("activate",))
+    macos.activate_app(window, kit, later=lambda ms, function: function())  # hidden by then: no second way
+    assert ("activateIgnoringOtherApps_", True) not in kit.calls
+
+
+def test_an_activation_that_fails_falls_back_to_the_raise_of_qt_with_one_log_line(caplog):
+    caplog.set_level(logging.INFO, logger="bellwether")
+    kit, window = make_kit(), QtWindow(visible=False)
+    kit.app.activate = lambda: (_ for _ in ()).throw(RuntimeError("made-up"))
+    macos.prepare_window(window, "answer", appkit=lambda: kit, later=lambda ms, function: function())
+    window.show()
+    assert window.calls[-2:] == [("raise_",), ("setProperty", "bellwetherActivation", "raise")]
+    assert records(caplog) == [(logging.INFO, "the program could not activate itself (RuntimeError)")]
 
 
 def test_the_app_is_an_accessory_app_and_without_pyobjc_one_log_line(caplog):
@@ -413,8 +445,9 @@ def test_the_facts_of_the_native_window_for_the_self_test():
         "pyobjc": True, "class": "QNSPanel", "panel": True, "level": 25, "collection_behavior": 337,
         "style_mask": 144, "can_become_key": False, "key": False, "hides_on_deactivate": False, "has_shadow": False,
         "movable": False, "visible": True, "on_active_space": True, "always_show_property": True,
-        "activation_policy": 1, "app_active": False}
-    assert macos.window_facts(QtWindow(), appkit=lambda: None) == {"pyobjc": False, "always_show_property": False}
+        "activation_policy": 1, "activation_asked": "", "app_active": False}
+    assert macos.window_facts(QtWindow(), appkit=lambda: None) == {"pyobjc": False, "always_show_property": False,
+                                                                    "activation_asked": ""}
 
 
 def test_the_panel_of_the_program_is_made_again_and_shows_as_before(app, tmp_path):

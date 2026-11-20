@@ -52,6 +52,9 @@ def checks(facts: dict) -> list[tuple[str, str, object]]:
     check("each layout showed", sorted(layouts) == list("ABCDE") and all(
         one.get("shown") and one.get("visible") for one in layouts.values()), layouts)
     check("the options window is visible", options.get("visible") is True, options.get("visible"))
+    answer = facts.get("answer", {})
+    check("the answer window is visible with the made-up prompt", answer.get("visible") is True
+          and answer.get("prompt") == "ready", {k: answer.get(k) for k in ("visible", "prompt", "error")})
     check("no Qt warning", facts.get("messages") == [], facts.get("messages"), soft=True)
     tray = facts.get("tray", {})
     check("the tray item is there", tray.get("visible") is True, tray, soft=True)
@@ -87,10 +90,21 @@ def checks(facts: dict) -> list[tuple[str, str, object]]:
         after = facts.get("panel_after_options", {}).get("native", {})
         check("the panel is still visible after the options window opened", after.get("visible") is True,
               after.get("visible"))
-        check("the options window made the app active", options.get("native", {}).get("app_active") is True,
-              options.get("native", {}).get("app_active"), soft=True)
-        check("the options window is the key window", options.get("native", {}).get("key") is True,
-              options.get("native", {}).get("key"), soft=True)
+        # The activation of an app that is not active: macOS 14 and later give it when the person acts in the app
+        # (a click in the tray menu or on the panel). The self-test opens the windows with no input of a person, so
+        # a refusal here proves nothing; that the program asked for it is a fact.
+        for name, window in (("options", options), ("answer", answer)):
+            native = window.get("native", {})
+            check(f"the {name} window asked the system to activate the app",
+                  native.get("activation_asked") in ("activate", "activate, activateIgnoringOtherApps",
+                                                     "activateIgnoringOtherApps"),
+                  native.get("activation_asked"))
+            check(f"the {name} window can become the key window", native.get("can_become_key") is True,
+                  native.get("can_become_key"))
+            check(f"the {name} window made the app active (no input of a person here)",
+                  native.get("app_active") is True, native.get("app_active"), soft=True)
+            check(f"the {name} window is the key window (no input of a person here)", native.get("key") is True,
+                  native.get("key"), soft=True)
     return found
 
 

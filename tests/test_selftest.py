@@ -13,7 +13,9 @@ from bellwether import selftest
 from bellwether.__main__ import start_panel
 
 ROOT = Path(__file__).parent.parent
-STEPS = ["panel-C", "layout-A", "layout-B", "layout-C", "layout-D", "layout-E", "options"]
+STEPS = ["panel-C", "layout-A", "layout-B", "layout-C", "layout-D", "layout-E", "options", "answer"]
+# Qt's offscreen plugin says this for the answer window (its size hints): not a fault of the program.
+OFFSCREEN = "This plugin does not support propagateSizeHints()"
 
 
 def test_the_self_test_shows_each_step_and_gives_the_facts_of_the_windows(app, monkeypatch):
@@ -35,7 +37,9 @@ def test_the_self_test_shows_each_step_and_gives_the_facts_of_the_windows(app, m
     assert all(one["shown"] and one["visible"] and one["size"][0] > 200 for one in facts["layouts"].values())
     assert facts["options"]["visible"] is True and facts["options"]["flag_names"][0] == "Window"
     assert facts["tray"] == {"available": False, "visible": False, "items": 0}  # no tray off screen
-    assert facts["messages"] == [] and "error" not in facts
+    assert facts["answer"]["visible"] is True and facts["answer"]["prompt"] == "ready"
+    assert facts["answer"]["native"] == {} and facts["answer"]["flag_names"][0] == "Window"
+    assert [m for m in facts["messages"] if m != OFFSCREEN] == [] and "error" not in facts
     assert "INFO shell: plain" in err.getvalue()
 
 
@@ -77,12 +81,16 @@ def mac_facts(frame, app_active, items=1):
               "style_mask": 142, "can_become_key": False, "key": False, "hides_on_deactivate": False,
               "has_shadow": False, "always_show_property": True, "activation_policy": 1, "app_active": app_active,
               "visible": True}
+    # As run 2 gave them: the activation was refused (no input of a person); now the call is in the facts.
+    asked = {"app_active": False, "key": False, "can_become_key": True,
+             "activation_asked": "activate, activateIgnoringOtherApps"}
     return {"system": "darwin", "qt_platform": "cocoa", "shell": "plain", "messages": [],
             "panel": {"visible": True, "active": False, "frame": frame, "flag_names": [
                 "Tool", "FramelessWindowHint", "WindowStaysOnTopHint", "WindowDoesNotAcceptFocus"],
                 "screen": {"geometry": [0, 0, 1024, 768], "available": [0, 31, 1024, 674]}},
             "native": native, "layouts": {letter: {"shown": True, "visible": True} for letter in "ABCDE"},
-            "options": {"visible": True, "native": {"app_active": True, "key": True}},
+            "options": {"visible": True, "native": asked},
+            "answer": {"visible": True, "prompt": "ready", "native": asked},
             "panel_after_options": {"native": {"visible": True}},
             "tray": {"available": True, "visible": True, "items": items}}
 
@@ -98,3 +106,8 @@ def test_the_checks_of_the_runner_fail_on_the_faults_of_run_1_and_pass_without_t
         "the panel is inside the available area of its screen (not under a menu bar, a Dock or a panel)",
         "the app was not active while only the panel showed (the panel and the start take no focus)"]
     assert failed(mac_facts([688, 47, 320, 192], app_active=False)) == []
+    without_call = mac_facts([688, 47, 320, 192], app_active=False)
+    without_call["answer"]["native"] = {**without_call["answer"]["native"], "activation_asked": ""}
+    assert failed(without_call) == ["the answer window asked the system to activate the app"]
+    warned = [name for status, name, _ in checks(without_call) if status == "WARN"]
+    assert "the options window made the app active (no input of a person here)" in warned

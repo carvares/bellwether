@@ -61,6 +61,9 @@ class Window(Recorder):
     def className(self):
         return self.class_name
 
+    def makeKeyAndOrderFront_(self, sender):
+        self.calls.append(("makeKeyAndOrderFront_", sender))
+
     def isKindOfClass_(self, cls):
         return cls == "NSPanel" and self.class_name.endswith("Panel")
 

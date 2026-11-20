@@ -298,24 +298,61 @@ def _prepare_panel(window, kit) -> None:
         _make_again(window)
 
 
-def activate_app(window, kit) -> None:
-    """Make this app the active app, so that the keyboard goes to `window`: AppKit's `activate` (macOS 14) or
-    `activateIgnoringOtherApps:`; without pyobjc Qt's raise, which also activates the app."""
+# A property of the window: the calls that asked the system to make this app active at the last show ("activate",
+# "activate, activateIgnoringOtherApps", "activateIgnoringOtherApps", "raise"), for the self-test.
+ACTIVATION = "bellwetherActivation"
+# Milliseconds after `activate` until the second way, when the app is not active then.
+SECOND_WAY_MS = 300
+
+
+def _later(milliseconds: int, function) -> None:
+    from PySide6.QtCore import QTimer  # noqa: PLC0415  (the watcher imports this module: no Qt at the top)
+    QTimer.singleShot(milliseconds, function)
+
+
+def activate_app(window, kit, later=_later) -> None:
+    """Ask the system to make this app the active app and `window` its key window, so that the keyboard goes to it.
+    macOS 14 and later activate by cooperation (`activate`): the system gives the activation to an app that asks
+    while the person acts in it (a click in the tray menu or on the panel opens these windows) and can refuse it
+    otherwise. So when the app is still not active SECOND_WAY_MS later, the older `activateIgnoringOtherApps:` asks
+    again (deprecated, still there). Each way ends with `makeKeyAndOrderFront:`. Without pyobjc: Qt's raise, which
+    also asks for the activation. The calls are kept on the window (ACTIVATION)."""
     if kit is None:
         window.raise_()
+        window.setProperty(ACTIVATION, "raise")
         return
     try:
         app = kit.AppKit.NSApplication.sharedApplication()
         if app.respondsToSelector_("activate"):
             app.activate()
+            call = "activate"
         else:
             app.activateIgnoringOtherApps_(True)
+            call = "activateIgnoringOtherApps"
+        native_window(window, kit).makeKeyAndOrderFront_(None)
+        window.setProperty(ACTIVATION, call)
     except Exception as error:
         log.info("the program could not activate itself (%s)", type(error).__name__)
         window.raise_()
+        window.setProperty(ACTIVATION, "raise")
+        return
+    if call != "activate":
+        return
+
+    def second_way() -> None:
+        try:
+            if app.isActive() or not window.isVisible():
+                return
+            app.activateIgnoringOtherApps_(True)
+            native_window(window, kit).makeKeyAndOrderFront_(None)
+            window.setProperty(ACTIVATION, "activate, activateIgnoringOtherApps")
+        except Exception as error:
+            log.info("the program could not activate itself the second way (%s)", type(error).__name__)
+
+    later(SECOND_WAY_MS, second_way)
 
 
-def prepare_window(window, role: str, *, appkit=None) -> None:
+def prepare_window(window, role: str, *, appkit=None, later=_later) -> None:
     """After a window of the program exists. "panel": a non-activating panel at the status level on every Space,
     that does not hide when the app is not active. "answer" and "options": the app is activated at each show of the
     window (an accessory app is not active, and only the active app gets the keyboard). Nothing when Qt does not use
@@ -326,9 +363,9 @@ def prepare_window(window, role: str, *, appkit=None) -> None:
     if role == "panel":
         _prepare_panel(window, kit)
         return
-    window.visibleChanged.connect(lambda visible: activate_app(window, kit) if visible else None)
+    window.visibleChanged.connect(lambda visible: activate_app(window, kit, later) if visible else None)
     if window.isVisible():
-        activate_app(window, kit)
+        activate_app(window, kit, later)
 
 
 def window_facts(window, *, appkit=None) -> dict:
@@ -338,7 +375,8 @@ def window_facts(window, *, appkit=None) -> dict:
         return {}
     kit = (appkit or load_appkit)()
     if kit is None:
-        return {"pyobjc": False, "always_show_property": bool(window.property(ALWAYS_SHOW))}
+        return {"pyobjc": False, "always_show_property": bool(window.property(ALWAYS_SHOW)),
+                "activation_asked": str(window.property(ACTIVATION) or "")}
     appkit_ = kit.AppKit
     native = native_window(window, kit)
     app = appkit_.NSApplication.sharedApplication()
@@ -358,6 +396,7 @@ def window_facts(window, *, appkit=None) -> dict:
         "on_active_space": bool(native.isOnActiveSpace()),
         "always_show_property": bool(window.property(ALWAYS_SHOW)),
         "activation_policy": int(app.activationPolicy()),
+        "activation_asked": str(window.property(ACTIVATION) or ""),
         "app_active": bool(app.isActive()),
     }
 

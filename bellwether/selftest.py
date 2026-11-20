@@ -2,7 +2,8 @@
 stdout with the facts of its real windows. For a machine that nobody of the project can look at (the GitHub runners
 of macOS and Windows).
 
-It shows the panel for about 3 seconds, then each layout and the options window. Before the wait of each step it
+It shows the panel for about 3 seconds, then each layout, the options window and the answer window (a made-up
+prompt). Before the wait of each step it
 writes one line to stderr, "self-test: shown <step>": a script can take a picture of the screen then. Then it prints
 the facts and exits (0, or 1 when the panel did not load). It takes no lock, writes no log file, and reads and writes
 no setting of the user: the settings file is in a temporary folder. The log lines go to stderr. Every name and text
@@ -22,7 +23,9 @@ from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
 from . import layouts, platform
+from .answer import Answer
 from .backend import Backend
+from .client import Screen
 from .icons import Icons
 from .options import Options
 from .state import Agent
@@ -42,14 +45,46 @@ AGENTS = [
 ]
 
 
+# The screen of the blocked agent: a made-up permission dialog of Claude Code (the answer window shows it).
+RULE = "─" * 80
+PROMPT = f"""
+❯ Run this made-up command: touch made-up.txt
+
+● Creating a made-up file
+  ⎿  $ touch made-up.txt
+
+{RULE}
+ Bash command
+ Create a made-up file
+{"╌" * 80}
+ touch made-up.txt
+{"╌" * 80}
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. No
+
+ Esc to cancel · Tab to amend
+"""
+
+
 class MadeUpClient:
-    """In the place of the Herdr client: the made-up agents, and a jump that does nothing."""
+    """In the place of the Herdr client: the made-up agents, the made-up screen of the blocked one, and a jump and
+    keys that do nothing."""
 
     def list_agents(self) -> list[Agent]:
         return list(AGENTS)
 
     def focus_agent(self, key: str) -> None:
         pass
+
+    def read_screen(self, terminal: str) -> Screen:
+        return Screen(PROMPT, True)
+
+    def press(self, terminal: str, keys, late=None) -> None:
+        return None
+
+    def send_text(self, terminal: str, text: str, cancel=None) -> None:
+        return None
 
 
 def wait(app, seconds: float) -> None:
@@ -166,6 +201,19 @@ def run(start_panel, show: float = SHOW, step: float = STEP, out=sys.stdout, err
             wait(app, step)
             window.close()
             wait(app, 0.2)
+            # The answer window, as the Answer control of the blocked row opens it (the prompt of a made-up screen).
+            answer = Answer(engine, backend)
+            backend.showAnswer("t1")
+            wait(app, 0.8)
+            if answer.window is None:
+                facts["answer"] = {"error": "the answer window did not open"}
+            else:
+                facts["answer"] = {**qt_facts(answer.window), "native": native_facts(answer.window),
+                                   "prompt": backend.prompt.get("state")}
+                shown("answer")
+                wait(app, step)
+                answer.window.close()
+                wait(app, 0.2)
         finally:
             facts["messages"] = messages[:20]
             facts["seconds"] = round(time.monotonic() - began, 1)
