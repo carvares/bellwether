@@ -107,11 +107,58 @@ def test_a_parent_that_is_gone_before_the_start_starts_no_command(tmp_path):
     assert not marker.exists()
 
 
-def test_the_check_of_the_parent_ends_the_command_and_gives_1():
+def test_the_check_of_the_parent_ends_the_command_and_gives_1(tmp_path):
+    marker = tmp_path / "pid"
+    quiet = [sys.executable, "-c", f"import os, time; open({str(marker)!r}, 'w').write(str(os.getpid())); time.sleep(60)"]
     checks = []
     began = time.monotonic()
-    code = guard.run(os.getpid(), CHILD, poll=0.05, grace=1.0, alive=lambda: checks.append(1) or len(checks) < 4)
+    code = guard.run(os.getpid(), quiet, poll=0.05, grace=1.0,
+                     alive=lambda: checks.append(1) or len(checks) < 4 or not marker.exists())
     assert code == 1 and time.monotonic() - began < 5
+    assert wait_gone([int(marker.read_text())], 2), "the command lives on after the end of its parent"
+
+
+def test_the_watcher_sleeps_between_two_checks_and_does_not_poll_in_between(tmp_path):
+    """One check of the parent and of the command each poll interval: the watcher sleeps in between (CPython's
+    wait with a timeout wakes about 20 times a second)."""
+    sleeps = []
+    code = guard.run(os.getpid(), [sys.executable, "-c", "import time; time.sleep(0.5)"], poll=0.1, alive=lambda: True,
+                     sleep=lambda seconds: (sleeps.append(seconds), time.sleep(seconds)))
+    assert code == 0 and set(sleeps) == {0.1} and 3 <= len(sleeps) <= 12
+
+
+def test_the_stop_handlers_are_there_before_the_command_starts(monkeypatch):
+    seen = []
+
+    class Started:
+        def __init__(self, command):
+            seen.append(signal.getsignal(signal.SIGTERM))
+            self.returncode = 0
+
+        def poll(self):
+            return 0
+
+    monkeypatch.setattr(guard.subprocess, "Popen", Started)
+    assert guard.run(os.getpid(), ["made-up"], alive=lambda: True) == 0
+    assert seen == [guard._stop] and signal.getsignal(signal.SIGTERM) is not guard._stop
+
+
+def test_the_watcher_kills_a_stubborn_command_before_the_event_source_kills_the_watcher():
+    from bellwether import events
+    assert guard.GRACE < events.GRACE
+
+
+def test_the_reader_sees_the_end_of_the_output_when_the_command_closes_it_not_when_the_watcher_ends():
+    """The watcher gives its own copy of the pipe away: the end of the stream is the end of the command's output."""
+    watcher = guarded([sys.executable, "-c", "import os, time; print('made-up line', flush=True); os.close(1); "
+                                             "time.sleep(3)"])
+    try:
+        assert watcher.stdout.readline() == b"made-up line\n"
+        began = time.monotonic()
+        assert watcher.stdout.read() == b"" and time.monotonic() - began < 1.5
+    finally:
+        watcher.kill()
+        watcher.communicate(timeout=10)
 
 
 def test_a_wrong_call_and_a_command_that_cannot_start(capsys):

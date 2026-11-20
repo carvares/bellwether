@@ -16,12 +16,18 @@ import os
 import signal
 import subprocess
 import sys
+import time
 
 # Seconds between two checks of the parent.
 POLL = 1.0
-# Seconds that the command has to end after SIGTERM, before it is killed.
-GRACE = 2.0
+# Seconds that the command has to end after SIGTERM, before it is killed. Shorter than the grace of the event source
+# (events.GRACE, 2 s): the watcher kills a command that ignores SIGTERM before the program kills the watcher.
+GRACE = 1.0
 USAGE = "usage: python -m bellwether.platform.guard <parent pid> <command…>"
+
+
+# The signals that stop the watcher (and its command). SIGHUP is not on every system.
+STOP_SIGNALS = tuple(getattr(signal, name) for name in ("SIGTERM", "SIGINT", "SIGHUP") if hasattr(signal, name))
 
 
 class _Stop(Exception):
@@ -29,7 +35,7 @@ class _Stop(Exception):
 
 
 def _stop(signum, _frame):
-    for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+    for number in STOP_SIGNALS:
         signal.signal(number, signal.SIG_IGN)  # one stop: a second signal does not break the end of the command
     raise _Stop(signum)
 
@@ -48,25 +54,44 @@ def _end(child: subprocess.Popen, grace: float) -> int:
         return child.wait()
 
 
-def run(parent: int, command: list[str], poll: float = POLL, grace: float = GRACE, alive=None) -> int:
+def _let_go_of_stdout() -> None:
+    """The command has its own copy of stdout (the pipe of the program): the watcher writes nothing there, and with its
+    copy gone the reader of the pipe sees its end as soon as the command ends."""
+    try:
+        sys.stdout.flush()
+        empty = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(empty, 1)
+        os.close(empty)
+    except (OSError, ValueError, AttributeError):  # no stdout of its own (a test): nothing to give away
+        pass
+
+
+def run(parent: int, command: list[str], poll: float = POLL, grace: float = GRACE, alive=None,
+        sleep=time.sleep, started=lambda: None) -> int:
     """Run `command` while the process `parent` lives. `alive`: the check of the parent (a test gives its own); by
-    default the parent of this process must still be `parent` (when it ends, this process gets a new parent)."""
+    default the parent of this process must still be `parent` (when it ends, this process gets a new parent). One
+    check of the parent and of the command each `poll` seconds, and no other wake-up. `started` is called once the
+    command runs (the watcher process gives its stdout away there)."""
     alive = alive or (lambda: os.getppid() == parent)
     if not alive():
         return 1  # the parent ended before the command could start: no command
-    child = subprocess.Popen(command)
-    previous = {number: signal.signal(number, _stop) for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)}
+    # The handlers first: a stop signal that comes while the command starts must not leave the command alone.
+    previous = {number: signal.signal(number, _stop) for number in STOP_SIGNALS}
+    child = None
     try:
+        child = subprocess.Popen(command)
+        started()
         while True:
-            try:
-                return _code(child.wait(poll))
-            except subprocess.TimeoutExpired:
-                pass
+            code = child.poll()
+            if code is not None:
+                return _code(code)
             if not alive():
                 _end(child, grace)
                 return 1
+            sleep(poll)
     except _Stop as stop:
-        _end(child, grace)
+        if child is not None:
+            _end(child, grace)
         return 128 + stop.args[0]
     finally:
         for number, handler in previous.items():
@@ -78,7 +103,7 @@ def main(argv: list[str]) -> int:
         print(USAGE, file=sys.stderr)
         return 2
     try:
-        return run(int(argv[1]), argv[2:])
+        return run(int(argv[1]), argv[2:], started=_let_go_of_stdout)
     except OSError as error:  # the command cannot start: its name only, no path
         print(f"bellwether guard: the command cannot start ({type(error).__name__})", file=sys.stderr)
         return 127
