@@ -659,14 +659,17 @@ def readable(descriptors: list[int], timeout: float, *, win32=None) -> list[int]
     """The open file numbers of `descriptors` (pipes) that have data or whose writer is gone, after at most `timeout`
     seconds (empty: none). select takes only sockets on Windows: a thread of each pipe waits in the system for its
     data (PipeWatch), and this call waits on them with its time limit. No thread wakes while no data comes. A pipe
-    that this call told of last time waits again (its data was read since). A file number that now names an other
-    pipe gets a new watch."""
+    that this call told of last time waits again (its data was read since). A watch belongs to one pipe: a watch
+    whose pipe ended is told one time and then forgotten (its thread has ended). The system gives the same file
+    number, and even the same handle value, to the pipe of the next event child: a number with no watch, an other
+    handle, or an ended watch gets a new watch, which asks the system again (the end of a pipe that is still the
+    ended one comes back at once from its own read)."""
     api = (win32 or load_win32)()
     with _changed:
         for descriptor in descriptors:
             handle = api.handle_of(descriptor)
             watch = _watches.get(descriptor)
-            if watch is None or watch.handle != handle:
+            if watch is None or watch.handle != handle or watch.ended:
                 _watches[descriptor] = PipeWatch(descriptor, handle, api.wait_data, _changed)
             else:
                 watch.again()

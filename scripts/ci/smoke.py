@@ -4,9 +4,10 @@ the .cmd files), in a home folder of its own (`<out>/home`: no real setting, log
 
     python scripts/ci/smoke.py <out folder> [seconds]
 
-It waits until the log has the lines of a good start (or the seconds are over), kills the widget (SIGKILL; Windows:
-TerminateProcess: no clean-up of its own), and checks that the event child is gone 3 seconds later (the kernel on
-Linux, the watcher on macOS, the job object on Windows). It prints each check and the two logs (made-up data only),
+It waits until the log has the lines of a good start (or the seconds are over), kills the event child one time and
+checks that the widget starts and reads a new one, then kills the widget (SIGKILL; Windows: TerminateProcess: no
+clean-up of its own), and checks that the event child is gone 3 seconds later (the kernel on Linux, the watcher on
+macOS, the job object on Windows). It prints each check and the two logs (made-up data only),
 and exits 1 when a check failed. Processes are found and killed by pid only.
 """
 from __future__ import annotations
@@ -21,6 +22,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 FAKE = ROOT / "scripts" / "ci" / "fake-herdr"
 WINDOWS = sys.platform == "win32"
+# The longest wait for the stream after its restart: the retry (1 s), and 20 s of life before "events: connected".
+RESTART_SECONDS = 30
 
 
 def table() -> dict[int, tuple[int, str]]:
@@ -157,6 +160,22 @@ def main(argv: list[str]) -> int:
     checks["no traceback in the logs"] = "Traceback" not in text + started
     checks["one event child runs"] = len(children) == 1
     checks["one widget started it"] = len(widgets) == 1
+    # One restart of the event stream: its child is killed (by pid); the widget must see the end, start a new child
+    # and read it (a stream that comes after an other one is told as connected when it has lived 20 s: MIN_LIFE).
+    # On Windows the new pipe can get the same file number and handle value as the ended one.
+    for pid in children:
+        kill(pid)
+    end = time.monotonic() + RESTART_SECONDS
+    while time.monotonic() < end and read(log).count("events: connected") < 2:
+        time.sleep(0.25)
+    text = read(log)
+    rows = table()
+    restarted = event_children(rows)
+    checks["the event stream comes back after its child was killed (events: lost, then connected again)"] = (
+        "events: lost" in text and text.count("events: connected") >= 2 and len(restarted) == 1
+        and not set(restarted) & set(children))
+    children = restarted
+    widgets = {widget_of(rows, child) for child in children} - {None}
     for pid in widgets:
         kill(pid)  # no clean-up of its own: the kernel, the watcher or the job must end the child
     end = time.monotonic() + 3

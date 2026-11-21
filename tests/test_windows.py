@@ -549,6 +549,8 @@ class Pipes:
 
     def wait_data(self, handle):
         self.waits.append(handle)
+        if handle in self.endings:
+            return False  # the read of a pipe whose writer is gone fails at once
         event = self._event(handle)
         event.wait(10)
         event.clear()
@@ -595,14 +597,64 @@ def test_after_the_data_was_read_the_pipe_waits_again(pipes):
     assert sorted(pipes.waits) == [1005, 1007, 1007]
 
 
-def test_the_end_of_a_pipe_stays_ready_and_a_new_pipe_on_the_same_number_gets_a_new_watch(pipes):
+def test_the_end_of_a_pipe_is_told_and_a_new_pipe_on_the_same_number_gets_a_new_watch(pipes):
     pipes.end(7)
     assert windows.readable([5, 7], 5.0, win32=lambda: pipes) == [7]
-    assert windows.readable([5, 7], 0.2, win32=lambda: pipes) == [7]  # a read gives its end, at once
-    pipes.handles[7] = 2007  # the number of the next child's pipe
+    assert windows.readable([5, 7], 5.0, win32=lambda: pipes) == [7]  # still the ended pipe: its own read says so
+    pipes.handles[7] = 2007  # the number of the next child's pipe, with an other handle value
     assert windows.readable([5, 7], 0.2, win32=lambda: pipes) == []
     time.sleep(0.1)
     assert pipes.waits.count(2007) == 1
+
+
+def test_a_new_pipe_with_the_same_number_and_the_same_handle_value_is_not_the_ended_one(pipes):
+    """The final review's probe (F1): the event child of a restart gets file number 7 and handle 1007 again. The
+    ended watch of the last pipe must not answer for it: the reader would block in a read with no data."""
+    pipes.end(7)  # the child of stream 1 ends
+    assert windows.readable([5, 7], 1.0, win32=lambda: pipes) == [7]
+    pipes.endings.clear()  # stream 2: its pipe has number 7 and handle 1007 again, with no data yet
+    pipes.events.clear()
+    began = time.monotonic()
+    assert windows.readable([5, 7], 0.3, win32=lambda: pipes) == []
+    assert time.monotonic() - began >= 0.25
+    pipes.give(7)  # its first line
+    assert windows.readable([5, 7], 5.0, win32=lambda: pipes) == [7]
+
+
+def test_after_a_restart_the_event_source_stops_in_a_short_time(pipes, monkeypatch):
+    """The quit of the program after a restart of the event child: no read that waits for data that never comes."""
+    import threading
+    from bellwether import events
+    monkeypatch.setattr(events, "readable", lambda descriptors, timeout: windows.readable(
+        descriptors, timeout, win32=lambda: pipes))
+    read_end, write_end = os.pipe()
+    stop_read, stop_write = os.pipe()
+    pipes.handles = {read_end: 1007, stop_read: 1009}  # the stream and the stop pipe of the source
+
+    class Child:
+        stdout = SimpleNamespace(fileno=lambda: read_end)
+
+    pipes.end(read_end)  # stream 1 ended: its watch has ended
+    assert windows.readable([read_end, stop_read], 1.0, win32=lambda: pipes) == [read_end]
+    pipes.endings.clear()
+    pipes.events.pop(1007, None)  # stream 2 on the same number and handle value, quiet
+    source = events.EventSource(["made-up"], lambda: None, quiet=30.0)
+    source._stop_pipe = (stop_read, stop_write)
+    result = []
+    follower = threading.Thread(target=lambda: result.append(source._follow(Child(), 0.0, announce=True)))
+    try:
+        follower.start()
+        time.sleep(0.2)
+        assert follower.is_alive() and result == []  # it waits: no read of a pipe with no data
+        began = time.monotonic()
+        source._stop.set()
+        os.write(stop_write, b"x")
+        pipes.give(stop_read)
+        follower.join(5)
+        assert not follower.is_alive() and time.monotonic() - began < 1 and result == [False]
+    finally:
+        for descriptor in (read_end, write_end, stop_read, stop_write):
+            os.close(descriptor)
 
 
 @on_windows
