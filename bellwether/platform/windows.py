@@ -1,7 +1,11 @@
 """The Windows part of the program. Nobody of the project has run it on a Windows machine: it is proven with fakes on
 Linux and on a GitHub Windows runner (see the design of the port). It imports on every system: the Win32 calls
 (ctypes.windll), msvcrt and psutil are loaded only when a member needs them, and each member takes a loader in their
-place for a test. The Win32 part is the class Win32: thin calls, each proven by the tests of the runner.
+place for a test. The Win32 part is the class Win32: thin calls. The prototype of each function (its argument and
+result types) and the values that each call gives are tested on Linux with a made-up windll; the runner runs the
+calls of the job, the pipes, the process names, the window search and the styles that the self-test reads, and those
+of the raise and the foreground when they come up there. The calls that change a style (set_ex_style, set_topmost)
+run on the runner only when Qt did not give a style, which it does.
 """
 from __future__ import annotations
 
@@ -9,6 +13,7 @@ import ctypes
 import logging
 import os
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -193,7 +198,8 @@ class Win32:
         self._user32, self._kernel32 = windll.user32, windll.kernel32
         handle, dword, boolean = wintypes.HANDLE, wintypes.DWORD, wintypes.BOOL
         hwnd, pointer = wintypes.HWND, ctypes.c_void_p
-        self._enum_proc = ctypes.WINFUNCTYPE(boolean, hwnd, wintypes.LPARAM)
+        # WINFUNCTYPE (stdcall) on Windows; CFUNCTYPE where there is none (the tests of the prototypes on Linux).
+        self._enum_proc = getattr(ctypes, "WINFUNCTYPE", ctypes.CFUNCTYPE)(boolean, hwnd, wintypes.LPARAM)
         long_ptr = ctypes.c_ssize_t
         get_long = getattr(self._user32, "GetWindowLongPtrW", None) or self._user32.GetWindowLongW
         set_long = getattr(self._user32, "SetWindowLongPtrW", None) or self._user32.SetWindowLongW
@@ -220,7 +226,8 @@ class Win32:
                 (self._kernel32.SetInformationJobObject, boolean, [handle, ctypes.c_int, pointer, dword]),
                 (self._kernel32.AssignProcessToJobObject, boolean, [handle, handle]),
                 (self._kernel32.PeekNamedPipe, boolean, [handle, pointer, dword, pointer, ctypes.POINTER(dword),
-                                                         pointer])):
+                                                         pointer]),
+                (self._kernel32.ReadFile, boolean, [handle, pointer, dword, ctypes.POINTER(dword), pointer])):
             function.restype = result
             function.argtypes = arguments
         self._job = None
@@ -316,14 +323,25 @@ class Win32:
         finally:
             self._kernel32.CloseHandle(process)
 
-    def pipe_ready(self, descriptor: int) -> bool:
-        """True when the pipe of the open file number has data, or its writer is gone (a read gives its end)."""
+    def handle_of(self, descriptor: int) -> int:
+        """The Win32 handle of an open file number."""
+        return int(self._msvcrt.get_osfhandle(descriptor))
+
+    def wait_data(self, handle: int, sleep=time.sleep) -> bool:
+        """Wait until the pipe `handle` has data (True) or its writer is gone or the handle fails (False). A read of
+        no bytes waits in the system until a byte is there and takes none (libuv waits for the anonymous pipes of
+        Windows this way: `uv_pipe_zero_readfile_thread_proc`). Should it come back with no byte there, the pipe is
+        looked at again after PIPE_POLL seconds: never a loop that does not wait."""
         from ctypes import wintypes  # noqa: PLC0415
-        available = wintypes.DWORD(0)
-        if not self._kernel32.PeekNamedPipe(self._msvcrt.get_osfhandle(descriptor), None, 0, None,
-                                            ctypes.byref(available), None):
-            return True  # a broken pipe (or an other error): the read tells
-        return available.value > 0
+        buffer, got, available = ctypes.create_string_buffer(1), wintypes.DWORD(0), wintypes.DWORD(0)
+        while True:
+            if not self._kernel32.ReadFile(handle, buffer, 0, ctypes.byref(got), None):
+                return False
+            if not self._kernel32.PeekNamedPipe(handle, None, 0, None, ctypes.byref(available), None):
+                return False
+            if available.value > 0:
+                return True
+            sleep(PIPE_POLL)
 
 
 _win32: list = []
@@ -595,22 +613,69 @@ def spawn_child(argv: list[str], *, popen=subprocess.Popen, win32=None) -> subpr
     return child
 
 
-# The seconds between two looks at the pipes (Windows cannot wait for an anonymous pipe: PeekNamedPipe).
+# The seconds before a pipe is looked at again when a read of no bytes came back with no byte (see wait_data).
 PIPE_POLL = 0.05
 
 
-def readable(descriptors: list[int], timeout: float, *, win32=None, sleep=time.sleep, clock=time.monotonic
-             ) -> list[int]:
+class PipeWatch:
+    """A thread that waits until a pipe has data or its writer is gone (Win32.wait_data), and takes no byte. It
+    tells `changed` (a Condition that `readable` waits on). After the reader took the data, `again` lets it wait
+    once more. When the writer is gone it stays ready (a read gives the end) and its thread ends."""
+
+    def __init__(self, descriptor: int, handle: int, wait_data, changed: threading.Condition) -> None:
+        self.descriptor, self.handle = descriptor, handle
+        self.ready = self.ended = False
+        self._wait_data, self._changed = wait_data, changed
+        self._go = threading.Event()
+        self._go.set()
+        threading.Thread(target=self._run, name="pipe-watch", daemon=True).start()
+
+    def _run(self) -> None:
+        while True:
+            self._go.wait()
+            self._go.clear()
+            try:
+                alive = bool(self._wait_data(self.handle))
+            except Exception:  # a failed call: as the end of the pipe (the read tells)
+                alive = False
+            with self._changed:
+                self.ready, self.ended = True, not alive
+                self._changed.notify_all()
+            if not alive:
+                return
+
+    def again(self) -> None:
+        """The data that it told of was read (the caller holds `changed`): wait for new data."""
+        if self.ready and not self.ended:
+            self.ready = False
+            self._go.set()
+
+
+_watches: dict[int, PipeWatch] = {}
+_changed = threading.Condition()
+
+
+def readable(descriptors: list[int], timeout: float, *, win32=None) -> list[int]:
     """The open file numbers of `descriptors` (pipes) that have data or whose writer is gone, after at most `timeout`
-    seconds (empty: none). select takes only sockets on Windows: a look at each pipe each PIPE_POLL seconds."""
+    seconds (empty: none). select takes only sockets on Windows: a thread of each pipe waits in the system for its
+    data (PipeWatch), and this call waits on them with its time limit. No thread wakes while no data comes. A pipe
+    that this call told of last time waits again (its data was read since). A file number that now names an other
+    pipe gets a new watch."""
     api = (win32 or load_win32)()
-    end = clock() + timeout
-    while True:
-        ready = [descriptor for descriptor in descriptors if api.pipe_ready(descriptor)]
-        left = end - clock()
-        if ready or left <= 0:
-            return ready
-        sleep(min(PIPE_POLL, left))
+    with _changed:
+        for descriptor in descriptors:
+            handle = api.handle_of(descriptor)
+            watch = _watches.get(descriptor)
+            if watch is None or watch.handle != handle:
+                _watches[descriptor] = PipeWatch(descriptor, handle, api.wait_data, _changed)
+            else:
+                watch.again()
+
+        def ready() -> list[int]:
+            return [descriptor for descriptor in descriptors if _watches[descriptor].ready]
+
+        _changed.wait_for(ready, timeout)
+        return ready()
 
 
 # ----- the process host: psutil -----

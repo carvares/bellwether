@@ -34,12 +34,11 @@ class FakeWin32:
     windows, the topmost first: (hwnd, pid, visible, minimized, owned); `names` the program of each pid."""
 
     def __init__(self, tops=(), names=None, foreground_ok=True, ex_style=0, style=0x96000000, job=0x50,
-                 joins=True, ready=()):
+                 joins=True):
         self.calls = []
         self.tops, self.names = list(tops), dict(names or {})
         self.foreground_ok, self.ex = foreground_ok, {0x7f00: ex_style}
         self.style_value, self.job, self.joins = style, job, joins
-        self.ready = set(ready)
         self.front = 0
 
     def windows(self):
@@ -98,9 +97,6 @@ class FakeWin32:
         self.calls.append(("assign", job, pid))
         return self.joins
 
-    def pipe_ready(self, descriptor):
-        self.calls.append(("pipe_ready", descriptor))
-        return descriptor in self.ready
 
 
 def through(function):
@@ -531,18 +527,82 @@ def test_on_windows_a_killed_parent_leaves_no_event_child():
 
 # ----- the wait for the event stream -----
 
-def test_the_wait_looks_at_each_pipe_until_one_has_data_or_the_time_is_over():
-    api, now, sleeps = FakeWin32(ready={7}), [0.0], []
+class Pipes:
+    """Made-up pipes for the wait of Windows: each file number has a handle (`handles`, a test can give a new one),
+    and its wait (wait_data) blocks until the test gives it data (`give`) or ends it (`end`)."""
 
-    def sleep(seconds):
-        sleeps.append(seconds)
-        now[0] += seconds
+    def __init__(self, *descriptors):
+        import threading
+        self.handles = {d: 1000 + d for d in descriptors}
+        self.events = {}
+        self.endings = set()
+        self.waits = []  # each wait of the system: its handle
+        self._lock = threading.Lock()
 
-    assert windows.readable([5, 7], 1.0, win32=lambda: api, sleep=sleep, clock=lambda: now[0]) == [7]
-    assert sleeps == []
-    api.ready = set()
-    assert windows.readable([5, 7], 0.12, win32=lambda: api, sleep=sleep, clock=lambda: now[0]) == []
-    assert [round(s, 3) for s in sleeps] == [0.05, 0.05, 0.02]
+    def handle_of(self, descriptor):
+        return self.handles[descriptor]
+
+    def _event(self, handle):
+        import threading
+        with self._lock:
+            return self.events.setdefault(handle, threading.Event())
+
+    def wait_data(self, handle):
+        self.waits.append(handle)
+        event = self._event(handle)
+        event.wait(10)
+        event.clear()
+        return handle not in self.endings
+
+    def give(self, descriptor):
+        self._event(self.handles[descriptor]).set()
+
+    def end(self, descriptor):
+        self.endings.add(self.handles[descriptor])
+        self.give(descriptor)
+
+
+@pytest.fixture
+def pipes(monkeypatch):
+    monkeypatch.setattr(windows, "_watches", {})
+    return Pipes(5, 7)
+
+
+def test_the_wait_tells_of_the_pipe_that_has_data_and_wakes_for_nothing_else(pipes):
+    import threading
+    threading.Timer(0.1, pipes.give, args=(7,)).start()
+    began = time.monotonic()
+    assert windows.readable([5, 7], 5.0, win32=lambda: pipes) == [7]
+    assert time.monotonic() - began < 2
+    time.sleep(0.2)
+    assert sorted(pipes.waits) == [1005, 1007]  # one wait of the system for each pipe, no look in between
+
+
+def test_the_time_limit_gives_nothing_and_the_waits_go_on_for_the_next_call(pipes):
+    began = time.monotonic()
+    assert windows.readable([5, 7], 0.2, win32=lambda: pipes) == []
+    assert 0.15 <= time.monotonic() - began < 2
+    pipes.give(5)
+    assert windows.readable([5, 7], 5.0, win32=lambda: pipes) == [5]
+    assert sorted(pipes.waits) == [1005, 1007]  # the same two waits: no new thread for the second call
+
+
+def test_after_the_data_was_read_the_pipe_waits_again(pipes):
+    pipes.give(7)
+    assert windows.readable([5, 7], 5.0, win32=lambda: pipes) == [7]
+    assert windows.readable([5, 7], 0.2, win32=lambda: pipes) == []  # its data was read: it waits again
+    time.sleep(0.1)
+    assert sorted(pipes.waits) == [1005, 1007, 1007]
+
+
+def test_the_end_of_a_pipe_stays_ready_and_a_new_pipe_on_the_same_number_gets_a_new_watch(pipes):
+    pipes.end(7)
+    assert windows.readable([5, 7], 5.0, win32=lambda: pipes) == [7]
+    assert windows.readable([5, 7], 0.2, win32=lambda: pipes) == [7]  # a read gives its end, at once
+    pipes.handles[7] = 2007  # the number of the next child's pipe
+    assert windows.readable([5, 7], 0.2, win32=lambda: pipes) == []
+    time.sleep(0.1)
+    assert pipes.waits.count(2007) == 1
 
 
 @on_windows
@@ -636,3 +696,202 @@ def test_on_windows_psutil_sees_a_file_that_a_process_holds_open_with_a_lock(tmp
         assert os.path.normcase(str(path)) in names
     finally:
         holder.close()
+
+
+# ----- the Win32 calls themselves, with a made-up windll: their prototypes and their values (review of P4, I2) -----
+
+NOT_SET = object()
+
+
+class Function:
+    """A made-up function of a DLL: it keeps the prototype that the program gives it and records each call."""
+
+    def __init__(self, name, calls):
+        self.name, self.calls = name, calls
+        self.argtypes = self.restype = NOT_SET
+        self.result, self.effect = 1, None
+
+    def __call__(self, *args):
+        self.calls.append((self.name, args))
+        return self.effect(*args) if self.effect else self.result
+
+
+class Library:
+    def __init__(self, calls):
+        self._functions, self._calls = {}, calls
+
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return self._functions.setdefault(name, Function(name, self._calls))
+
+
+def made_up_win32():
+    calls = []
+    windll = SimpleNamespace(user32=Library(calls), kernel32=Library(calls))
+    api = windows.Win32(windll, SimpleNamespace(get_osfhandle=lambda descriptor: 4000 + descriptor))
+    calls.clear()
+    return api, windll, calls
+
+
+def prototypes():
+    from ctypes import wintypes as w
+    handle, dword, boolean, hwnd, pointer = w.HANDLE, w.DWORD, w.BOOL, w.HWND, ctypes.c_void_p
+    long_ptr, int_ = ctypes.c_ssize_t, ctypes.c_int
+    return {
+        "user32": {
+            "GetWindowThreadProcessId": ([hwnd, ctypes.POINTER(dword)], dword),
+            "IsWindowVisible": ([hwnd], boolean),
+            "IsIconic": ([hwnd], boolean),
+            "GetWindow": ([hwnd, ctypes.c_uint], hwnd),
+            "ShowWindow": ([hwnd, int_], boolean),
+            "SetForegroundWindow": ([hwnd], boolean),
+            "GetForegroundWindow": ([], hwnd),
+            "GetClassNameW": ([hwnd, w.LPWSTR, int_], int_),
+            "SetWindowPos": ([hwnd, hwnd, int_, int_, int_, int_, ctypes.c_uint], boolean),
+            "GetWindowLongPtrW": ([hwnd, int_], long_ptr),
+            "SetWindowLongPtrW": ([hwnd, int_, long_ptr], long_ptr),
+        },
+        "kernel32": {
+            "OpenProcess": ([dword, boolean, dword], handle),
+            "CloseHandle": ([handle], boolean),
+            "QueryFullProcessImageNameW": ([handle, dword, w.LPWSTR, ctypes.POINTER(dword)], boolean),
+            "CreateJobObjectW": ([pointer, w.LPCWSTR], handle),
+            "SetInformationJobObject": ([handle, int_, pointer, dword], boolean),
+            "AssignProcessToJobObject": ([handle, handle], boolean),
+            "PeekNamedPipe": ([handle, pointer, dword, pointer, ctypes.POINTER(dword), pointer], boolean),
+            "ReadFile": ([handle, pointer, dword, ctypes.POINTER(dword), pointer], boolean),
+        },
+    }
+
+
+@pytest.mark.parametrize("library, name", [(library, name) for library, table in prototypes().items()
+                                           for name in table])
+def test_each_win32_function_has_its_prototype(library, name):
+    """A handle and a pointer are 64 bits on 64-bit Windows: with no prototype ctypes gives an int of 32 bits."""
+    api, windll, _calls = made_up_win32()
+    function = getattr(getattr(windll, library), name)
+    assert (function.argtypes, function.restype) == prototypes()[library][name]
+
+
+def test_the_callback_of_the_window_list_has_its_prototype():
+    from ctypes import wintypes as w
+    api, windll, _calls = made_up_win32()
+    enum = windll.user32.EnumWindows
+    assert enum.restype == w.BOOL and enum.argtypes == [api._enum_proc, w.LPARAM]
+    assert api._enum_proc._restype_ == w.BOOL and api._enum_proc._argtypes_ == (w.HWND, w.LPARAM)
+
+
+def test_a_missing_prototype_is_seen():
+    """Mutation M8 of the review: a result type removed must fail the test of the prototypes."""
+    api, windll, _calls = made_up_win32()
+    windll.user32.GetForegroundWindow.restype = NOT_SET
+    with pytest.raises(AssertionError):
+        function = windll.user32.GetForegroundWindow
+        assert (function.argtypes, function.restype) == prototypes()["user32"]["GetForegroundWindow"]
+
+
+def test_the_window_calls_give_the_documented_values():
+    api, windll, calls = made_up_win32()
+    api.restore(0x10)
+    api.set_topmost(0x10)
+    api.set_ex_style(0x10, 0x88)
+    api.set_ex_style(0x10, 0x80000008)  # a style with its highest bit: a negative LONG_PTR of 32 bits
+    assert calls == [("ShowWindow", (0x10, 9)),  # SW_RESTORE
+                     ("SetWindowPos", (0x10, -1, 0, 0, 0, 0, 0x1 | 0x2 | 0x10 | 0x20)),  # HWND_TOPMOST, NOSIZE|NOMOVE|NOACTIVATE|FRAMECHANGED
+                     ("SetWindowLongPtrW", (0x10, -20, 0x88)),  # GWL_EXSTYLE
+                     ("SetWindowLongPtrW", (0x10, -20, -0x7FFFFFF8))]
+    calls.clear()
+    windll.user32.GetWindowLongPtrW.result = -0x7FFFFFF8
+    assert api.ex_style(0x10) == 0x80000008 and api.style(0x10) == 0x80000008
+    windll.user32.GetForegroundWindow.result = None
+    windll.user32.SetForegroundWindow.result = 0
+    assert api.foreground_window() == 0 and api.set_foreground(0x10) is False
+    assert calls == [("GetWindowLongPtrW", (0x10, -20)), ("GetWindowLongPtrW", (0x10, -16)),  # GWL_EXSTYLE, GWL_STYLE
+                     ("GetForegroundWindow", ()), ("SetForegroundWindow", (0x10,))]
+
+
+def test_the_list_of_windows_and_the_name_of_a_program():
+    api, windll, calls = made_up_win32()
+    windll.user32.EnumWindows.effect = lambda proc, param: (proc(0x11, 0), proc(0x22, 0), 1)[-1]
+
+    def pid_of(hwnd, out):
+        out._obj.value = {0x11: 41, 0x22: 7}[hwnd]
+        return 9
+
+    windll.user32.GetWindowThreadProcessId.effect = pid_of
+    windll.user32.IsWindowVisible.effect = lambda hwnd: hwnd == 0x11
+    windll.user32.IsIconic.result = 0
+    windll.user32.GetWindow.result = None
+    assert api.windows() == [(0x11, 41, True, False, False), (0x22, 7, False, False, False)]
+    assert all(call[1][1] == 4 for call in calls if call[0] == "GetWindow")  # GW_OWNER
+    calls.clear()
+    windll.kernel32.OpenProcess.result = 0x61
+
+    def image(process, flags, buffer, size):
+        buffer.value = "C:\\Users\\made-up\\AppData\\Local\\Programs\\herdr-app\\herdr-app.exe"
+        return 1
+
+    windll.kernel32.QueryFullProcessImageNameW.effect = image
+    assert api.process_name(41) == "herdr-app.exe"
+    assert [call[0] for call in calls] == ["OpenProcess", "QueryFullProcessImageNameW", "CloseHandle"]
+    assert calls[0][1] == (0x1000, False, 41) and calls[1][1][:2] == (0x61, 0) and calls[2][1] == (0x61,)
+
+
+def test_the_job_calls_give_the_documented_values():
+    api, windll, calls = made_up_win32()
+    windll.kernel32.CreateJobObjectW.result = 0x50
+    assert api.kill_job() == 0x50 and api.kill_job() == 0x50  # made one time
+    (create, information) = calls
+    assert create == ("CreateJobObjectW", (None, None))
+    job, kind, limits, size = information[1]
+    assert (job, kind, size) == (0x50, 9, ctypes.sizeof(windows.JobLimits))  # JobObjectExtendedLimitInformation
+    assert limits._obj.BasicLimitInformation.LimitFlags == 0x2000 | 0x1000  # KILL_ON_JOB_CLOSE | SILENT_BREAKAWAY_OK
+    calls.clear()
+    windll.kernel32.OpenProcess.result = 0x60
+    assert api.assign(0x50, 4321) is True
+    assert calls == [("OpenProcess", (0x100 | 0x1, False, 4321)),  # PROCESS_SET_QUOTA | PROCESS_TERMINATE
+                     ("AssignProcessToJobObject", (0x50, 0x60)), ("CloseHandle", (0x60,))]
+
+
+def test_the_wait_for_a_pipe_reads_no_byte_and_looks_how_many_are_there():
+    api, windll, calls = made_up_win32()
+    counts = iter([0, 0, 3])
+
+    def peek(handle, buffer, size, read, available, left):
+        available._obj.value = next(counts)
+        return 1
+
+    windll.kernel32.PeekNamedPipe.effect = peek
+    sleeps = []
+    assert api.handle_of(5) == 4005
+    assert api.wait_data(4005, sleep=sleeps.append) is True
+    reads = [call[1] for call in calls if call[0] == "ReadFile"]
+    assert len(reads) == 3 and all(args[0] == 4005 and args[2] == 0 and args[4] is None for args in reads)
+    peeks = [call[1] for call in calls if call[0] == "PeekNamedPipe"]
+    assert all(args[:4] == (4005, None, 0, None) and args[5] is None for args in peeks)
+    assert sleeps == [windows.PIPE_POLL] * 2  # a read of no bytes that did not wait: a look again later, no loop
+    windll.kernel32.ReadFile.result = 0  # the writer is gone
+    assert api.wait_data(4005, sleep=sleeps.append) is False
+
+
+@on_windows
+def test_on_windows_a_read_of_no_bytes_waits_in_the_system_until_a_byte_comes(monkeypatch):
+    """The ground of the wait of the event pipe: ReadFile of 0 bytes on an anonymous pipe waits (no loop)."""
+    import threading
+    api = windows.load_win32()
+    sleeps = []
+    read_end, write_end = os.pipe()
+    try:
+        done = []
+        waiter = threading.Thread(target=lambda: done.append(api.wait_data(api.handle_of(read_end),
+                                                                           sleep=sleeps.append)), daemon=True)
+        waiter.start()
+        time.sleep(0.5)
+        assert done == [] and sleeps == []  # it waits, and it did not look again in a loop
+        os.write(write_end, b"x")
+        waiter.join(5)
+        assert done == [True] and os.read(read_end, 1) == b"x"  # the byte is still there for the reader
+    finally:
+        os.close(read_end)
+        os.close(write_end)
