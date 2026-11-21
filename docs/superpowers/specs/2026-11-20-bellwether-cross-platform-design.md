@@ -231,6 +231,17 @@ it can). The plan below is kept; where the two differ, this is right.
   `uv_pipe_zero_readfile_thread_proc`), then tells `readable` through a condition; after the reader took the data it
   waits again. Should a read of no bytes come back with no byte there, the pipe is looked at again after 50 ms (never a
   loop that does not wait). The end of the pipe stays ready. A file number that names a new pipe gets a new watch.
+- The pipe watch after a restart of the event child (final review, F1): the next child's pipe can get the same file
+  number and the same handle value; a watch whose pipe ended is told one time and then replaced, so the new pipe is
+  asked of the system again. Proven with made-up pipes (the reviewer's probe as a test, and the quit after a
+  restart), and on the runners by the smoke run: it kills the made-up `herdr-core events` once by pid, and the widget
+  must log `events: lost` and later `events: connected` again (a stream after another one is announced after 20 s
+  of life) with exactly one new event child. Not proven: a restart where the new pipe really gets the same handle
+  value (Windows chooses it).
+- On Wayland (final review, F2): Qt knows the screen of a window only after the compositor shows it; the options
+  window takes the room of that screen when Qt tells it (`screenChanged`), so on two monitors the first frame can
+  have the layout for the width of the other monitor for a moment. Where the program places windows (F6), the place
+  and the lower height below the panel are given before the show: the first frame is the final one.
 - Placement (review of P4, m1 and m8): the options and the answer window open on the screen of the panel (`setScreen`
   before the first show, where the program can place windows), get the free width of the screen that shows them
   (again after the show when the system chose an other one), and after each show go inside the free part of that

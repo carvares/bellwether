@@ -202,6 +202,8 @@ A GitHub machine installs Bellwether, runs a selected set of the tests, and runs
 - **The panel is not under the menu bar, the Dock or the taskbar.**
 - **A smoke run with a made-up Herdr:** the start script starts one panel, the panel reads the made-up app and its event stream, and after a kill of the panel its child process ends within 3 seconds.
 
+The last CI run of both systems (2026-11-21 00:30 UTC) had every change of the port: the macOS job and the Windows job passed with the opaque answer and options windows, the options window on a narrow screen, and UTF-8 for each text file. Not in that run: the restart of the event stream in the smoke run and the fixes after the final review.
+
 What a CI machine cannot prove: no person sits at it, and it has no real Herdr app and no real agent. Nobody has looked at the panel there, dragged it, or clicked it with a real mouse. On the CI machine the windows got the keyboard with no click of a person; on a real Mac and on a real Windows PC, the system decides after the click of the person. The list of open checks is in [Not verified by a person](#not-verified-by-a-person).
 
 ### Why the limits
@@ -216,7 +218,7 @@ What a CI machine cannot prove: no person sits at it, and it has no real Herdr a
 | Requirement | Linux (KDE Plasma 6) | macOS | Windows |
 |---|---|---|---|
 | **System** | KDE Plasma 6 on Wayland. Plasma 6.3 or later for the Herdr mark in the taskbar; older versions show a generic icon there. | macOS 12.3 or later for `start.sh`, which needs `readlink -f`. Tested on 26.7.2 only. | Windows 10 or 11. Tested on Windows Server 2025 only. |
-| **Python** | 3.12 or later | 3.12 or later | 3.12 or later |
+| **Python** | 3.12 or later | 3.12 or later (`pyproject.toml`); the CI machine tested 3.14 only | 3.12 or later (`pyproject.toml`); the CI machine tested 3.14 only |
 | **`uv`** | Any recent | Any recent | Any recent |
 | **What `uv sync` installs into `.venv`** | PySide6 | PySide6, psutil, pyobjc (Cocoa) | PySide6, psutil |
 | **System parts** | Package `layer-shell-qt`, from your Plasma. System Qt **6.12**: it must have the same minor version as the PySide6 that Bellwether installs (see [the Qt version rule](docs/reference.md#the-qt-version-rule)). `systemd-run`, to start a closed Herdr app from the panel. | None | None |
@@ -251,7 +253,7 @@ The panel shows at the top right of your screen.
 
 ### macOS
 
-Install Python 3.12 or later and `uv`. Then, in Terminal:
+Install Python 3.12 or later (the CI machine tested 3.14) and `uv`. Then, in Terminal:
 
     git clone git@github.com:carvares/bellwether.git
     cd bellwether
@@ -262,7 +264,7 @@ Install Python 3.12 or later and `uv`. Then, in Terminal:
 
 ### Windows
 
-Install Python 3.12 or later and `uv`. Then, in a Command Prompt:
+Install Python 3.12 or later (the CI machine tested 3.14) and `uv`. Then, in a Command Prompt:
 
     git clone git@github.com:carvares/bellwether.git
     cd bellwether
@@ -356,6 +358,7 @@ On Windows, all the files except the settings are in `%LOCALAPPDATA%\bellwether`
 ### Linux
 
 - The jump to an agent on a different virtual desktop is not tested.
+- With two monitors on Wayland, the options window can show for a moment the layout for the width of the first monitor, then the layout for its own monitor: the compositor tells the screen of a window only after the window shows.
 - On X11, GNOME and other desktops, see [Why the limits](#why-the-limits). Without KWin, the jump has only its second way to bring the Herdr window to the front: it runs `herdr-app`.
 
 The full list of Linux limits, and of what a person has not yet checked there, is in the [reference](docs/reference.md#limits).
@@ -365,7 +368,6 @@ The full list of Linux limits, and of what a person has not yet checked there, i
 - macOS can refuse to give the keyboard to the options window or the answer window when you did not just click in Bellwether. Then click in the window.
 - Without pyobjc, Bellwether has a Dock icon, and the panel stays above the other windows on the current Space only.
 - The model of Claude Code: Bellwether compares the start of the process with the text that Claude Code writes on macOS. The CI machine checked that text against `ps`, but not with a real Claude Code. When the text is different, the row shows the time only.
-- The last CI run of both systems (2026-11-21) had every change of the port: the macOS job and the Windows job passed with the opaque answer and options windows, the options window on a narrow screen, and UTF-8 for each text file.
 
 ### Windows
 

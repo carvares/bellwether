@@ -246,6 +246,7 @@ The widget had the name herdr-float before 2026-11-18. At its first start with t
 - The panel redraws at most one time for each frame of your screen, and only when something changes. A drag moves the panel at most one time in two frames of the screen that the panel is on (240 Hz: each 8.3 ms, 144 Hz: each 13.9 ms, 60 Hz: each 20 ms). The second frame gives the compositor time to apply the last move before the next one is calculated.
 - The drag across monitors works because KWin shows a layer surface also on the neighbour monitor. A different compositor can cut the panel at the edge of its monitor during the drag. The tray entry "Move to next screen" always works.
 - A drag across monitors: the panel goes only across an edge that two monitors share. Where a monitor has no neighbour (for example above a smaller monitor that starts lower), the panel stops at the edge. During the drag the panel can be on two monitors. At the release it goes fully to the monitor that holds its middle, and it can blink one time when it changes its monitor: the compositor needs a new surface for a different monitor.
+- On Wayland with two monitors, the options window can show for a moment the layout for the width of the first monitor: Qt knows the monitor of a window only after the compositor shows it, and the window then takes the width of its own monitor.
 - If the monitor of the panel is disconnected while the widget runs, the panel shows on a monitor that stays. This was tested with made-up screens only, not with a real cable. The saved monitor does not change, so after a later start with that monitor the panel is there again.
 - A person has not yet dragged the panel to a different monitor with a real mouse. The checks used the same functions without a pointer, and the protocol trace of the compositor.
 - The widget is made for KDE Plasma on Wayland (the layer shell, below). On other desktops it uses the plain shell, with the limits named there. macOS and Windows always use the plain shell (see "Other systems").
@@ -363,7 +364,7 @@ How a job starts:
 - By a push to the branch `cross-platform` that changes code (`bellwether/`, `tests/`, `scripts/`, `pyproject.toml`, `uv.lock` or the workflow), and whose head commit message has the marker `[ci macos]`, `[ci windows]` or `[ci both]`.
 - With no marker, no job runs. A change of the documents only starts no job. After a merge into `main`, a job starts only by hand, because the push rule names only the branch `cross-platform`.
 
-Why: the repository is private. GitHub counts a macOS minute as 10 minutes and a Windows minute as 2 minutes of the free minutes. So a job runs only when it is asked for, and it runs a fast selected set of tests: the full suite takes about 11 minutes on Linux, and the panel tests of the plain shell took about 5 times as long on the macOS machine. The port used 7 runs and 154 of a budget of 500 weighted minutes.
+Why: the repository is private. GitHub counts a macOS minute as 10 minutes and a Windows minute as 2 minutes of the free minutes. So a job runs only when it is asked for, and it runs a fast selected set of tests: the full suite takes about 11 minutes on Linux, and the panel tests of the plain shell took about 5 times as long on the macOS machine. The runs and their minutes are on the Actions page of the repository.
 
 ## The Qt version rule
 
