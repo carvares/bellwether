@@ -328,3 +328,5 @@ Not verified by a person (P3): everything of section 4 of "Proof", and on macOS:
 
 - A missing optional part (`pyobjc`, `psutil`, the app bundle, the commands) gives one clear log line and the nearest working behaviour, never a crash at start.
 - A raise that the system refuses is reported as today: the row shows the failure message for 3 seconds.
+
+After the last run of the port (2026-11-21) the push rule with the commit-message markers was removed: the workflow starts by hand only (`workflow_dispatch`, default system Windows). `tests/test_workflow.py` holds it to that.
