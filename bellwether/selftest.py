@@ -145,12 +145,14 @@ def body_alpha(window) -> float | None:
 def without_home(text: str, home=None) -> str:
     """The text with the home folder of the person as "~" (a path of a checkout holds the name of a person): in each
     form a path can take in a text — the separators of Windows or forward slashes (a file URL), and any case of the
-    letters (Windows paths have no case). `home`: for a test (None: the home folder of this process)."""
+    letters (Windows paths have no case); never a part of a longer folder name. `home`: for a test (None: the home
+    folder of this process)."""
     home = str(Path.home() if home is None else home).rstrip("/\\")
     if len(home.strip("/\\:")) < 2:  # no home folder, or a root: nothing to hide
         return text
     for form in dict.fromkeys((home, home.replace("\\", "/"), home.replace("/", "\\"))):
-        text = re.sub(re.escape(form), "~", text, flags=re.IGNORECASE)
+        # Only the whole folder: not a part of a longer name ("/home/al" is not in "/home/alice").
+        text = re.sub(re.escape(form) + r"(?![\w.-])", "~", text, flags=re.IGNORECASE)
     return text
 
 

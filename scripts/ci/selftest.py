@@ -41,12 +41,17 @@ WINDOWS_SHOT = ("Add-Type -AssemblyName System.Windows.Forms, System.Drawing; "
                 "$i.Save('{path}', [System.Drawing.Imaging.ImageFormat]::Png)")
 
 
+_without_home: list = []  # bellwether.selftest.without_home, imported at the first use
+
+
 def private(text: str, home=None) -> str:
     """The text with the home folder as "~" in each form a path takes (bellwether/selftest.py, `without_home`): a
     path of a checkout can hold the name of a person."""
-    sys.path.insert(0, str(ROOT))
-    from bellwether.selftest import without_home  # noqa: PLC0415
-    return without_home(text, home)
+    if not _without_home:
+        sys.path.insert(0, str(ROOT))
+        from bellwether.selftest import without_home  # noqa: PLC0415
+        _without_home.append(without_home)
+    return _without_home[0](text, home)
 
 
 def on_a_runner(environ=None) -> bool:

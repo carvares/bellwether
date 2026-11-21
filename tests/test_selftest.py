@@ -154,6 +154,10 @@ def test_pictures_only_on_a_ci_runner_and_the_home_folder_is_never_written(monke
     assert module.private("file:///home/made-up-person/src/bellwether/ui/X.qml:3", "/home/made-up-person") == (
         "file://~/src/bellwether/ui/X.qml:3")
     assert module.private(f"made-up {Path.home()} line") == "made-up ~ line"  # the home folder of this system
+    path_entries = len(sys.path)
+    for _ in range(3):
+        module.private("made-up line")
+    assert len(sys.path) == path_entries  # the checkout is added to the path one time, not at each line
     assert module.main(["selftest.py", str(tmp_path)]) == 2 and module.main(["selftest.py", str(tmp_path), "linux"]) == 2
     picture = tmp_path / "it's.png"  # a path of this system, with a quote
     assert module.shot_command("linux", picture, which=lambda name: name) is None
@@ -219,6 +223,10 @@ def test_the_checks_of_the_windows_runner():
     ("C:\\Users\\Made-Up", "c:\\users\\made-up\\x and C:/USERS/MADE-UP/y", "~\\x and ~/y"),
     ("C:\\Users\\Made-Up\\", "C:\\Users\\Made-Up\\x", "~\\x"),
     ("/", "/etc/made-up", "/etc/made-up"),  # no home folder to hide
+    # A path boundary: an other folder whose name starts with the name of the home folder stays.
+    ("/home/al", "/home/alice/x and /home/al/y and /home/al", "/home/alice/x and ~/y and ~"),
+    ("/home/al", "'/home/al' file:///home/al:3 (/home/al), /home/al.bak /home/al-2", "'~' file://~:3 (~), /home/al.bak /home/al-2"),
+    ("C:\\Users\\Al", "C:\\Users\\Alice\\x C:\\Users\\Al\\y", "C:\\Users\\Alice\\x ~\\y"),
 ])
 def test_the_home_folder_is_never_written_in_any_form_of_a_path(home, text, wanted):
     assert selftest.without_home(text, home) == wanted
