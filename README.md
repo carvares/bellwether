@@ -380,7 +380,7 @@ The full list of Linux limits, and of what a person has not yet checked there, i
 On macOS and on Windows, a person has not yet checked these things:
 
 - The feel of a drag with a real mouse.
-- A second monitor, also two monitors with different scales.
+- A second monitor. Two monitors with different scales: a drag of the panel from one to the other is tested only with a model of how Qt maps the pointer; the real mapping of Qt was never seen (the CI machines have one monitor).
 - An app in full screen: is the panel above it? (macOS: also on every Space.)
 - The jump with the real Herdr app: a window behind other windows, a minimized window, a closed app.
 - The model line with a real agent. For Claude Code on Windows there is no model yet: the row shows the time.

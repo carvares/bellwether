@@ -328,7 +328,8 @@ Windows:
 - The raise of the Herdr window: the first top-level window of `herdr-app.exe`, restored when it is minimized, then brought to the front. The start of a closed app: `herdr-app` as a detached process. When a Herdr window exists, the widget does not start a second app: a refused raise then shows "could not raise the window".
 - The programs: `PATH`, then `%LOCALAPPDATA%\Programs\herdr-app`, `%LOCALAPPDATA%\Programs\herdr-core` and `~\.cargo\bin`. Each program that the widget runs gets no console window.
 - The event child is in a job object that ends it when the widget ends, also after a kill. A process that the child starts (the herdr-core server) is not in the job and does not end with the widget.
-- The wait for the event stream checks the pipe each 50 ms: Windows has no `select` for a pipe.
+- The wait for the event stream: Windows has no `select` for a pipe. A thread for each pipe waits in the system with a read of no bytes (as libuv does) and takes no byte; nothing wakes while no data comes.
+- The options window and the answer window open on the screen of the panel, inside the free part of that screen, and clear of the panel when the screen has room at a side of it (macOS and X11 too; on Wayland the compositor places them).
 - The tray icon: `herdr-app.svg` beside `herdr-app.exe`, else the circle.
 - The model of Claude Code: none. Claude Code writes `procStartFt` on Windows, and its form is not known. The row shows the time. Codex: its folder is `%USERPROFILE%\.codex`.
 - `scripts\start.cmd` runs `scripts\start_windows.py` with the `pythonw` of the checkout. It starts the widget with no console, out of the process group and the job of the caller, and writes its output to `start.log` in the log folder (emptied above 1 MiB).
@@ -358,7 +359,7 @@ Fonts: each layout's font list ends with fonts of macOS (`SF Pro`, `Helvetica Ne
 
 How a job starts:
 
-- By hand: `workflow_dispatch`, with the input `system` (`macos`, `windows` or `both`).
+- By hand: `workflow_dispatch`, with the input `system` (`macos`, `windows` or `both`; the default is `windows`, so a run by hand spends no macOS minute unless macOS is chosen).
 - By a push to the branch `cross-platform` that changes code (`bellwether/`, `tests/`, `scripts/`, `pyproject.toml`, `uv.lock` or the workflow), and whose head commit message has the marker `[ci macos]`, `[ci windows]` or `[ci both]`.
 - With no marker, no job runs. A change of the documents only starts no job. After a merge into `main`, a job starts only by hand, because the push rule names only the branch `cross-platform`.
 

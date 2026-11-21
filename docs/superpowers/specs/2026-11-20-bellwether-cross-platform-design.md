@@ -180,7 +180,12 @@ it can). The plan below is kept; where the two differ, this is right.
 - The command without the caller variables: the argv and `os.environ` without the names (no case).
 - The event child: a job object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK`,
   made once; the program holds its only handle, so the system ends the child when the program ends, also after a
-  kill. Silent breakaway: a process that the child starts (the server of herdr-core, which runs every terminal) is
+  kill. The child joins the job just after `Popen` returns (`AssignProcessToJobObject` by its pid): a program killed
+  in that short time leaves the child, which then ends at its next write into the pipe with no reader. A launcher
+  that runs the real `herdr-core` as a child of its own (a shim of a package manager, the launcher of a Python
+  environment) is the process in the job; the real stream is not (silent breakaway). When the launcher ends with the
+  job, the stream keeps the write end of the pipe and ends at its next write after the program is gone (the next
+  heartbeat, at most 15 s) — not seen on a runner: the release installs `herdr-core.exe` itself, with no launcher. Silent breakaway: a process that the child starts (the server of herdr-core, which runs every terminal) is
   not in the job and never ends with the panel (only the direct child, as `PR_SET_PDEATHSIG` on Linux). Chosen over
   the watcher: `terminate()` on Windows is `TerminateProcess`, which runs no handler, so a watcher that the program
   ends would leave its child; the job is proven on the runner with real processes. The child has no console
@@ -221,10 +226,24 @@ it can). The plan below is kept; where the two differ, this is right.
   moved inside the free part of their screen when the system put them partly outside (Windows places a new window
   at a default place); no move when inside (Wayland). At the width of today: 0 different pixels. The answer window
   (600 px) fits a 640 px screen. The self-test checks that the options window is inside the free part of its screen.
+- The wait for the event pipe (review of P4, m2): no polling. A thread of each pipe (`PipeWatch`) waits in the system
+  with a read of no bytes (`ReadFile` of 0 bytes waits until a byte is there and takes none; libuv waits this way,
+  `uv_pipe_zero_readfile_thread_proc`), then tells `readable` through a condition; after the reader took the data it
+  waits again. Should a read of no bytes come back with no byte there, the pipe is looked at again after 50 ms (never a
+  loop that does not wait). The end of the pipe stays ready. A file number that names a new pipe gets a new watch.
+- Placement (review of P4, m1 and m8): the options and the answer window open on the screen of the panel (`setScreen`
+  before the first show, where the program can place windows), get the free width of the screen that shows them
+  (again after the show when the system chose an other one), and after each show go inside the free part of that
+  screen and clear of the panel (left of it, below it, right of it, above it: the first that fits; else they stay).
+  No move where the compositor places the windows (Wayland). The options window lays its sections out from the size
+  it asks for, not the size the window system gave so far, so a new room given before a show does not leave it
+  scrolled (the first open on a narrow screen started scrolled down: runner run 3).
 - With monitors of different scales (Windows, macOS) Qt 6 leaves gaps between the areas of the screens in its
   coordinates. The plain shell gives `desktopPoint(item, x, y)` (Qt's `mapToGlobal`, which maps a point by the screen
   under it); a drag keeps the point of the press under that pointer, so the panel crosses to the other monitor.
   The layer shell gives null and adds the move of the pointer as before (0 different pixels, the same protocol trace).
+  The real mixed-scale mapping of Qt is proven nowhere: the test (`test_a_drag_crosses_the_gap_between_monitors_of_
+  different_scales`) uses a model of `QWindow::mapToGlobal` written in the test, and the runners have one screen.
 
 The plan before P4:
 
