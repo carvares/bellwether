@@ -1401,19 +1401,60 @@ def test_the_first_and_a_later_open_on_a_narrow_low_screen_start_at_the_top(app,
 
 # ----- the options and the answer window: clear of the panel when the screen has room (review of P4, m8) -----
 
-@pytest.mark.parametrize("frame, free, avoid, wanted", [
-    ((300, 0, 400, 300), (0, 0, 800, 800), None, (300, 0)),  # no panel: only inside the free area
-    ((500, 600, 400, 300), (0, 0, 800, 800), None, (400, 500)),
-    ((300, 0, 400, 300), (0, 0, 800, 800), (480, 16, 300, 192), (64, 0)),  # left of the panel
-    ((100, 0, 600, 300), (0, 0, 800, 800), (480, 16, 300, 192), (100, 224)),  # no room at its left: below it
-    ((0, 0, 992, 680), (0, 0, 1024, 720), (688, 16, 320, 192), (0, 0)),  # a 1024 px screen: no room on any side
-    ((20, 20, 300, 200), (0, 0, 1024, 720), (688, 16, 320, 192), (20, 20)),  # clear already: no move
-    ((2700, 0, 400, 300), (1920, 0, 1280, 720), (2864, 16, 320, 192), (2448, 0)),  # an other screen, not at 0
-    ((900, 0, 400, 300), (1920, 0, 1280, 720), (2864, 16, 320, 192), (1920, 0)),  # comes onto it: clear there
+@pytest.mark.parametrize("frame, free, avoid, lower, wanted", [
+    ((300, 0, 400, 300), (0, 0, 800, 800), None, None, (300, 0, 300)),  # no panel: only inside the free area
+    ((500, 600, 400, 300), (0, 0, 800, 800), None, None, (400, 500, 300)),
+    ((300, 0, 400, 300), (0, 0, 800, 800), (480, 16, 300, 192), None, (64, 0, 300)),  # left of the panel
+    ((100, 0, 600, 300), (0, 0, 800, 800), (480, 16, 300, 192), None, (100, 224, 300)),  # no room at its left: below
+    ((0, 0, 992, 680), (0, 0, 1024, 720), (688, 16, 320, 192), None, (0, 0, 680)),  # a 1024 px screen: no side
+    ((0, 0, 992, 680), (0, 0, 1024, 720), (688, 16, 320, 192), 240, (0, 224, 496)),  # …lower, below the panel
+    ((0, 0, 992, 680), (0, 0, 1024, 400), (688, 16, 320, 192), 240, (0, 0, 680)),  # no room below for 240 either
+    ((20, 20, 300, 200), (0, 0, 1024, 720), (688, 16, 320, 192), None, (20, 20, 200)),  # clear already: no move
+    ((2700, 0, 400, 300), (1920, 0, 1280, 720), (2864, 16, 320, 192), None, (2448, 0, 300)),  # a screen not at 0
+    ((900, 0, 400, 300), (1920, 0, 1280, 720), (2864, 16, 320, 192), None, (1920, 0, 300)),  # onto it: clear
 ])
-def test_a_window_goes_inside_its_screen_and_clear_of_the_panel_when_there_is_room(frame, free, avoid, wanted):
+def test_a_window_goes_inside_its_screen_and_clear_of_the_panel_when_there_is_room(frame, free, avoid, lower, wanted):
     from bellwether.options import clear_place
-    assert clear_place(frame, free, avoid) == wanted
+    assert clear_place(frame, free, avoid, min_height=lower) == wanted
+
+
+def test_on_a_1024_px_screen_the_options_window_goes_below_the_panel_and_its_close_control_is_clear(
+        app, fake_client, state_path):
+    """The runner's screen of 1024 × 768 (free 1024 × 720) with the panel at its default corner."""
+    from PySide6.QtGui import QWindow
+    from bellwether import options as options_module
+    panel = QWindow()
+    panel.setGeometry(688, 16, 320, 192)
+    panel.show()
+    backend = Backend(fake_client, settings_path=state_path, skins=built_skins())
+    engine = QQmlApplicationEngine()
+    engine.rootContext().setContextProperty("backend", backend)
+    previous = qInstallMessageHandler(lambda mode, context, text: None)
+    try:
+        options = fitted_options(engine, 1024, 768)
+        options.open()
+        settle(app)
+        window = engine.rootObjects()[0]
+        window.setPosition(0, 0)
+        settle(app)
+        free = (0, 0, 1024, 720)
+        frame = window.frameGeometry()
+        x, y, height = options_module.clear_place((frame.x(), frame.y(), frame.width(), frame.height()), free,
+                                                  (688, 16, 320, 192), min_height=options_module.MIN_HEIGHT)
+        assert (y, height) == (224, 496)
+        window.setProperty("roomHeight", height - (frame.height() - window.height()) + 80)
+        window.setPosition(x, y)
+        settle(app)
+        assert window.frameGeometry().height() == 496 and window.y() >= 224
+        close = find(window, "isClose")
+        corner = close.mapToScene(QPointF(0, 0))
+        assert window.y() + corner.y() > 16 + 192  # the close control is below the panel
+        assert first_title_shows(window) and find(window, "isScroller").property("scrolls")
+    finally:
+        shiboken6.delete(engine)
+        panel.destroy()
+        app.processEvents()
+        qInstallMessageHandler(previous)
 
 
 def test_the_rule_moves_a_real_window_and_leaves_it_where_the_window_system_places_windows(app, monkeypatch):

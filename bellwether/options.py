@@ -48,10 +48,12 @@ class Options:
         screen = self._window.screen()
         if screen is not None:
             self._window.setProperty("roomWidth", screen.availableGeometry().width())
+            # As Screen.height: keep_on_screen can have lowered it at the last show (below the panel).
+            self._window.setProperty("roomHeight", screen.geometry().height())
         return screen
 
     def keep_on_screen(self) -> None:
-        keep_on_screen(self._window, panel_of(self._engine))
+        keep_on_screen(self._window, panel_of(self._engine), lower=True)
 
 
 def panel_of(engine):
@@ -73,11 +75,13 @@ def can_place_windows() -> bool:
 PANEL_GAP = 16
 
 
-def clear_place(frame, free, avoid, gap: int = PANEL_GAP):
-    """The top-left corner (x, y) for a window `frame` (x, y, width, height) inside the free area `free` of its
-    screen: kept inside it as far as it fits, and clear of the panel `avoid` (None: no panel there) when the free
-    area has room at its left, below it, at its right or above it (in this order; the nearest place of each side).
-    Where no side has room the window stays where it is in the free area: under the panel."""
+def clear_place(frame, free, avoid, gap: int = PANEL_GAP, min_height: int | None = None):
+    """The place (x, y, height) for a window `frame` (x, y, width, height) inside the free area `free` of its screen:
+    kept inside it as far as it fits, and clear of the panel `avoid` (None: no panel there) when the free area has
+    room at its left, below it, at its right or above it (in this order; the nearest place of each side). With
+    `min_height` (a window that can be lower: its sections scroll) and no side with room for all of it: below the
+    panel (else above it) with the height that is there, when that is `min_height` or more. Else the window stays
+    where it is in the free area: under the panel."""
     x0, y0, w, h = frame
     fx, fy, fw, fh = free
 
@@ -86,25 +90,36 @@ def clear_place(frame, free, avoid, gap: int = PANEL_GAP):
 
     x, y = inside(x0, y0)
     if avoid is None:
-        return x, y
+        return x, y, h
     ax, ay, aw, ah = avoid
 
     def clear(cx, cy):
         return cx + w <= ax or cx >= ax + aw or cy + h <= ay or cy >= ay + ah
 
     if clear(x, y):
-        return x, y
+        return x, y, h
     for cx, cy in ((ax - gap - w, y), (x, ay + ah + gap), (ax + aw + gap, y), (x, ay - gap - h)):
         if fx <= cx and cx + w <= fx + fw and fy <= cy and cy + h <= fy + fh:
-            return cx, cy
-    return x, y
+            return cx, cy, h
+    if min_height is not None:
+        below, above = fy + fh - (ay + ah + gap), ay - gap - fy
+        if below >= min_height:
+            return x, ay + ah + gap, min(h, below)
+        if above >= min_height:
+            return x, ay - gap - min(h, above), min(h, above)
+    return x, y, h
 
 
-def keep_on_screen(window, panel=None) -> None:
+# The lowest options or answer window that goes below the panel (a header, a footer and some lines of its sections).
+MIN_HEIGHT = 240
+
+
+def keep_on_screen(window, panel=None, lower: bool = False) -> None:
     """After a show: a window that the system put partly outside the free part of its screen (Windows places a new
     window at a default place) comes inside it, as far as it fits, and goes clear of the panel (a window that stays
-    above every other) when the screen has room for that. Where the window system places the windows (Wayland):
-    no move."""
+    above every other, and could cover the close control) when the screen has room for that. `lower` (the options
+    window): on a small screen it goes below the panel and is lower (its `roomHeight`: its sections scroll). Where
+    the window system places the windows (Wayland): no move."""
     screen = window.screen()
     if screen is None or not can_place_windows():
         return
@@ -113,7 +128,12 @@ def keep_on_screen(window, panel=None) -> None:
     if panel is not None and panel.isVisible() and panel.screen() == screen:
         box = panel.frameGeometry()
         avoid = (box.x(), box.y(), box.width(), box.height())
-    x, y = clear_place((frame.x(), frame.y(), frame.width(), frame.height()),
-                       (free.x(), free.y(), free.width(), free.height()), avoid)
+    x, y, height = clear_place((frame.x(), frame.y(), frame.width(), frame.height()),
+                               (free.x(), free.y(), free.width(), free.height()), avoid,
+                               min_height=MIN_HEIGHT if lower else None)
+    if height < frame.height():
+        # The window takes its height from the room (fixedHeight: at most roomHeight - 80), and the frame is a
+        # few pixels higher than the window.
+        window.setProperty("roomHeight", height - (frame.height() - window.height()) + 80)
     if (x, y) != (frame.x(), frame.y()):
         window.setPosition(window.x() + x - frame.x(), window.y() + y - frame.y())

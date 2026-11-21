@@ -234,7 +234,9 @@ it can). The plan below is kept; where the two differ, this is right.
 - Placement (review of P4, m1 and m8): the options and the answer window open on the screen of the panel (`setScreen`
   before the first show, where the program can place windows), get the free width of the screen that shows them
   (again after the show when the system chose an other one), and after each show go inside the free part of that
-  screen and clear of the panel (left of it, below it, right of it, above it: the first that fits; else they stay).
+  screen and clear of the panel (left of it, below it, right of it, above it: the first that fits). When no side
+  fits, the options window goes below the panel and is lower (at least 240 px: its sections scroll), so its close
+  control is never under the panel (a 1024 × 768 screen); else they stay.
   No move where the compositor places the windows (Wayland). The options window lays its sections out from the size
   it asks for, not the size the window system gave so far, so a new room given before a show does not leave it
   scrolled (the first open on a narrow screen started scrolled down: runner run 3).
