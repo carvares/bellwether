@@ -12,7 +12,7 @@ on:
         description: "The system to prove"
         type: choice
         options: [macos, windows, both]
-        default: both
+        default: windows  # a run by hand spends no macOS minute unless macOS is chosen
   push:
     branches: [cross-platform]
     paths:
