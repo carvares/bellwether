@@ -1487,6 +1487,8 @@ class WindowDouble:
     def __init__(self, screen):
         self.calls, self.properties, self.visible, self._screen = [], {}, False, screen
         self.visibleChanged = SimpleNamespace(connect=lambda slot: None)
+        self.screen_slots = []
+        self.screenChanged = SimpleNamespace(connect=self.screen_slots.append)
 
     def __getattr__(self, name):
         if name in ("show", "hide", "requestActivate", "raise_", "installEventFilter"):
@@ -1565,6 +1567,40 @@ def test_the_options_window_opens_on_the_screen_of_the_panel_with_the_room_of_th
     options.open()
     assert ("setProperty", "roomHeight", 1080) in window.calls  # given back before the next show
     assert names.count("setScreen") == 1 and [c[0] for c in window.calls].count("setScreen") == 0  # first show only
+
+
+def test_on_wayland_the_window_takes_the_room_of_the_screen_that_the_compositor_tells_after_the_show(app, monkeypatch):
+    """Review F2: before the show Qt knows only the primary screen (or the last one)."""
+    from bellwether import options as options_module
+    from bellwether.options import Options
+    monkeypatch.setattr(options_module, "can_place_windows", lambda: False)
+    primary, wide = ScreenDouble(1024, 768, 768), ScreenDouble(2560, 1440, 1440)
+    window = WindowDouble(primary)
+    Options(EngineDouble(panel_double(wide), window)).open()
+    assert window.properties["roomWidth"] == 1024
+    window._screen = wide  # the compositor puts it on the wide monitor and Qt tells it
+    for slot in window.screen_slots:
+        slot(wide)
+    assert window.properties["roomWidth"] == 2560 and window.properties["roomHeight"] == 1440
+    window.hide()
+    for slot in window.screen_slots:
+        slot(primary)  # a hidden window: nothing
+    assert window.properties["roomWidth"] == 2560
+
+
+def test_the_place_and_the_lower_height_come_before_the_show(app):
+    """Review F6: on a small screen the first frame is already lower, below the panel (no full height first)."""
+    from bellwether.options import Options
+    small = ScreenDouble(1024, 768, 720)
+    window = WindowDouble(small)
+    window.frameGeometry = lambda: __import__("PySide6.QtCore", fromlist=["QRect"]).QRect(0, 0, 992, 688)
+    window.height = lambda: 688
+    Options(EngineDouble(panel_double(small), window)).open()
+    names = [call[0] if call[0] != "setProperty" else f"setProperty {call[1]}" for call in window.calls]
+    show = names.index("show")
+    assert "setPosition" in names[:show]
+    lowered = [call for call in window.calls[:show] if call[:2] == ("setProperty", "roomHeight")]
+    assert lowered[-1][2] == 496 + 80  # 720 - (16 + 192 + 16) = 496 px high, given before the show
 
 
 def test_the_answer_window_opens_on_the_screen_of_the_panel(app, monkeypatch):

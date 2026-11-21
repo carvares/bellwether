@@ -30,11 +30,17 @@ class Options:
             panel = panel_of(self._engine)
             if panel is not None and panel.screen() is not None and can_place_windows():
                 self._window.setScreen(panel.screen())  # the first show on the screen of the panel
+            # A Wayland compositor tells the screen of a window only after it shows: the room of that screen then
+            # (the sections are laid out at once from the asked size: no scroll fault; the same room changes nothing).
+            self._window.screenChanged.connect(lambda _screen: self.fit_screen() if self._window.isVisible() else None)
         fitted = self.fit_screen()
         if self._window.isVisible() and not self._window.isActive():
             # Behind a different window. On Wayland a program cannot raise its window without a click in one of
             # its windows (the tray menu is not one), but a new window comes to the front: show it again.
             self._window.hide()
+        # The place and the height before the show, where the program places windows: the first frame shows the
+        # window where it stays (on a small screen: already lower, below the panel).
+        self.keep_on_screen()
         self._window.show()
         if self._window.screen() != fitted:
             self.fit_screen()  # the system showed it on an other screen: the room of that one
