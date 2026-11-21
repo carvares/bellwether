@@ -365,7 +365,7 @@ The full list of Linux limits, and of what a person has not yet checked there, i
 - macOS can refuse to give the keyboard to the options window or the answer window when you did not just click in Bellwether. Then click in the window.
 - Without pyobjc, Bellwether has a Dock icon, and the panel stays above the other windows on the current Space only.
 - The model of Claude Code: Bellwether compares the start of the process with the text that Claude Code writes on macOS. The CI machine checked that text against `ps`, but not with a real Claude Code. When the text is different, the row shows the time only.
-- The last macOS CI run was before three changes: the opaque answer and options windows, the options window on a narrow screen, and UTF-8 for each text file that the program reads and writes. These changes ran on Linux and on the Windows CI machine, not yet on macOS.
+- The last CI run of both systems (2026-11-21) had every change of the port: the macOS job and the Windows job passed with the opaque answer and options windows, the options window on a narrow screen, and UTF-8 for each text file.
 
 ### Windows
 
