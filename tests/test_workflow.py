@@ -30,14 +30,15 @@ def condition(name):
     return " ".join(found.group(1).split())
 
 
-def test_the_workflow_starts_only_by_hand_or_by_a_push_and_never_by_a_schedule_or_a_pull_request():
+def test_the_workflow_starts_only_by_hand_and_never_by_a_push_a_schedule_or_a_pull_request():
     head = text().split("\njobs:")[0]
-    assert "schedule" not in head and "pull_request" not in head
-    assert re.search(r"\non:\n  workflow_dispatch:\n", head) and "\n  push:\n" in head
+    triggers = re.findall(r"\n  ([a-z_]+):\n", head.split("\non:")[1].split("\nconcurrency:")[0])
+    assert triggers == ["workflow_dispatch"]
+    assert not re.search(r"\n  (push|schedule|pull_request|pull_request_target|workflow_run):", head)
 
 
 def test_a_run_by_hand_spends_no_macos_minute_unless_macos_is_chosen():
-    inputs = text().split("workflow_dispatch:")[1].split("\n  push:")[0]
+    inputs = text().split("workflow_dispatch:")[1].split("\nconcurrency:")[0]
     assert re.search(r"options: \[macos, windows, both\]", inputs)
     assert re.search(r"\n        default: windows\b", inputs)
 
@@ -45,9 +46,7 @@ def test_a_run_by_hand_spends_no_macos_minute_unless_macos_is_chosen():
 @pytest.mark.parametrize("name", JOBS)
 def test_each_job_runs_only_when_it_is_asked_for_and_has_a_time_limit(name):
     assert condition(name) == (
-        f"(github.event_name == 'workflow_dispatch' && (inputs.system == '{name}' || inputs.system == 'both')) "
-        f"|| (github.event_name == 'push' && (contains(github.event.head_commit.message, '[ci {name}]') "
-        f"|| contains(github.event.head_commit.message, '[ci both]')))")
+        f"github.event_name == 'workflow_dispatch' && (inputs.system == '{name}' || inputs.system == 'both')")
     limit = re.search(r"\n    timeout-minutes: (\d+)\n", job(name))
     assert limit and int(limit.group(1)) <= 8
     assert f"\n    runs-on: {JOBS[name]}\n" in job(name)
@@ -58,10 +57,9 @@ def test_the_jobs_are_the_two_systems_and_the_actions_are_pinned():
     assert set(re.findall(r"uses: (\S+)", text())) == ACTIONS
 
 
-def test_the_check_of_the_condition_finds_an_inverted_marker(monkeypatch):
-    """Mutation M7 of the review: the marker condition inverted must fail the test above."""
-    changed = text().replace("(contains(github.event.head_commit.message, '[ci windows]')",
-                             "(!contains(github.event.head_commit.message, '[ci windows]')")
+def test_the_check_of_the_condition_finds_an_inverted_choice(monkeypatch):
+    """Mutation M7 of the review: the condition of a job inverted must fail the test above."""
+    changed = text().replace("(inputs.system == 'windows' ||", "(inputs.system != 'windows' ||")
     assert changed != text()
     monkeypatch.setattr(Path, "read_text", lambda self, encoding=None: changed)
     with pytest.raises(AssertionError):

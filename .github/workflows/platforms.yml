@@ -1,8 +1,8 @@
 # The proof of the other systems on real machines (see docs/superpowers/specs/2026-11-20-bellwether-cross-platform-design.md,
 # "Proof"). The repository is private: a macOS minute counts 10 times and a Windows minute 2 times, so each job runs a
 # selected fast test set, the smoke run, the self-test and the screen pictures, in a few minutes. A job runs only when
-# it is asked for: by hand (the input `system`), or by a push to the branch of the port that changes code and whose
-# head commit message has the marker `[ci macos]`, `[ci windows]` or `[ci both]` (no marker: no job).
+# a person starts the workflow by hand and chooses its system (the input `system`; the default is Windows). No push,
+# no pull request and no schedule starts it.
 name: platforms
 
 on:
@@ -13,15 +13,6 @@ on:
         type: choice
         options: [macos, windows, both]
         default: windows  # a run by hand spends no macOS minute unless macOS is chosen
-  push:
-    branches: [cross-platform]
-    paths:
-      - "bellwether/**"
-      - "tests/**"
-      - "scripts/**"
-      - "pyproject.toml"
-      - "uv.lock"
-      - ".github/workflows/platforms.yml"
 
 concurrency:
   group: platforms-${{ github.ref }}
@@ -33,9 +24,7 @@ permissions:
 jobs:
   macos:
     if: >-
-      (github.event_name == 'workflow_dispatch' && (inputs.system == 'macos' || inputs.system == 'both'))
-      || (github.event_name == 'push' && (contains(github.event.head_commit.message, '[ci macos]')
-      || contains(github.event.head_commit.message, '[ci both]')))
+      github.event_name == 'workflow_dispatch' && (inputs.system == 'macos' || inputs.system == 'both')
     runs-on: macos-latest
     timeout-minutes: 6
     defaults:
@@ -103,9 +92,7 @@ jobs:
 
   windows:
     if: >-
-      (github.event_name == 'workflow_dispatch' && (inputs.system == 'windows' || inputs.system == 'both'))
-      || (github.event_name == 'push' && (contains(github.event.head_commit.message, '[ci windows]')
-      || contains(github.event.head_commit.message, '[ci both]')))
+      github.event_name == 'workflow_dispatch' && (inputs.system == 'windows' || inputs.system == 'both')
     runs-on: windows-latest
     timeout-minutes: 8
     defaults:

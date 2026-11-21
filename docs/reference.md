@@ -361,8 +361,7 @@ Fonts: each layout's font list ends with fonts of macOS (`SF Pro`, `Helvetica Ne
 How a job starts:
 
 - By hand: `workflow_dispatch`, with the input `system` (`macos`, `windows` or `both`; the default is `windows`, so a run by hand spends no macOS minute unless macOS is chosen).
-- By a push to the branch `cross-platform` that changes code (`bellwether/`, `tests/`, `scripts/`, `pyproject.toml`, `uv.lock` or the workflow), and whose head commit message has the marker `[ci macos]`, `[ci windows]` or `[ci both]`.
-- With no marker, no job runs. A change of the documents only starts no job. After a merge into `main`, a job starts only by hand, because the push rule names only the branch `cross-platform`.
+- Nothing else starts it: no push, no pull request and no schedule. During the port, a push to the branch of the port with a marker in the commit message (`[ci macos]`, `[ci windows]`, `[ci both]`) also started a job; that rule was removed before the merge.
 
 Why: the repository is private. GitHub counts a macOS minute as 10 minutes and a Windows minute as 2 minutes of the free minutes. So a job runs only when it is asked for, and it runs a fast selected set of tests: the full suite takes about 11 minutes on Linux, and the panel tests of the plain shell took about 5 times as long on the macOS machine. The runs and their minutes are on the Actions page of the repository.
 
