@@ -3,6 +3,7 @@ state file, and pointer and key events as a person makes them. Off screen."""
 import json
 import re
 import time
+from types import SimpleNamespace
 
 import pytest
 import shiboken6
@@ -1418,14 +1419,41 @@ def test_a_window_goes_inside_its_screen_and_clear_of_the_panel_when_there_is_ro
     assert clear_place(frame, free, avoid, min_height=lower) == wanted
 
 
+class ScreenDouble:
+    """A screen of made-up size for the placement (the screen of the off-screen platform is 800 × 800)."""
+
+    def __init__(self, width, height, free_height):
+        from PySide6.QtCore import QRect
+        self._whole, self._free = QRect(0, 0, width, height), QRect(0, 0, width, free_height)
+
+    def geometry(self):
+        return self._whole
+
+    def availableGeometry(self):
+        return self._free
+
+
+class PanelDouble:
+    def __init__(self, screen, box=(688, 16, 320, 192)):
+        from PySide6.QtCore import QRect
+        self._screen, self._box = screen, QRect(*box)
+
+    def isVisible(self):
+        return True
+
+    def screen(self):
+        return self._screen
+
+    def frameGeometry(self):
+        return self._box
+
+
 def test_on_a_1024_px_screen_the_options_window_goes_below_the_panel_and_its_close_control_is_clear(
         app, fake_client, state_path):
-    """The runner's screen of 1024 × 768 (free 1024 × 720) with the panel at its default corner."""
-    from PySide6.QtGui import QWindow
+    """The runner's screen of 1024 × 768 (free 1024 × 720) with the panel at its default corner: the real
+    keep_on_screen of the program on the real options window."""
     from bellwether import options as options_module
-    panel = QWindow()
-    panel.setGeometry(688, 16, 320, 192)
-    panel.show()
+    screen = ScreenDouble(1024, 768, 720)
     backend = Backend(fake_client, settings_path=state_path, skins=built_skins())
     engine = QQmlApplicationEngine()
     engine.rootContext().setContextProperty("backend", backend)
@@ -1437,24 +1465,126 @@ def test_on_a_1024_px_screen_the_options_window_goes_below_the_panel_and_its_clo
         window = engine.rootObjects()[0]
         window.setPosition(0, 0)
         settle(app)
-        free = (0, 0, 1024, 720)
-        frame = window.frameGeometry()
-        x, y, height = options_module.clear_place((frame.x(), frame.y(), frame.width(), frame.height()), free,
-                                                  (688, 16, 320, 192), min_height=options_module.MIN_HEIGHT)
-        assert (y, height) == (224, 496)
-        window.setProperty("roomHeight", height - (frame.height() - window.height()) + 80)
-        window.setPosition(x, y)
+        window.screen = lambda: screen  # this window is on the made-up screen
+        options_module.keep_on_screen(window, PanelDouble(screen), lower=True)
         settle(app)
-        assert window.frameGeometry().height() == 496 and window.y() >= 224
-        close = find(window, "isClose")
-        corner = close.mapToScene(QPointF(0, 0))
+        assert window.frameGeometry().height() == 496 and window.frameGeometry().y() == 224
+        corner = find(window, "isClose").mapToScene(QPointF(0, 0))
         assert window.y() + corner.y() > 16 + 192  # the close control is below the panel
         assert first_title_shows(window) and find(window, "isScroller").property("scrolls")
+        options_module.keep_on_screen(window, PanelDouble(screen), lower=False)  # the answer window: never lower
+        settle(app)
+        assert window.frameGeometry().height() == 496
     finally:
         shiboken6.delete(engine)
-        panel.destroy()
         app.processEvents()
         qInstallMessageHandler(previous)
+
+
+class WindowDouble:
+    """A window of the program for the glue of options.py and answer.py: it records each call."""
+
+    def __init__(self, screen):
+        self.calls, self.properties, self.visible, self._screen = [], {}, False, screen
+        self.visibleChanged = SimpleNamespace(connect=lambda slot: None)
+
+    def __getattr__(self, name):
+        if name in ("show", "hide", "requestActivate", "raise_", "installEventFilter"):
+            return lambda *args: self.calls.append((name, *args)) or (setattr(self, "visible", name == "show")
+                                                                       if name in ("show", "hide") else None)
+        raise AttributeError(name)
+
+    def setScreen(self, screen):
+        self.calls.append(("setScreen", screen))
+        self._screen = screen
+
+    def screen(self):
+        return self._screen
+
+    def setProperty(self, name, value):
+        self.calls.append(("setProperty", name, value))
+        self.properties[name] = value
+
+    def property(self, name):
+        return self.properties.get(name)
+
+    def isVisible(self):
+        return self.visible
+
+    def isActive(self):
+        return False
+
+    def frameGeometry(self):
+        from PySide6.QtCore import QRect
+        return QRect(0, 0, 100, 100)
+
+    def x(self):
+        return 0
+
+    def y(self):
+        return 0
+
+    def height(self):
+        return 100
+
+    def setPosition(self, x, y):
+        self.calls.append(("setPosition", x, y))
+
+
+class EngineDouble:
+    """An engine whose `load` adds the window double after the panel."""
+
+    def __init__(self, panel, window):
+        self._roots, self._window = [panel], window
+
+    def rootObjects(self):
+        return list(self._roots)
+
+    def load(self, source):
+        self._roots.append(self._window)
+
+
+def panel_double(screen):
+    panel = PanelDouble(screen)
+    panel.property = lambda name: {"posX": 10, "screenName": "B"}.get(name)
+    return panel
+
+
+def test_the_options_window_opens_on_the_screen_of_the_panel_with_the_room_of_that_screen(app):
+    """Mutations M7 (no reset of roomHeight) and M8 (no setScreen) of the final review fail here."""
+    from bellwether.options import Options
+    first, second = ScreenDouble(800, 600, 560), ScreenDouble(1920, 1080, 1040)
+    window = WindowDouble(first)
+    options = Options(EngineDouble(panel_double(second), window))
+    options.open()
+    names = [call[0] for call in window.calls]
+    assert names.index("setScreen") < names.index("show") and ("setScreen", second) in window.calls
+    assert window.properties["roomWidth"] == 1920 and window.properties["roomHeight"] == 1080
+    window.properties["roomHeight"] = 400  # lowered below the panel at the last show
+    window.calls.clear()
+    options.open()
+    assert ("setProperty", "roomHeight", 1080) in window.calls  # given back before the next show
+    assert names.count("setScreen") == 1 and [c[0] for c in window.calls].count("setScreen") == 0  # first show only
+
+
+def test_the_answer_window_opens_on_the_screen_of_the_panel(app, monkeypatch):
+    from bellwether.answer import Answer
+    second = ScreenDouble(1920, 1080, 1040)
+    window = WindowDouble(ScreenDouble(800, 600, 560))
+    backend = SimpleNamespace(answerRequested=SimpleNamespace(connect=lambda slot: None))
+    Answer(EngineDouble(panel_double(second), window), backend).open()
+    names = [call[0] for call in window.calls]
+    assert ("setScreen", second) in window.calls and names.index("setScreen") < names.index("show")
+
+
+def test_where_the_compositor_places_windows_the_dialogs_get_no_screen_and_no_move(app, monkeypatch):
+    from bellwether import options as options_module
+    from bellwether.options import Options
+    monkeypatch.setattr(options_module, "can_place_windows", lambda: False)
+    window = WindowDouble(ScreenDouble(800, 600, 560))
+    Options(EngineDouble(panel_double(ScreenDouble(1920, 1080, 1040)), window)).open()
+    assert not [call for call in window.calls if call[0] in ("setScreen", "setPosition")]
+    assert window.properties["roomWidth"] == 800  # the room of the screen that Qt knows
 
 
 def test_the_rule_moves_a_real_window_and_leaves_it_where_the_window_system_places_windows(app, monkeypatch):
