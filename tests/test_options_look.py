@@ -1350,3 +1350,96 @@ def test_a_window_that_the_system_put_partly_outside_its_screen_comes_inside_it(
     window.setGeometry(0, 0, 1000, 300)
     keep_on_screen(window)
     assert (window.x(), window.y()) == (0, 0)  # wider than the screen: its left edge stays on it
+
+
+# ----- the first open on a narrow screen starts at the top (review of P4, I1) -----
+
+def fitted_options(engine, width, height):
+    """The options object of the program on a screen whose free part is `width` × `height` (given before each
+    show, as options.py gives the room of the real screen)."""
+    from bellwether.options import Options
+
+    class Fitted(Options):
+        def fit_screen(self):
+            self._window.setProperty("roomWidth", width)
+            self._window.setProperty("roomHeight", height)
+            return self._window.screen()
+
+    return Fitted(engine)
+
+
+def first_title_shows(window):
+    scroller = find(window, "isScroller")
+    title = next(i for i in walk(window.contentItem()) if i.property("isSectionTitle"))
+    top = title.mapToItem(scroller, QPointF(0, 0)).y()
+    return scroller.property("contentY") == 0 and 0 <= top and top + title.height() <= scroller.height()
+
+
+@pytest.mark.parametrize("width, height", [(1024, 768), (800, 720), (640, 720)])
+def test_the_first_and_a_later_open_on_a_narrow_low_screen_start_at_the_top(app, fake_client, state_path, width, height):
+    backend = Backend(fake_client, settings_path=state_path, skins=built_skins())
+    engine = QQmlApplicationEngine()
+    engine.rootContext().setContextProperty("backend", backend)
+    previous = qInstallMessageHandler(lambda mode, context, text: None)
+    try:
+        options = fitted_options(engine, width, height)
+        options.open()
+        settle(app)
+        window = engine.rootObjects()[0]
+        assert window.width() == width - 32 and find(window, "isScroller").property("scrolls")
+        assert first_title_shows(window)
+        window.hide()
+        settle(app)
+        options.open()
+        settle(app)
+        assert first_title_shows(window)
+    finally:
+        shiboken6.delete(engine)
+        app.processEvents()
+        qInstallMessageHandler(previous)
+
+
+# ----- the options and the answer window: clear of the panel when the screen has room (review of P4, m8) -----
+
+@pytest.mark.parametrize("frame, free, avoid, wanted", [
+    ((300, 0, 400, 300), (0, 0, 800, 800), None, (300, 0)),  # no panel: only inside the free area
+    ((500, 600, 400, 300), (0, 0, 800, 800), None, (400, 500)),
+    ((300, 0, 400, 300), (0, 0, 800, 800), (480, 16, 300, 192), (64, 0)),  # left of the panel
+    ((100, 0, 600, 300), (0, 0, 800, 800), (480, 16, 300, 192), (100, 224)),  # no room at its left: below it
+    ((0, 0, 992, 680), (0, 0, 1024, 720), (688, 16, 320, 192), (0, 0)),  # a 1024 px screen: no room on any side
+    ((20, 20, 300, 200), (0, 0, 1024, 720), (688, 16, 320, 192), (20, 20)),  # clear already: no move
+    ((2700, 0, 400, 300), (1920, 0, 1280, 720), (2864, 16, 320, 192), (2448, 0)),  # an other screen, not at 0
+    ((900, 0, 400, 300), (1920, 0, 1280, 720), (2864, 16, 320, 192), (1920, 0)),  # comes onto it: clear there
+])
+def test_a_window_goes_inside_its_screen_and_clear_of_the_panel_when_there_is_room(frame, free, avoid, wanted):
+    from bellwether.options import clear_place
+    assert clear_place(frame, free, avoid) == wanted
+
+
+def test_the_rule_moves_a_real_window_and_leaves_it_where_the_window_system_places_windows(app, monkeypatch):
+    from PySide6.QtGui import QWindow
+    from bellwether import options as options_module
+    panel, window = QWindow(), QWindow()
+    panel.setGeometry(480, 16, 300, 192)
+    panel.show()
+    window.setGeometry(300, 0, 400, 300)
+    try:
+        options_module.keep_on_screen(window, panel)
+        frame = window.frameGeometry()
+        assert frame.x() + frame.width() + 16 == panel.frameGeometry().x() and frame.y() == 0  # 16 px left of it
+        window.setGeometry(300, 0, 400, 300)
+        monkeypatch.setattr(options_module, "can_place_windows", lambda: False)  # Wayland: the compositor places
+        options_module.keep_on_screen(window, panel)
+        assert (window.x(), window.y()) == (300, 0)
+    finally:
+        panel.destroy()
+        window.destroy()
+
+
+def test_the_panel_of_an_engine_is_its_window_with_a_place():
+    from types import SimpleNamespace
+    from bellwether.options import panel_of
+    options = SimpleNamespace(property=lambda name: None)
+    panel = SimpleNamespace(property=lambda name: {"posX": 5, "screenName": "A"}.get(name))
+    assert panel_of(SimpleNamespace(rootObjects=lambda: [options, panel])) is panel
+    assert panel_of(SimpleNamespace(rootObjects=lambda: [options])) is None

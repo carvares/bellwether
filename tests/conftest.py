@@ -39,8 +39,9 @@ def wide_options(engine, *args):
     from bellwether.options import Options
 
     class WideOptions(Options):
-        def fit_screen(self) -> None:
+        def fit_screen(self):
             self._window.setProperty("roomWidth", ROOM_WIDTH)
+            return self._window.screen()
 
     return WideOptions(engine, *args)
 

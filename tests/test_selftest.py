@@ -42,6 +42,7 @@ def test_the_self_test_shows_each_step_and_gives_the_facts_of_the_windows(app, m
     # The plain shell: the bodies of the answer and the options window are opaque (the panel keeps its opacity).
     assert [facts[name]["body_alpha"] for name in ("options", "answer")] == [1.0, 1.0]
     assert facts["options"]["opaque_dialogs"] is True
+    assert facts["options"]["first_title_visible"] is True and len(facts["options"]["close"]) == 4
     assert [m for m in facts["messages"] if m != OFFSCREEN] == [] and "error" not in facts
     assert "INFO shell: plain" in err.getvalue()
 
@@ -94,6 +95,8 @@ def mac_facts(frame, app_active, items=1):
             "native": native, "layouts": {letter: {"shown": True, "visible": True} for letter in "ABCDE"},
             "options": {"visible": True, "native": asked, "body_alpha": 1.0, "opaque_dialogs": True,
                         "frame": [16, 47, 992, 640],
+                        "close": [968, 50, 28, 28], "panel_frame": [0, 500, 10, 10],
+                        "first_title_visible": True, "scroll": 0.0,
                         "screen": {"geometry": [0, 0, 1024, 768], "available": [0, 31, 1024, 674]}},
             "answer": {"visible": True, "prompt": "ready", "native": asked, "body_alpha": 1.0, "opaque_dialogs": True},
             "panel_after_options": {"native": {"visible": True}},
@@ -182,6 +185,8 @@ def windows_facts(foreground_of_program=False, added=""):
             "native": panel, "layouts": {letter: {"shown": True, "visible": True} for letter in "ABCDE"},
             "options": {"visible": True, "native": dict(window), "body_alpha": 1.0, "opaque_dialogs": True,
                         "frame": [16, 40, 992, 680],
+                        "close": [968, 50, 28, 28], "panel_frame": [0, 500, 10, 10],
+                        "first_title_visible": True, "scroll": 0.0,
                         "screen": {"geometry": [0, 0, 1024, 768], "available": [0, 0, 1024, 720]}},
             "answer": {"visible": True, "prompt": "ready", "native": dict(window), "body_alpha": 1.0,
                        "opaque_dialogs": True},
@@ -206,6 +211,13 @@ def test_the_checks_of_the_windows_runner():
         "no window of the program was in front while only the panel showed (the panel and the start take no focus)",
         "the options window asked for the foreground"]
     assert "Qt gave the panel all its styles (the program added none)" in by(bad)["WARN"]
+    under = windows_facts()
+    under["options"]["panel_frame"] = [688, 16, 320, 192]  # the panel over the close control (a 1024 px screen)
+    scrolled = windows_facts()
+    scrolled["options"].update(first_title_visible=False, scroll=116.0)  # the first open of run 3 (review I1)
+    assert by(under)["FAIL"] == ["the close control of the options window is not under the panel"]
+    assert by(scrolled)["FAIL"] == ["the options window opens at the top of its sections (the first section title "
+                                    "shows)"]
     cut = windows_facts()
     cut["options"]["frame"] = [0, 0, 1076, 720]  # as run 1 of the Windows runner showed it on a 1024 px screen
     assert by(cut)["FAIL"] == ["the options window is inside the available area of its screen (a narrow screen too)"]

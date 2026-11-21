@@ -126,6 +126,13 @@ def checks(facts: dict, system: str | None = None) -> list[tuple[str, str, objec
     check("the panel is inside the available area of its screen (not under a menu bar, a Dock or a panel)",
           *inside(panel))
     check("the options window is inside the available area of its screen (a narrow screen too)", *inside(options))
+    check("the options window opens at the top of its sections (the first section title shows)",
+          options.get("first_title_visible") is True, {k: options.get(k) for k in ("first_title_visible", "scroll")})
+    close, under = options.get("close") or [0, 0, 0, 0], options.get("panel_frame") or [0, 0, 0, 0]
+    covered = (close[0] < under[0] + under[2] and under[0] < close[0] + close[2]
+               and close[1] < under[1] + under[3] and under[1] < close[1] + close[3])
+    check("the close control of the options window is not under the panel", bool(options.get("close")) and not covered,
+          {"close": close, "panel": under})
     if system == "darwin":
         native = facts.get("native", {})
         check("Qt uses its cocoa plugin", facts.get("qt_platform") == "cocoa", facts.get("qt_platform"))

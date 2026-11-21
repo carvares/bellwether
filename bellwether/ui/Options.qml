@@ -173,7 +173,10 @@ Window {
     Rectangle {
         id: frame
         readonly property bool isFrame: true
-        anchors.fill: parent
+        // The size that the window asks for, not the size that the window system gave so far: a new room (a narrow
+        // screen, given just before the show) lays the sections out at once, before the scroll goes to their top.
+        width: options.fixedWidth
+        height: options.fixedHeight
         radius: options.theme.radius
         // Opaque where an other app's window can be behind this one (the plain shell): decisions and settings must be
         // readable. The panel colour with its opacity on the layer shell.

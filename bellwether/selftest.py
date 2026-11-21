@@ -142,6 +142,33 @@ def body_alpha(window) -> float | None:
     return None
 
 
+def options_places(window, panel) -> dict:
+    """Where the close control and the first section title of the options window are: the close control in the
+    desktop (it must not be under the panel, which stays above every window), and whether the first title is inside
+    the visible part of the sections (the window opens at their top)."""
+    from PySide6.QtCore import QPointF  # noqa: PLC0415
+    items, close, title, scroller = [window.contentItem()], None, None, None
+    while items:
+        item = items.pop(0)
+        if item.property("isClose") and close is None:
+            close = item
+        if item.property("isSectionTitle") and title is None:
+            title = item
+        if item.property("isScroller") and scroller is None:
+            scroller = item
+        items += item.childItems()
+    found = {}
+    if close is not None:
+        corner = window.mapToGlobal(close.mapToScene(QPointF(0, 0)).toPoint())
+        found["close"] = [corner.x(), corner.y(), round(close.width()), round(close.height())]
+    if title is not None and scroller is not None:
+        top = title.mapToItem(scroller, QPointF(0, 0)).y()
+        found["first_title_visible"] = 0 <= top and top + title.height() <= scroller.height()
+        found["scroll"] = scroller.property("contentY")
+    found["panel_frame"] = rect(panel.frameGeometry())
+    return found
+
+
 def without_home(text: str, home=None) -> str:
     """The text with the home folder of the person as "~" (a path of a checkout holds the name of a person): in each
     form a path can take in a text — the separators of Windows or forward slashes (a file URL), and any case of the
@@ -225,7 +252,7 @@ def run(start_panel, show: float = SHOW, step: float = STEP, out=sys.stdout, err
             wait(app, 0.5)
             window = engine.rootObjects()[-1]
             facts["options"] = {**qt_facts(window), "native": native_facts(window), "body_alpha": body_alpha(window),
-                                "opaque_dialogs": backend.opaqueDialogs}
+                                "opaque_dialogs": backend.opaqueDialogs, **options_places(window, panel)}
             facts["panel_after_options"] = {"active": panel.isActive(), "native": native_facts(panel)}
             shown("options")
             wait(app, step)
