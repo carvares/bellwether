@@ -4,15 +4,18 @@ import json
 import logging
 import os
 import subprocess
+import sys
 import threading
 import time
 from types import SimpleNamespace
 
 import pytest
 
+from bellwether import client as client_module
 from bellwether.client import (
     PRESS_TIMEOUT, READ_TIMEOUT, SEND_TIMEOUT, TEXT_LIMIT, Failure, HerdrClient, Screen, text_problem, valid_address,
     valid_text)
+from bellwether.platform import linux
 
 CORE = "/fake/herdr-core"
 MARKER = "MARKER-private-screen-text"
@@ -21,6 +24,13 @@ LIST = {"terminals": [
     {"address": "t1c", "agent": "codex", "state": "live", "status": "working"},
     {"address": "box/t7", "agent": "claude-code", "state": "live", "status": "blocked"},
 ]}
+
+
+@pytest.fixture(autouse=True)
+def linux_system(monkeypatch):
+    """The client with the Linux module of the platform, on every system: these tests check its command lines
+    (the KWin raise, systemd-run, `env -u`). The client with the macOS module: tests/test_macos.py."""
+    monkeypatch.setattr(client_module, "platform", linux)
 
 
 def done(stdout=b"", returncode=0, stderr=b""):
@@ -411,6 +421,39 @@ def test_a_text_with_a_cancel_runs_as_a_process_that_is_watched():
     assert runner.gets == [([CORE, "get", "t1", "--json"], READ_TIMEOUT)] and not process.killed
 
 
+def test_a_platform_that_gives_an_environment_runs_the_command_as_it_is_in_that_environment(monkeypatch):
+    """A system with no `env` program (macOS, Windows): the platform gives the argv unchanged and an environment
+    without the caller variables. The client gives it to the runner and to the process (with a cancel)."""
+    made_up = {"PATH": "/made/up", "HOME": "/made/up/home"}
+    asked = []
+
+    def clean_environment(argv, names, commands):
+        asked.append((list(argv), tuple(names), commands))
+        return list(argv), dict(made_up)
+
+    monkeypatch.setattr(client_module, "platform", SimpleNamespace(COMMANDS={}, clean_environment=clean_environment))
+    calls = []
+    runner = Runner(done({}))
+
+    def run(argv, timeout=2.0, **options):
+        calls.append((argv, options))
+        return runner(argv, timeout)
+
+    spawned = []
+    process = Process(ends=1)
+    client = HerdrClient(None, CORE, run=run, spawn=lambda argv, **options: spawned.append((argv, options)) or process)
+    client.list_agents()
+    assert client.send_text("t1", "made-up text") is None
+    assert client.send_text("t1", "made-up text", cancel=threading.Event()) is None
+    argv = [CORE, "send", "--force", "--", "t1", "made-up text"]
+    assert asked == [(argv, ("HC_TERMINAL_ID", "HC_SCOPE", "HC_TERMINAL_SOCKET"), {})] * 2
+    assert [call for call in calls if call[0][1] == "send"] == [(argv, {"env": made_up})]
+    assert [call for call in calls if call[0][1] != "send"] == [([CORE, "ls", "--json"], {}),
+                                                                  ([CORE, "get", "t1", "--json"], {}),
+                                                                  ([CORE, "get", "t1", "--json"], {})]
+    assert spawned == [(argv, {"env": made_up})]
+
+
 def test_a_text_whose_cancel_is_set_is_killed_and_ends_after_the_process(records):
     """A held `send` that is killed is not typed (measured). The call returns only when the process has ended."""
     process = Process()
@@ -459,12 +502,13 @@ def test_a_watched_text_that_herdr_refuses_has_the_error_kind():
     assert client.send_text("t1", "text", cancel=threading.Event()) == Failure("herdr_not_found")
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="a POSIX shell script as herdr-core")
 def test_a_real_process_is_killed_and_gone_when_the_call_returns(tmp_path):
     """With a real child process (a shell script in the place of herdr-core, not herdr-core): the cancel kills it,
     and the call returns after it ended."""
     script = tmp_path / "fake-core"
     pid_file = tmp_path / "pid"
-    script.write_text(f"#!/bin/sh\necho $$ > {pid_file}\nexec sleep 30\n")
+    script.write_text(f"#!/bin/sh\necho $$ > {pid_file}\nexec sleep 30\n", encoding="utf-8")
     script.chmod(0o755)
     runner = Runner(done({}))
     client = HerdrClient(None, str(script), run=runner)
@@ -475,7 +519,7 @@ def test_a_real_process_is_killed_and_gone_when_the_call_returns(tmp_path):
     began = time.monotonic()
     assert client.send_text("t1", "text", cancel=cancel) == Failure("cancelled")
     assert time.monotonic() - began < 3.0
-    pid = int(pid_file.read_text())
+    pid = int(pid_file.read_text(encoding="utf-8"))
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)
 
@@ -547,12 +591,13 @@ def test_a_key_command_with_no_listener_runs_on_too():
     process.end(0)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="a POSIX shell script as herdr-core")
 def test_a_real_key_process_lives_past_the_deadline_and_is_reaped(tmp_path, monkeypatch):
     """With a real child process (a shell script in the place of herdr-core): the call returns at the deadline, the
     process runs on, and its end is told."""
     monkeypatch.setattr("bellwether.client.PRESS_TIMEOUT", 0.2)
     script = tmp_path / "fake-core"
-    script.write_text("#!/bin/sh\nsleep 0.8\nexit 0\n")
+    script.write_text("#!/bin/sh\nsleep 0.8\nexit 0\n", encoding="utf-8")
     script.chmod(0o755)
     client = HerdrClient(None, str(script), run=Runner(done({})))
     client._known = frozenset({"t1"})

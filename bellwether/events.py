@@ -7,14 +7,13 @@ a line or a part of one.
 """
 from __future__ import annotations
 
-import ctypes
 import logging
 import os
-import select
-import signal
 import subprocess
 import threading
 import time
+
+from .platform import readable, spawn_child
 
 log = logging.getLogger("bellwether")
 
@@ -31,34 +30,12 @@ GRACE = 2.0
 # The start of a heartbeat line. It is the only text of a line that this module looks at.
 HEARTBEAT = b'{"jsonrpc":"2.0","method":"heartbeat"'
 
-_PR_SET_PDEATHSIG = 1
-# The function is found and its types are set here and not in the child: between fork and exec the child
-# must not load a library or look for a symbol.
-_prctl = ctypes.CDLL(None).prctl
-_prctl.argtypes = [ctypes.c_int, ctypes.c_ulong]
-_prctl.restype = ctypes.c_int
-
-
-def _spawn(argv: list[str]) -> subprocess.Popen:
-    """Start the child. The kernel ends it when this process ends, also when this process is killed."""
-    parent = os.getpid()
-
-    def die_with_parent() -> None:
-        # No child without the signal. And the parent can end before the call: then the child ends here.
-        if _prctl(_PR_SET_PDEATHSIG, signal.SIGTERM) != 0 or os.getppid() != parent:
-            os._exit(1)
-
-    return subprocess.Popen(
-        argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=0,
-        preexec_fn=die_with_parent,
-    )
-
 
 class EventSource:
     """One child process and one thread. `wake` is called for each line of the child, and one time when
     the stream is lost. `healthy()` is true from the first line of a child to the end of that child."""
 
-    def __init__(self, argv: list[str], wake, spawn=_spawn, pause=None, quiet: float = QUIET,
+    def __init__(self, argv: list[str], wake, spawn=spawn_child, pause=None, quiet: float = QUIET,
                  grace: float = GRACE, clock=time.monotonic) -> None:
         self._clock = clock
         self._argv = argv
@@ -147,7 +124,7 @@ class EventSource:
             return not announce and connected and self._clock() - began >= MIN_LIFE
 
         while not self._stop.is_set():
-            ready, _, _ = select.select([descriptor, self._stop_pipe[0]], [], [], self._quiet)
+            ready = readable([descriptor, self._stop_pipe[0]], self._quiet)
             # Here and not only at a line: the stream can end, or be silent, before its next line.
             if lived():
                 announce = True

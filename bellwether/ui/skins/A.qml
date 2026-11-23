@@ -1,6 +1,6 @@
 // Layout A, "Refined list": a list of the four statuses with an accent bar and a count badge; the agents of the
 // open status show under its row. The visual reference is design/layouts/a-refined-list.qml. A skin is only
-// drawing: the state and the rules are in PanelModel.qml, the pointer handling is in Main.qml.
+// drawing: the state and the rules are in PanelModel.qml, the pointer handling is in PanelShell.qml.
 import QtQuick
 import ".."
 

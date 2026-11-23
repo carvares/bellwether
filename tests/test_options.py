@@ -14,8 +14,7 @@ from PySide6.QtTest import QTest
 from bellwether.backend import Backend
 from bellwether import layouts
 from bellwether.layouts import built_skins
-from bellwether.options import Options
-from tests.conftest import FakeClient
+from tests.conftest import FakeClient, wide_options
 
 # Layout C of the program, and the test skin in the place of design B: a second layout that can be chosen.
 # A, D and E have no skin here: the window must show a design that is not built as "coming next".
@@ -49,7 +48,7 @@ def opened(app, fake_client, tmp_path):
     engine.warnings.connect(lambda errors: messages.extend(e.toString() for e in errors))
     engine.rootContext().setContextProperty("backend", backend)
     try:
-        yield Options(engine), engine, backend, messages
+        yield wide_options(engine), engine, backend, messages
     finally:
         # The engine goes before the backend that its bindings read. Not `del`: the options object of the test
         # holds the engine too.
@@ -102,6 +101,18 @@ def test_the_window_opens_one_time_and_a_second_open_shows_the_same_window(app, 
     assert messages == []
 
 
+def test_the_system_prepares_the_window_one_time_when_it_is_made(app, opened, monkeypatch):
+    from bellwether import platform
+    calls = []
+    monkeypatch.setattr(platform, "prepare_window", lambda window, role: calls.append((window, role)))
+    options, engine, backend, messages = opened
+    options.open()
+    settle(app)
+    options.open()
+    settle(app)
+    assert calls == [(engine.rootObjects()[0], "options")]
+
+
 def test_the_window_lists_the_five_designs_and_marks_the_selected_and_the_ones_to_come(app, opened):
     options, engine, backend, messages = opened
     options.open()
@@ -133,7 +144,7 @@ def test_a_click_on_a_built_card_applies_and_saves_the_layout_and_a_card_to_come
     click(app, window, e)
     assert told == [] and backend.layout == "C" and not (tmp_path / "state.json").exists()
     click(app, window, b)
-    assert told == ["B"] and json.loads((tmp_path / "state.json").read_text()) == {"layout": "B"}
+    assert told == ["B"] and json.loads((tmp_path / "state.json").read_text(encoding="utf-8")) == {"layout": "B"}
     assert spoken(b) == "Layout B, Tiles, selected" and spoken(c) == "Layout C, Techno / HUD"
     assert tags(window) == ["COMING NEXT", "SELECTED", "COMING NEXT", "COMING NEXT"]
     click(app, window, b)  # the selected card again: nothing to do
@@ -186,7 +197,7 @@ def test_an_options_file_that_does_not_load_gives_one_log_line_and_no_window(app
     engine = QQmlApplicationEngine()
     previous = qInstallMessageHandler(lambda mode, context, text: None)
     try:
-        options = Options(engine, tmp_path / "not-there.qml")
+        options = wide_options(engine, tmp_path / "not-there.qml")
         options.open()
         options.open()
     finally:
@@ -224,7 +235,7 @@ def test_every_skin_has_a_theme_file_with_all_the_tokens(app, letter):
     assert missing_tokens(theme) == []
     assert theme.property("panelColor").alpha() > 200 and theme.property("fontFamily")
     assert theme.property("frameWidth") >= 1 and 9 <= theme.property("smallSize") <= theme.property("titleSize") <= 16
-    assert f"{letter}Theme {{" in skin.read_text()  # the skin uses its own tokens
+    assert f"{letter}Theme {{" in skin.read_text(encoding="utf-8")  # the skin uses its own tokens
 
 
 @pytest.mark.parametrize("letter", LETTERS)
@@ -250,12 +261,12 @@ def test_the_default_colours_of_the_backend_are_the_colours_of_the_loaded_theme(
 def test_a_theme_colour_that_cannot_be_read_from_the_file_is_an_error_and_never_the_colour_of_layout_c(
         app, fake_client, tmp_path, caplog, token, line):
     theme_b = layouts.theme_file(built_skins()["B"])
-    lines = [line if f"property color {token}:" in old else old for old in theme_b.read_text().splitlines()]
-    (tmp_path / "BTheme.qml").write_text("\n".join(l for l in lines if l is not None))
+    lines = [line if f"property color {token}:" in old else old for old in theme_b.read_text(encoding="utf-8").splitlines()]
+    (tmp_path / "BTheme.qml").write_text("\n".join(l for l in lines if l is not None), encoding="utf-8")
     with pytest.raises(layouts.ThemeColorError, match=token):
         layouts.theme_colors(tmp_path / "BTheme.qml")
     # The backend still gives the options window a colour for each role, and the log has the error one time.
-    (tmp_path / "B.qml").write_text("import QtQuick\nItem {}")
+    (tmp_path / "B.qml").write_text("import QtQuick\nItem {}", encoding="utf-8")
     backend = Backend(fake_client, settings_path=tmp_path / "state.json",
                       skins={"C": built_skins()["C"], "B": tmp_path / "B.qml"})
     backend.setLayout("B")
@@ -266,11 +277,11 @@ def test_a_theme_colour_that_cannot_be_read_from_the_file_is_an_error_and_never_
 
 def test_a_theme_file_that_forgets_a_token_is_found(app, tmp_path):
     theme_a = layouts.theme_file(layouts.built_skins()["A"])
-    text = theme_a.read_text()
+    text = theme_a.read_text(encoding="utf-8")
     lines = [line for line in text.splitlines() if "hoverColor" not in line and "readonly property int radius" not in line]
-    (tmp_path / "ZTheme.qml").write_text("\n".join(lines))
+    (tmp_path / "ZTheme.qml").write_text("\n".join(lines), encoding="utf-8")
     for helper in ("fonts.js", "ThemeBase.qml"):  # what every theme file uses
-        (tmp_path / helper).write_text((theme_a.parent / helper).read_text())
+        (tmp_path / helper).write_text((theme_a.parent / helper).read_text(encoding="utf-8"), encoding="utf-8")
     theme, engine, errors = load_theme(tmp_path / "ZTheme.qml")
     assert errors == [] and missing_tokens(theme) == ["radius", "hoverColor"]
 
@@ -297,7 +308,7 @@ def real_options(app, fake_client, tmp_path):
     engine.warnings.connect(lambda errors: messages.extend(e.toString() for e in errors))
     engine.rootContext().setContextProperty("backend", backend)
     try:
-        options = Options(engine)
+        options = wide_options(engine)
         options.open()
         settle(app)
         yield engine.rootObjects()[0], backend, messages
@@ -375,7 +386,7 @@ def test_a_click_on_a_card_changes_the_style_and_the_cards_stay_where_they_are(a
     for letter in "ABDEC":
         card = next(c for c in cards(window) if c.property("layoutId") == letter)
         click(app, window, card)
-        assert backend.layout == letter and json.loads((tmp_path / "state.json").read_text()) == {"layout": letter}
+        assert backend.layout == letter and json.loads((tmp_path / "state.json").read_text(encoding="utf-8")) == {"layout": letter}
         assert place() == first and window.size() == size and window.position() == origin and window.isVisible()
         assert card.property("selected") and card.property("activeFocus")
         looks[letter] = look(window)

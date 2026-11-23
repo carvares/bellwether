@@ -64,6 +64,7 @@ class Backend(QObject):
     promptChanged = Signal()
     # The "Answer" control of a row was used and a prompt is open: the answer window shows (bellwether/answer.py).
     answerRequested = Signal()
+    opaqueDialogsChanged = Signal()
     # The setting "Show model and session time" is different.
     showMetaChanged = Signal()
     _snapshot = Signal(object)
@@ -158,6 +159,20 @@ class Backend(QObject):
             self._age_timer.start()
 
     # ----- properties for QML -----
+
+    def _get_opaque_dialogs(self) -> bool:
+        return getattr(self, "_opaque_dialogs", False)
+
+    def _set_opaque_dialogs(self, value: bool) -> None:
+        if bool(value) != self._get_opaque_dialogs():
+            self._opaque_dialogs = bool(value)
+            self.opaqueDialogsChanged.emit()
+
+    # True: the answer and the options window draw their body with no transparency (the plain shell: Windows, macOS,
+    # X11, where an other app's window can be behind them and its text would show through). False (the layer shell of
+    # KDE): the body has the opacity of the panel colour, as the person chose it. The panel keeps that opacity always.
+    # The program sets it from the shell (`__main__.start_panel`).
+    opaqueDialogs = Property(bool, _get_opaque_dialogs, _set_opaque_dialogs, notify=opaqueDialogsChanged)
 
     @Property(bool, notify=changed)
     def online(self) -> bool:

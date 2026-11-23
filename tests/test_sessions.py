@@ -13,8 +13,10 @@ import pytest
 
 from bellwether import sessions
 from bellwether.client import Failure, Terminal
+from bellwether.platform import linux
+from bellwether.platform.linux import Host
 from bellwether.sessions import (
-    BLOCK, SCAN_LIMIT, Host, SessionFacts, SessionWatch, age_text, age_words, read_claude, read_codex, short_model)
+    BLOCK, SCAN_LIMIT, SessionFacts, SessionWatch, age_text, age_words, read_claude, read_codex, short_model)
 from bellwether.state import Agent
 
 MARKER = "MARKER-private-session-text"
@@ -111,8 +113,8 @@ class Machine:
     def process(self, pid, ticks=5000, children=(), files=()):
         folder = self.proc / str(pid)
         (folder / "task" / str(pid)).mkdir(parents=True, exist_ok=True)
-        (folder / "stat").write_text(f"{pid} (made up) name) S " + " ".join(["0"] * 18) + f" {ticks} 0 0\n")
-        (folder / "task" / str(pid) / "children").write_text(" ".join(map(str, children)))
+        (folder / "stat").write_text(f"{pid} (made up) name) S " + " ".join(["0"] * 18) + f" {ticks} 0 0\n", encoding="utf-8")
+        (folder / "task" / str(pid) / "children").write_text(" ".join(map(str, children)), encoding="utf-8")
         (folder / "fd").mkdir(exist_ok=True)
         for number, target in enumerate(files):
             os.symlink(target, folder / "fd" / str(number))
@@ -124,7 +126,7 @@ class Machine:
         sessions_folder.mkdir(parents=True, exist_ok=True)
         (sessions_folder / f"{pid}.json").write_text(json.dumps(
             {"pid": pid, "sessionId": session, "cwd": folder, "startedAt": started, "procStart": str(ticks),
-             "name": MARKER, **more}))
+             "name": MARKER, **more}), encoding="utf-8")
         if records is None:
             return None
         return self.transcript(records, session, folder)
@@ -208,7 +210,7 @@ def test_the_child_processes_are_read_only_when_the_first_process_is_not_the_age
 def test_the_family_of_a_process_has_a_limit(machine):
     for pid in range(1, 80):
         machine.process(pid, children=[pid + 1])
-    assert list(machine.host.family(1)) == list(range(1, sessions.MAX_PROCESSES + 1))
+    assert list(machine.host.family(1)) == list(range(1, linux.MAX_PROCESSES + 1))
     machine.process(200, children=[200, 201])  # a process that names itself
     machine.process(201, children=[200])
     assert list(machine.host.family(200, 0, -4)) == [200, 201]
@@ -227,7 +229,7 @@ def test_a_session_file_of_an_older_process_with_the_same_pid_is_not_used(machin
 def test_a_session_file_that_names_an_other_pid_is_not_used(machine):
     machine.claude(700, assistant("claude-opus-5-5"))
     file = machine.home / ".claude" / "sessions" / "700.json"
-    file.write_text(file.read_text().replace('"pid": 700', '"pid": 701'))
+    file.write_text(file.read_text(encoding="utf-8").replace('"pid": 700', '"pid": 701'), encoding="utf-8")
     assert read_claude(machine.host, [700]).reason == "other_process"
 
 
@@ -757,7 +759,7 @@ def test_nothing_of_a_session_file_is_in_a_log_an_error_a_text_form_or_a_file(ma
     rollout = machine.rollout(meta() + turn("gpt-5.2-codex") + user())
     machine.process(900, files=[str(rollout)])
     machine.claude(702, None)
-    (machine.home / ".claude" / "sessions" / "702.json").write_text(MARKER)
+    (machine.home / ".claude" / "sessions" / "702.json").write_text(MARKER, encoding="utf-8")
     client = Terminals(t1=Terminal(700, 700, CREATED), t2=Terminal(900, 900, CREATED), t3=Terminal(701, 701, CREATED),
                        t4=Terminal(702, 702, CREATED))
     clock = Clock()
@@ -869,7 +871,7 @@ def thread_meta(source="user"):
 
 def config(machine, text):
     (machine.home / ".codex").mkdir(exist_ok=True)
-    (machine.home / ".codex" / "config.toml").write_text(text)
+    (machine.home / ".codex" / "config.toml").write_text(text, encoding="utf-8")
 
 
 def arguments(machine, pid, *words):

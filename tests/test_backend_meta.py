@@ -8,7 +8,8 @@ import pytest
 
 from bellwether.backend import Backend
 from bellwether.client import Failure, Terminal
-from bellwether.sessions import Host, SessionFacts, SessionWatch
+from bellwether.platform.linux import Host
+from bellwether.sessions import SessionFacts, SessionWatch
 from bellwether.state import Agent
 from tests.test_backend import wait_for
 
@@ -40,7 +41,7 @@ class Desk:
     def __init__(self, tmp_path, show=NO_FILE, **more):
         self.path = tmp_path / "state.json"
         if show is not NO_FILE:
-            self.path.write_text(json.dumps({"x": 5, "showMeta": show}))
+            self.path.write_text(json.dumps({"x": 5, "showMeta": show}), encoding="utf-8")
         self.client = Client()
         self.mono = 100.0
         self.now = NOW
@@ -222,7 +223,7 @@ def test_with_the_setting_off_nothing_is_read_and_no_row_has_a_line(app, desk):
 
 def test_the_setting_goes_off_and_on_and_is_saved_with_the_other_keys(app, desk):
     d = desk()
-    d.path.write_text(json.dumps({"x": 5, "layout": "B", "later": [1]}))
+    d.path.write_text(json.dumps({"x": 5, "layout": "B", "later": [1]}), encoding="utf-8")
     assert d.backend.showMeta is True
     d.backend.apply(list(AGENTS))
     d.backend.read_meta()
@@ -232,7 +233,7 @@ def test_the_setting_goes_off_and_on_and_is_saved_with_the_other_keys(app, desk)
     del d.emitted[:], d.client.calls[:]
     d.backend.setShowMeta(False)
     assert told == [False] and d.emitted == [1] and d.meta() == {"t1": "", "t2": "", "t3": ""}
-    assert json.loads(d.path.read_text()) == {"x": 5, "layout": "B", "later": [1], "showMeta": False}
+    assert json.loads(d.path.read_text(encoding="utf-8")) == {"x": 5, "layout": "B", "later": [1], "showMeta": False}
     assert d.watch.facts() == {} and not d.backend._age_timer.isActive()
     d.mono += 60
     reads = list(d.reads)
@@ -244,7 +245,7 @@ def test_the_setting_goes_off_and_on_and_is_saved_with_the_other_keys(app, desk)
     d.backend._meta_wake.clear()
     d.backend.setShowMeta(True)
     assert told == [False, True] and d.backend._meta_wake.is_set() and d.backend._age_timer.isActive()
-    assert json.loads(d.path.read_text()) == {"x": 5, "layout": "B", "later": [1]}  # the default has no key
+    assert json.loads(d.path.read_text(encoding="utf-8")) == {"x": 5, "layout": "B", "later": [1]}  # the default has no key
     d.backend.read_meta()  # at once, not 30 seconds later
     app.processEvents()
     assert d.client.calls == ["t1", "t2", "t3"] and d.meta()["t1"] == "Opus 5.5 · 2h 14m"
@@ -280,7 +281,7 @@ def test_a_saved_value_of_an_other_type_is_ignored_with_one_log_line(app, desk, 
     assert d.backend.showMeta is True
     assert [r.getMessage() for r in caplog.records] == [
         "the saved value of showMeta cannot be used: the model and session-time line shows"]
-    assert json.loads(d.path.read_text()) == {"x": 5, "showMeta": value}  # the file stays as it is
+    assert json.loads(d.path.read_text(encoding="utf-8")) == {"x": 5, "showMeta": value}  # the file stays as it is
 
 
 def test_a_save_that_fails_is_one_log_line_and_the_setting_still_applies(app, desk, caplog, monkeypatch):

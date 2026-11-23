@@ -1,4 +1,4 @@
-"""The "Answer" control of a blocked agent row, in every layout: the real Main.qml, the real backend, a fake client
+"""The "Answer" control of a blocked agent row, in every layout: the real panel (the layer shell), the real backend, a fake client
 and real pointer events. A click on it opens the prompt of that agent and asks for the answer window; the rest of
 the row still jumps. Screens are the made-up fixtures of the readers."""
 import threading
@@ -12,17 +12,20 @@ from PySide6.QtCore import qInstallMessageHandler
 from PySide6.QtTest import QTest
 
 from bellwether import layouts
-from bellwether.__main__ import IMPORT_PATH, UI_PATH
+from bellwether.__main__ import UI_PATH
+from bellwether.platform.linux import IMPORT_PATH
 from bellwether.answer import Answer
 from bellwether.backend import Backend
 from bellwether.icons import Icons
 from bellwether.state import Agent
 from tests.audit import text_findings
 from tests.test_backend_prompt import ScreenClient, wait_for
-from tests.test_qml import LAYERSHELL_QMLDIR, OFFSCREEN_NOTE, click, rows, settle, use_screens, visible_texts, walk
+from tests.conftest import needs_layershell
+from tests.test_qml import (
+    OFFSCREEN_NOTE, SHELLS, both_shells, click, release, rows, settle, use_screens, visible_texts, walk)
 from tests.test_skins import spoken, wait_jump
 
-pytestmark = pytest.mark.skipif(not LAYERSHELL_QMLDIR.is_file(), reason="org.kde.layershell is not installed")
+# Without the system module of the layer shell only its cases are skipped (tests/conftest.py, `shell`).
 
 LETTERS = [letter for letter, _, _ in layouts.LAYOUTS]
 LEFT, NONE = Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier
@@ -37,9 +40,9 @@ AGENTS = [
 
 
 class Panel:
-    """The panel (Main.qml) with a real backend and a client of made-up screens."""
+    """The panel (in the layer shell, or the shell named) with a real backend and a client of made-up screens."""
 
-    def __init__(self, app, tmp_path, agents=AGENTS, **more):
+    def __init__(self, app, tmp_path, agents=AGENTS, shell="layer", **more):
         self.app = app
         self.client = ScreenClient()
         self.backend = Backend(self.client, settings_path=tmp_path / "state.json",
@@ -53,7 +56,7 @@ class Panel:
         self.engine.warnings.connect(lambda errors: self.messages.extend(e.toString() for e in errors))
         self.engine.rootContext().setContextProperty("backend", self.backend)
         self.engine.addImportPath(str(IMPORT_PATH))
-        self.engine.load(UI_PATH / "Main.qml")
+        self.engine.load(SHELLS[shell])
         assert self.engine.rootObjects(), self.messages
         self.root: QQuickWindow = self.engine.rootObjects()[0]
         self.opener = Answer(self.engine, self.backend)  # as the program does it: the answer window
@@ -97,9 +100,9 @@ class Panel:
 
 
 @pytest.fixture(params=[(letter, scale) for scale in (1.0, 1.5) for letter in LETTERS], ids=lambda p: f"{p[0]}-{p[1]}")
-def panel(request, app, tmp_path):
+def panel(request, app, tmp_path, shell):
     letter, scale = request.param
-    made = Panel(app, tmp_path)
+    made = Panel(app, tmp_path, shell=shell)
     made.backend.setLayout(letter)
     assert made.backend.setScale(scale) is True
     settle(app)
@@ -124,6 +127,7 @@ def test_only_the_rows_of_blocked_agents_with_a_terminal_have_the_control(app, p
         assert panel.controls() == [] and len(rows(panel.root, "agent")) == 1
 
 
+@both_shells
 def test_a_click_on_the_control_opens_the_prompt_of_that_agent_and_does_not_jump(app, panel):
     panel.open_group("blocked")
     click(app, panel.root, panel.control("t1"))
@@ -142,6 +146,7 @@ def test_a_click_on_the_control_opens_the_prompt_of_that_agent_and_does_not_jump
     assert panel.client.focused == [] and panel.client.pressed == []
 
 
+@both_shells
 def test_a_click_on_the_rest_of_the_row_jumps_and_does_not_open(app, panel):
     panel.open_group("blocked")
     row, control = panel.row("t1"), panel.control("t1")
@@ -157,6 +162,7 @@ def test_a_click_on_the_rest_of_the_row_jumps_and_does_not_open(app, panel):
     assert panel.client.focused[-1] == "box-pane" and panel.asked == []
 
 
+@both_shells
 def test_a_drag_from_the_control_moves_the_panel_and_does_nothing_else(app, panel):
     panel.open_group("blocked")
     root = panel.root
@@ -164,10 +170,11 @@ def test_a_drag_from_the_control_moves_the_panel_and_does_nothing_else(app, pane
     start = centre(panel.control("t1"))
     QTest.mousePress(root, LEFT, NONE, start)
     settle(app)
-    for step in (QPoint(-10, 5), QPoint(-20, 12)):
+    for step in (QPoint(-10, 5), QPoint(-20, 12)):  # the steps add up (tests/test_qml.py, drag_by)
+        at = root.position()
         QTest.mouseMove(root, start + step)
         settle(app)
-    QTest.mouseRelease(root, LEFT, NONE, start + QPoint(-20, 12))
+    release(root, start + QPoint(-20, 12), at)
     settle(app)
     assert (root.property("posX"), root.property("posY")) == (before[0] - 30, before[1] + 17)
     assert panel.asked == [] and panel.state() == "closed" and panel.client.focused == []
@@ -231,6 +238,7 @@ def test_the_control_has_the_accent_of_the_custom_look(app, panel):
     assert QColor(word.property("color")).name() in ("#202124", "#f1f3f4")  # the ink that can be read on the plate
 
 
+@needs_layershell
 @pytest.mark.parametrize("letter", LETTERS)
 def test_at_large_text_the_label_of_a_blocked_row_has_room_before_its_workspace(app, tmp_path, letter):
     """Text size 140 %: the label of the agent shows in full, and the workspace text at its right gives way first

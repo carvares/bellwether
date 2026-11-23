@@ -1,0 +1,15 @@
+#!/bin/sh
+# A made-up herdr-app for the CI runners: `ls` gives made-up agents, `do` answers null. Nothing else works.
+case "$1" in
+  ls)
+    cat <<'JSON'
+{"spaces": [{"id": "sp1", "name": "Main", "tabs": [{"id": "tb1", "name": "1", "terminals": [
+ {"terminal": "t1", "pane": "p1", "status": "blocked", "app": "claude-code", "name": "made-up reviewer", "sub_agents": []},
+ {"terminal": "t2", "pane": "p2", "status": "working", "app": "codex", "name": "made-up builder", "sub_agents": []},
+ {"terminal": "t3", "pane": "p3", "status": "done", "app": "opencode", "name": null, "sub_agents": []},
+ {"terminal": "t4", "pane": "p4", "status": "idle", "app": "gemini", "name": "made-up planner", "sub_agents": []}]}]}]}
+JSON
+    ;;
+  do) echo null ;;
+  *) echo '{"error": "made-up herdr-app: not here"}' >&2; exit 1 ;;
+esac

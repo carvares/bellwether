@@ -1,35 +1,15 @@
-"""The folders of the widget (XDG base folders with the standard defaults), and the move of the folders of its old
-name: the widget was called herdr-float before 2026-11-18."""
+"""The folders of the widget (the platform gives the base folders of this system), and the move of the folders of
+its old name: the widget was called herdr-float before 2026-11-18."""
 from __future__ import annotations
 
 import logging
-import os
-from pathlib import Path
+
+from .platform import cache_home, config_home, runtime_dir, state_home
 
 NAME = "bellwether"
 OLD_NAME = "herdr-float"  # Only for the move of the old folders and for the lock of an old widget that still runs.
 
-
-def _base(variable: str, default: str) -> Path:
-    """The folder in the variable. An empty or relative value is not valid: then the default in the home folder."""
-    value = os.environ.get(variable, "")
-    return Path(value) if os.path.isabs(value) else Path.home() / default
-
-
-def config_home() -> Path:
-    return _base("XDG_CONFIG_HOME", ".config")
-
-
-def state_home() -> Path:
-    return _base("XDG_STATE_HOME", ".local/state")
-
-
-def cache_home() -> Path:
-    return _base("XDG_CACHE_HOME", ".cache")
-
-
-def runtime_dir() -> Path:
-    return Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp")
+__all__ = ["NAME", "OLD_NAME", "cache_home", "config_home", "move_old_folders", "runtime_dir", "state_home"]
 
 
 def move_old_folders() -> list[tuple[int, str]]:

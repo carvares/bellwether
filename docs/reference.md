@@ -2,7 +2,7 @@
 
 The full description of how Bellwether works: each rule of the panel, the answer window, the options, the files and the known limits. The [README](../README.md) is the short version with pictures.
 
-Contents: [Use](#use) · [The model and session-time line](#the-model-and-session-time-line) · [Options](#options) · [Custom look](#custom-look) · [When the Herdr app window is closed](#when-the-herdr-app-window-is-closed) · [How the widget opens the app window](#how-the-widget-opens-the-app-window) · [How the data stays fresh](#how-the-data-stays-fresh) · [Answer a blocked agent](#answer-a-blocked-agent) · [Files](#files) · [Limits](#limits) · [The Qt version rule](#the-qt-version-rule) · [Start with the Herdr app: the details](#start-with-the-herdr-app-the-details)
+Contents: [Use](#use) · [The model and session-time line](#the-model-and-session-time-line) · [Options](#options) · [Custom look](#custom-look) · [When the Herdr app window is closed](#when-the-herdr-app-window-is-closed) · [How the widget opens the app window](#how-the-widget-opens-the-app-window) · [How the data stays fresh](#how-the-data-stays-fresh) · [Answer a blocked agent](#answer-a-blocked-agent) · [Files](#files) · [Limits](#limits) · [The window shell](#the-window-shell) · [Other systems](#other-systems) · [The Qt version rule](#the-qt-version-rule) · [Start with the Herdr app: the details](#start-with-the-herdr-app-the-details)
 
 ## Use
 
@@ -161,6 +161,8 @@ An open row closes when the widget goes offline.
 
 ### How the widget opens the app window
 
+This section is for Linux. For macOS and Windows, see [Other systems](#other-systems).
+
 - The widget asks KWin (the window manager of Plasma) to restore and activate the window. It uses the program `busctl` for this.
 - If KWin does not do it (for example, `busctl` is not installed), the widget runs plain `herdr-app`. The app then raises its own window. On this machine that worked with the default focus rules of KWin.
 - The widget starts a closed app, and runs plain `herdr-app`, with `systemd-run --user`, as the desktop does. The app does not stop when the widget stops.
@@ -230,6 +232,8 @@ Limits:
 
 The widget uses `$XDG_CONFIG_HOME`, `$XDG_STATE_HOME` and `$XDG_CACHE_HOME` in place of `~/.config`, `~/.local/state` and `~/.cache` when you set them.
 
+These are the folders of Linux. The folders of macOS and Windows are in [Other systems](#other-systems).
+
 The widget had the name herdr-float before 2026-11-18. At its first start with the new name, it moves each folder `herdr-float` in these three places to the new name `bellwether`, with all files in it. It does not move a folder when a `bellwether` folder is already there. If a move fails, the widget starts with its default position and writes one line about it in the log. The widget does not try that move again at a later start. You can move the old folder by hand while the widget does not run. The three old folders are `~/.config/herdr-float`, `~/.local/state/herdr-float` and `~/.cache/herdr-float`; each gets the name `bellwether` in the same place (if a `bellwether` folder is there already, move the files of the old folder into it). The old log files stay in the moved folder with their old names. While a widget of the old name runs, a new widget does not start.
 
 ## Limits
@@ -242,9 +246,10 @@ The widget had the name herdr-float before 2026-11-18. At its first start with t
 - The panel redraws at most one time for each frame of your screen, and only when something changes. A drag moves the panel at most one time in two frames of the screen that the panel is on (240 Hz: each 8.3 ms, 144 Hz: each 13.9 ms, 60 Hz: each 20 ms). The second frame gives the compositor time to apply the last move before the next one is calculated.
 - The drag across monitors works because KWin shows a layer surface also on the neighbour monitor. A different compositor can cut the panel at the edge of its monitor during the drag. The tray entry "Move to next screen" always works.
 - A drag across monitors: the panel goes only across an edge that two monitors share. Where a monitor has no neighbour (for example above a smaller monitor that starts lower), the panel stops at the edge. During the drag the panel can be on two monitors. At the release it goes fully to the monitor that holds its middle, and it can blink one time when it changes its monitor: the compositor needs a new surface for a different monitor.
+- On Wayland with two monitors, the options window can show for a moment the layout for the width of the first monitor: Qt knows the monitor of a window only after the compositor shows it, and the window then takes the width of its own monitor.
 - If the monitor of the panel is disconnected while the widget runs, the panel shows on a monitor that stays. This was tested with made-up screens only, not with a real cable. The saved monitor does not change, so after a later start with that monitor the panel is there again.
 - A person has not yet dragged the panel to a different monitor with a real mouse. The checks used the same functions without a pointer, and the protocol trace of the compositor.
-- The widget works on KDE Plasma on Wayland only.
+- The widget is made for KDE Plasma on Wayland (the layer shell, below). On other desktops it uses the plain shell, with the limits named there. macOS and Windows always use the plain shell (see "Other systems").
 - The jump was tested on 2026-11-18 on this machine (one virtual desktop): window behind a different window, window minimized, app closed. A window on a different virtual desktop was not tested.
 - The jump needs `systemd-run` (a part of systemd). Without it the widget cannot start a closed app and has no second method to raise the window. `busctl` and KWin are the first method to raise the window; the jump also works without them (see "How the widget opens the app window").
 - Known, not fixed: a failed agent in a group with more than 8 agents is not scrolled into view, so its message can be out of sight.
@@ -259,12 +264,113 @@ The widget had the name herdr-float before 2026-11-18. At its first start with t
 - A person has not yet looked at the layouts A, B, D and E, and at the options window in its new look, on the screen. The checks compared pictures of the real panel with the approved design pictures, and used synthesized keys and clicks and the protocol trace of the compositor.
 - When an open row makes the panel longer than the space below it, the panel moves up. It does not move back down when the row closes.
 
+## The window shell
+
+On KDE Plasma on Wayland the panel is a layer surface (the layer shell): it stays above all windows, it never takes the keyboard, and the widget places it. The widget uses it when the Qt platform is Wayland, the QML module `org.kde.layershell` loads, and the compositor has the layer-shell protocol (`zwlr_layer_shell_v1`). Else it uses the plain shell: a frameless tool window that asks to stay on top and not to take the focus. On X11 the window manager gives that; on a Wayland desktop with no layer shell it is a normal window that the compositor places (it can be under other windows and take the focus at its start; a drag asks the compositor to move it, and its place is not saved). On X11 a window manager can keep the window inside its work area: then the widget asks for its place one more time and leaves it where the window manager put it. The first lines of the log say `shell: layer` or `shell: plain`. The environment variable `BELLWETHER_SHELL=layer` or `BELLWETHER_SHELL=plain` chooses the shell; another value is ignored with one line in the log. Without a Wayland compositor the widget starts on X11 (`QT_QPA_PLATFORM` is `wayland;xcb` unless you set it).
+
+## Other systems
+
+The widget runs on Linux, macOS and Windows from the same code. The [README](../README.md#will-it-run-on-my-machine) says how well each system is tested. Nobody has run the widget on a real Mac or a real Windows PC: GitHub CI machines ran it there (see "The CI workflow" below). The design of the port, with each decision and its source, is in `docs/superpowers/specs/2026-11-20-bellwether-cross-platform-design.md`.
+
+### The platform package
+
+- `bellwether/platform/` has all the code that is different for each system. No other module tests the system or imports a system library; a test checks this.
+- At the start, `platform/__init__.py` picks one module by `sys.platform`: `linux.py`, `macos.py` or `windows.py`. On a different system the widget stops with a clear message.
+- Each module gives the same members: the folders, the single-instance lock, the raise and the start of the Herdr app, the environment of a command, the event child, the process host, the icon of the Herdr app, the window shell, and the set-up of Qt and of each window.
+- `tests/test_platform.py` has the table of these members. Each module must give all of them, with the same parameters.
+- Shared parts: `posix.py` (the lock and the wait for a pipe, Linux and macOS), `host.py` (the process host on psutil, macOS and Windows), `guard.py` (the watcher of the event child, macOS) and `mainthread.py` (a call on the main thread of Qt).
+
+### The two window shells
+
+- The layer shell (`ui/shells/Layer.qml`): a layer surface. Only Linux has it (see "The window shell").
+- The plain shell (`ui/shells/Plain.qml`): a frameless tool window that asks to stay above the other windows and not to take the focus.
+- Both shells use the same panel (`ui/PanelShell.qml`): the place, the drag, the layout and the hit test.
+- The rule: macOS and Windows always use the plain shell. Linux uses the layer shell when Qt runs on Wayland, the QML module `org.kde.layershell` loads, and the compositor has `zwlr_layer_shell_v1`. Else Linux uses the plain shell.
+- `BELLWETHER_SHELL=layer` or `BELLWETHER_SHELL=plain` chooses the shell on Linux. On macOS and Windows, `layer` gives one line in the log, and the plain shell stays. The log says `shell: layer` or `shell: plain` at each start.
+
+### The folders
+
+| What | Linux | macOS | Windows |
+|---|---|---|---|
+| Settings (`state.json`) | `~/.config/bellwether/` | `~/Library/Application Support/bellwether/` | `%APPDATA%\bellwether\` |
+| Log and start log | `~/.local/state/bellwether/` | `~/Library/Logs/bellwether/` | `%LOCALAPPDATA%\bellwether\Logs\bellwether\` |
+| Icon copies | `~/.cache/bellwether/icons/` | `~/Library/Caches/bellwether/icons/` | `%LOCALAPPDATA%\bellwether\Cache\bellwether\icons\` |
+| Lock files | `$XDG_RUNTIME_DIR`, else `/tmp` | `~/Library/Caches/` | `%LOCALAPPDATA%\bellwether\` |
+
+- macOS keeps the lock files in `~/Library/Caches`, not in `$TMPDIR`: a start by the Herdr app and a start from a terminal can have a different `$TMPDIR`.
+- Windows: when `%APPDATA%` or `%LOCALAPPDATA%` is empty or not a full path, the widget uses the default folder under your home folder.
+- The settings file and the log are UTF-8 on every system.
+
+### What is different on each system
+
+All systems:
+
+- With the plain shell (macOS, Windows, X11, Wayland without the layer shell), the answer window and the options window have an opaque body. So the text of a window behind them cannot show through them. The panel keeps the opacity that you chose. With the layer shell, the two windows have the opacity of the panel, as before.
+- The plain shell keeps the panel out of the part of each screen that the system keeps: the macOS menu bar and Dock, the Windows taskbar, the panels of X11. The default corner, the clamp to the screen and the rows that fit use the rest.
+- The options window fits a narrow screen, on every system. Before each show it takes the width of the free part of its screen less 32 px (at least 320 px). The five cards go into rows (4 + 1 at a free width of 1024 px, 3 + 2 at 800, 2 + 2 + 1 at 640). "Size" and "Text" go one below the other when they do not have room side by side. The two colour groups go one below the other below 1076 px. The colour editor has a narrow form. Tab still goes in the order on the screen. At a free width of 1108 px or more, the window is as before.
+- After each show, the options window and the answer window move inside the free part of their screen when the system put them partly outside it (Windows puts a new window at a default place).
+- With two monitors of different scales (macOS, Windows), a drag keeps the point that you pressed under the pointer, so the panel crosses to the other monitor. This is tested off screen only.
+
+macOS:
+
+- Bellwether is an accessory app: it has no Dock icon. Its tray icon is in the menu bar.
+- The panel is a non-activating `NSPanel` at the status level (above the menu bar), set to show on every Space and beside an app in full screen. It cannot become the key window, so a click on it does not take the keyboard. These calls need pyobjc. Without pyobjc, the widget has a Dock icon and the panel is a plain window above the others on the current Space only; the log says so.
+- When the options window or the answer window opens, the widget asks macOS to make it the active app and makes the window the key window. When the app is still not active 300 ms later, it asks one more time in an older way, but only when the same app is still in front and the window still shows. macOS 14 and later can refuse this when you did not just act in the widget.
+- The raise of the Herdr window: activate the running Herdr app (`dev.herdr.app`), then `open -b dev.herdr.app`. The start of a closed app: `open -a` with the `Herdr.app` of `herdr-app`, else `open -b dev.herdr.app`.
+- The programs: `PATH`, then `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/share/mise/shims`, `/run/current-system/sw/bin`, `~/.nix-profile/bin`, `~/.cargo/bin`. For `herdr-app` also `Herdr.app` in `~/Applications` and `/Applications`.
+- The event child runs under a watcher (`python -m bellwether.platform.guard`). The watcher ends the child when the widget ends, also after a kill of the widget.
+- The tray icon: the `.icns` file of the Herdr app bundle, else the circle.
+- The model of Claude Code: the start of a process in the form of `LC_ALL=C TZ=UTC ps -o lstart=`, the form that Claude Code writes on macOS. A session file counts only when its `procStart` is exactly that text. Any other form gives no model.
+
+Windows:
+
+- The panel is a tool window (no taskbar button), topmost, with no activation. Qt gives these styles. The widget adds a style only when Qt did not give it, and writes one log line then.
+- When the options window or the answer window opens, the widget asks Windows to bring it to the front. Windows allows that after an input in the widget (a click in the tray menu or on the panel). Else the window shows, its taskbar button flashes, and the log gets one line.
+- The raise of the Herdr window: the first top-level window of `herdr-app.exe`, restored when it is minimized, then brought to the front. The start of a closed app: `herdr-app` as a detached process. When a Herdr window exists, the widget does not start a second app: a refused raise then shows "could not raise the window".
+- The programs: `PATH`, then `%LOCALAPPDATA%\Programs\herdr-app`, `%LOCALAPPDATA%\Programs\herdr-core` and `~\.cargo\bin`. Each program that the widget runs gets no console window.
+- The event child is in a job object that ends it when the widget ends, also after a kill. A process that the child starts (the herdr-core server) is not in the job and does not end with the widget.
+- The wait for the event stream: Windows has no `select` for a pipe. A thread for each pipe waits in the system with a read of no bytes (as libuv does) and takes no byte; nothing wakes while no data comes.
+- The options window and the answer window open on the screen of the panel, inside the free part of that screen, and clear of the panel when the screen has room at a side of it; on a small screen the options window goes below the panel and is lower (its sections scroll). macOS and X11 too; on Wayland the compositor places them.
+- The tray icon: `herdr-app.svg` beside `herdr-app.exe`, else the circle.
+- The model of Claude Code: none. Claude Code writes `procStartFt` on Windows, and its form is not known. The row shows the time. Codex: its folder is `%USERPROFILE%\.codex`.
+- `scripts\start.cmd` runs `scripts\start_windows.py` with the `pythonw` of the checkout. It starts the widget with no console, out of the process group and the job of the caller, and writes its output to `start.log` in the log folder (emptied above 1 MiB).
+- The log rotation can fail on Windows when a different process has the log open. The widget then keeps the file and writes the line.
+
+Fonts: each layout's font list ends with fonts of macOS (`SF Pro`, `Helvetica Neue`; `SF Mono`, `Menlo`) and of Windows (`Segoe UI`; `Cascadia Mono`, `Consolas`). On Linux the look is the same as before.
+
+### The self-test
+
+    uv run python -m bellwether --self-test
+
+- `--self-test` must be the only argument.
+- It uses made-up agents. It takes no lock, writes no log file, and keeps its settings in a temporary folder.
+- It shows the panel for about 3 seconds, then each layout, the options window and the answer window with a made-up question. Before each wait it writes `self-test: shown <step>` to stderr.
+- Then it prints one JSON object with the facts of the real windows: the system, the Qt platform, the shell, the flags, the place and the screen of each window, the native facts of the system, the tray and the Qt warnings. It exits with 0, or with 1 when the panel did not load.
+- `scripts/ci/selftest.py <out folder> <darwin | win32> [--pictures]` runs it on a CI machine. It takes a picture of the whole screen at each step (only when `CI` or `GITHUB_ACTIONS` is `true`, or with `--pictures`), writes the home folder as `~`, and prints each check: FAIL, or WARN for a fact that a CI machine may not give.
+
+### The CI workflow
+
+`.github/workflows/platforms.yml` has two jobs: `macos` (`macos-latest`, a limit of 6 minutes) and `windows` (`windows-latest`, a limit of 8 minutes). Each job:
+
+1. Runs `uv sync --locked`.
+2. Runs a selected set of tests: the platform package, the module of its system, the client, the state, the settings, the start scripts, the events, the self-test, and 23 cases of the panel tests on the plain shell (marker `runner`, `tests/conftest.py`).
+3. Runs the smoke test `scripts/ci/smoke.py`: the start script with a made-up Herdr (`scripts/ci/fake-herdr/`), the log lines, a kill of the widget, and a check that the event child ends.
+4. Runs the self-test with its checks.
+5. Keeps the facts, the logs and the pictures as an artifact for 3 days.
+
+How a job starts:
+
+- By hand: `workflow_dispatch`, with the input `system` (`macos`, `windows` or `both`; the default is `windows`, so a run by hand spends no macOS minute unless macOS is chosen).
+- Nothing else starts it: no push, no pull request and no schedule. During the port, a push to the branch of the port with a marker in the commit message (`[ci macos]`, `[ci windows]`, `[ci both]`) also started a job; that rule was removed before the merge.
+
+Why: the repository is private. GitHub counts a macOS minute as 10 minutes and a Windows minute as 2 minutes of the free minutes. So a job runs only when it is asked for, and it runs a fast selected set of tests: the full suite takes about 11 minutes on Linux, and the panel tests of the plain shell took about 5 times as long on the macOS machine. The runs and their minutes are on the Actions page of the repository.
+
 ## The Qt version rule
 
 The widget loads the system QML module `org.kde.layershell` into the Qt of the PySide6 wheel.
 This works while the system Qt and the wheel Qt have the same minor version (now 6.12).
 A system upgrade to a new Qt minor version (for example 6.13) can stop the module from loading.
-Then the widget does not show, and the log file names the missing module.
+Then the widget shows in the plain shell (see "The window shell"), and the log file names the missing module.
 To fix it, change the pin in `pyproject.toml` to the new minor version (for example `pyside6-essentials==6.13.*`).
 Then run `uv sync`.
 

@@ -1,11 +1,14 @@
-// The window of the floating panel: the layer surface, its place and its screen, the drag, and the one pointer
+// The floating panel, the same for every window shell: its place and its screen, the drag, and the one pointer
 // handler. The state and the rules are in PanelModel.qml. The drawing is a skin (skins/<letter>.qml) that the
 // Loader below shows: the layout of the backend. The scale of the custom look is applied here, one time, for
 // every skin: the skin is drawn larger or smaller, and the window has that size. The skin contract is in the spec
 // (docs/superpowers/specs/2026-11-18-bellwether-design.md, "options window and layout skins").
+//
+// Nothing here names a window system. A shell (shells/Layer.qml, shells/Plain.qml) is this panel with the window
+// properties of its system, and it gives showOn(): how the window goes to a screen and to the place of the panel.
+// The program loads one shell; its root object is the panel window.
 import QtQuick
 import QtQuick.Window
-import org.kde.layershell as LayerShell
 
 Window {
     id: root
@@ -23,10 +26,10 @@ Window {
     // The place of the panel, from the top-left corner of its screen (screenName).
     property int posX: 0
     property int posY: 0
-    // The name of the screen that holds the panel: the layer surface is on the output of this screen.
-    // "" until the start is complete.
+    // The name of the screen that holds the panel: the window is on this screen. "" until the start is complete.
     property string screenName: ""
-    // The name of the screen whose output the layer surface was made on. A surface gets its output when it is made.
+    // The name of the screen that the shell put the window on (showOn). A layer surface gets its output when it
+    // is made.
     property string surfaceScreen: ""
     // The screens of the desktop. Each has name, virtualX, virtualY, width and height. A test gives its own list.
     property var screenSource: Qt.application.screens
@@ -34,48 +37,69 @@ Window {
     // The screen of the window while the named screen is not there.
     readonly property var home: screenNamed(screenName)
         || ({name: Screen.name, x: Screen.virtualX, y: Screen.virtualY, width: Screen.width, height: Screen.height})
-    // True from the time the compositor closes the surface (its monitor went away) until the panel shows again.
+    // The parts of each screen that the system keeps for itself (the macOS menu bar and Dock, the panels of an X11
+    // desktop): screen name → {left, top, right, bottom} in pixels. The program sets it for the plain shell from the
+    // available geometry of each screen; empty (the layer shell: the compositor keeps its panels free itself): none.
+    property var reserved: ({})
+    // True from the time the system closes the window (the compositor closes a layer surface when its monitor went
+    // away) until the panel shows again.
     property bool closedByCompositor: false
     // True until the user moves the widget: it then stays at the top-right corner when its size changes.
     property bool atDefault: false
     // The refresh rate of the screen of the window, in Hz. The program sets it (QML does not have it). 0: unknown.
     property real refreshRate: 0
-    // The shortest time between two moves of a drag: two frames of the screen, from 4 ms to 20 ms. A new margin
-    // goes to the compositor with the next commit, and Qt holds that commit until the frame before it is on the
-    // screen. So a pointer event can come one frame after a move and still be relative to the old place.
+    // The shortest time between two moves of a drag: two frames of the screen, from 4 ms to 20 ms. A new place
+    // can reach the screen one frame late (a margin of a layer surface goes to the compositor with the next
+    // commit, and Qt holds that commit until the frame before it is on the screen). So a pointer event can come
+    // one frame after a move and still be relative to the old place.
     readonly property real minMoveMs: refreshRate > 0 ? Math.min(20, Math.max(4, 2000 / refreshRate)) : 16
     readonly property int edge: 16
     // The scale of the custom look: the skin is drawn this many times larger (0.75 to 2). The window, its place
     // and the pointer are in pixels of the screen; the skin has its own pixels (the pixels of the design).
     readonly property real panelScale: backend.scale
+    // True when the window system, not the panel, decides where the window is (a shell sets it: a plain window on
+    // Wayland). A drag is then a move of the window system, and the panel does not change or save its place.
+    property bool windowSystemPlaces: false
+    // True from the ask for such a move until the button is up again.
+    property bool systemMove: false
 
-    // A layer surface must not have the size 0: the window shows when it has the size of its first skin.
+    // A window must not have the size 0 (a layer surface cannot): the window shows when it has the size of its
+    // first skin.
     visible: false
     color: "transparent"
-    flags: Qt.FramelessWindowHint | Qt.WindowDoesNotAcceptFocus
-
-    LayerShell.Window.scope: "bellwether"
-    LayerShell.Window.layer: LayerShell.Window.LayerOverlay
-    LayerShell.Window.anchors: LayerShell.Window.AnchorTop | LayerShell.Window.AnchorLeft
-    LayerShell.Window.keyboardInteractivity: LayerShell.Window.KeyboardInteractivityNone
-    LayerShell.Window.exclusionZone: -1
-    LayerShell.Window.margins.left: posX
-    LayerShell.Window.margins.top: posY
-    // The compositor applies a new margin only with the next commit of the surface, so ask for a frame.
-    LayerShell.Window.onMarginsChanged: root.requestUpdate()
 
     // Keep the panel on its screen. During a drag the panel can be on two screens, so the drag does this itself.
     function clampPosition() {
-        if (pointerArea.pressed && pointerArea.moved)
+        if (dragging())
             return
-        if (atDefault) {
-            posX = home.width - width - edge
-            posY = edge
-        }
-        var maxX = Math.max(0, home.width - width)
-        var maxY = Math.max(0, home.height - height)
-        posX = Math.min(Math.max(0, posX), maxX)
-        posY = Math.min(Math.max(0, posY), maxY)
+        var place = clampedPlace(width, height)
+        posX = place.x
+        posY = place.y
+    }
+
+    // The part of the screen `target` (one of screens()) that the panel may use, from its top-left corner: the
+    // screen less what the system keeps for itself (`reserved`).
+    function workArea(target) {
+        var r = reserved[target.name] || {}
+        var left = r.left || 0
+        var top = r.top || 0
+        return {x: left, y: top, width: target.width - left - (r.right || 0),
+                height: target.height - top - (r.bottom || 0)}
+    }
+
+    // The place of a panel of w × h on its screen: the default corner when the panel has no place of its own, and
+    // kept in the work area of the screen.
+    function clampedPlace(w, h) {
+        var a = workArea(home)
+        var px = atDefault ? a.x + a.width - w - edge : posX
+        var py = atDefault ? a.y + edge : posY
+        return {x: Math.min(Math.max(a.x, px), Math.max(a.x, a.x + a.width - w)),
+                y: Math.min(Math.max(a.y, py), Math.max(a.y, a.y + a.height - h))}
+    }
+
+    // True while a drag moves the panel: it can then be on two screens, and nothing pulls it back to its own.
+    function dragging() {
+        return pointerArea.pressed && pointerArea.moved
     }
 
     // The screens as {name, x, y, width, height}, with x and y in the whole desktop.
@@ -110,6 +134,12 @@ Window {
             }
         }
         return best
+    }
+
+    // The pointer at (x, y) of `item` in the whole desktop, or null when the shell does not know it (the layer shell:
+    // a layer surface has no place in a desktop). A shell gives its own.
+    function desktopPoint(item, x, y) {
+        return null
     }
 
     // Where a drag can put a panel of w × h that wants to be at (gx, gy) of the desktop: the nearest place where
@@ -153,31 +183,31 @@ Window {
                 y: y + h / 2 > from.height / 2 ? to.height - (from.height - y) : y}
     }
 
-    // Put the panel on the screen `target` (one of screens()) at (x, y) of it, kept on that screen.
-    // A layer surface gets its output when it is made, from the screen of the window. So for a different
-    // output: hide the window, change its screen, show it again.
+    // Put the panel on the screen `target` (one of screens()) at (x, y) of it, kept on that screen. The shell
+    // does it (showOn), with the real screen when the window must go to a different one.
     function rehome(target, x, y) {
         var real = null
         var list = Qt.application.screens
         for (var i = 0; i < list.length; i++)
             if (list[i].name === target.name)
                 real = list[i]
-        var rebind = real !== null && surfaceScreen !== target.name
-        var shown = visible
-        if (rebind)
-            visible = false
+        showOn(target, x, y, real !== null && surfaceScreen !== target.name ? real : null)
+    }
+
+    // The place of the panel: the screen `target` and (x, y) of it, kept on that screen. Only the shell calls
+    // this, from its showOn().
+    function setPlace(target, x, y) {
         screenName = target.name
         posX = x
         posY = y
         clampPosition()
-        if (rebind) {
-            screen = real
-            // Qt takes the screen of a new surface from the place of the window.
-            root.x = target.x + posX
-            root.y = target.y + posY
-            surfaceScreen = target.name
-            visible = shown
-        }
+    }
+
+    // The shell puts the panel on the screen `target` at (x, y) of it: setPlace(target, x, y), and, when `real`
+    // (a screen of Qt) is not null, it moves the window to that screen and sets surfaceScreen. Each shell gives
+    // its own showOn(). This one only sets the place: no shell, no window system.
+    function showOn(target, x, y, real) {
+        setPlace(target, x, y)
     }
 
     // The end of a drag: the panel belongs to the screen that holds its centre.
@@ -253,7 +283,7 @@ Window {
 
     // The window has the size of the skin at the scale. Without a skin, and while a skin reports no size, it
     // keeps its size: a layer surface must never get the size 0. The width and the height change together: one
-    // new size for the layer surface.
+    // new size for the window (and its top-left corner stays).
     // A panel that would be taller than its screen does not get that size while its list can show fewer rows:
     // fitRows() takes rows away before the next frame, and the skin then has a size that fits.
     function takeSize() {
@@ -261,12 +291,18 @@ Window {
             return
         var w = scaled(skin.implicitWidth)
         var h = scaled(skin.implicitHeight)
-        if (h > home.height && panelModel.shown > 1 && panelModel.rowHeight > 0) {
+        if (h > workArea(home).height && panelModel.shown > 1 && panelModel.rowHeight > 0) {
             requestUpdate()  // a frame, so that fitRows() runs
             return
         }
         if (width !== w || height !== h)
-            setGeometry(x, y, w, h)
+            applySize(w, h)
+    }
+
+    // The window gets the size w × h. A shell that places its window gives its own applySize() (one request for the
+    // size and the place).
+    function applySize(w, h) {
+        setGeometry(x, y, w, h)
     }
 
     // The size of a skin can change two times and more in one step (one list closes and a different list opens;
@@ -294,7 +330,7 @@ Window {
         if (!skin || panelModel.rowHeight <= 0)
             return
         var rest = skin.implicitHeight - rows * panelModel.rowHeight
-        var fit = Math.floor((home.height / panelScale - rest) / panelModel.rowHeight + 0.000001)
+        var fit = Math.floor((workArea(home).height / panelScale - rest) / panelModel.rowHeight + 0.000001)
         panelModel.rowRoom = Math.max(1, Math.min(panelModel.rowLimit, fit))
     }
 
@@ -329,9 +365,16 @@ Window {
         takeSize()
     }
     onPanelScaleChanged: takeSize()
+    // The system keeps a different part of a screen (the Dock moved, a panel of the desktop grew).
+    onReservedChanged: {
+        if (started && screenNamed(screenName) !== null)
+            clampPosition()
+        takeSize()
+    }
     onAfterAnimating: fitRows()
     onScreenSourceChanged: recoverTimer.restart()
-    // Only the compositor closes the window (the tray hides it): the monitor of the surface went away.
+    // Only the system closes the window (the tray hides it): with the layer shell, the monitor of the surface went
+    // away.
     onClosing: {
         closedByCompositor = true
         recoverTimer.restart()
@@ -408,21 +451,36 @@ Window {
                 return
             moved = true
             root.panel.hoverItem = null
+            if (root.windowSystemPlaces) {
+                if (!root.systemMove) {
+                    root.systemMove = true
+                    root.startSystemMove()  // false when the window system cannot: the panel then stays
+                }
+                return
+            }
             var now = Date.now()
             if (now - lastMoveMs < root.minMoveMs)
                 return
             lastMoveMs = now
             root.atDefault = false
-            // The panel follows the pointer on all the screens. The surface stays on its output until the release.
-            var place = root.dragPlace(root.screens(), root.home.x + root.posX + dx, root.home.y + root.posY + dy,
-                                       root.width, root.height)
+            // The panel follows the pointer on all the screens. The window stays on its screen until the release.
+            // Where the shell knows the pointer in the desktop, the panel keeps the point of the press under it;
+            // else the move of the pointer is added to the place of the panel.
+            var at = root.desktopPoint(pointerArea, mouse.x, mouse.y)
+            var place = at ? root.dragPlace(root.screens(), Math.round(at.x - startX), Math.round(at.y - startY),
+                                            root.width, root.height)
+                : root.dragPlace(root.screens(), root.home.x + root.posX + dx, root.home.y + root.posY + dy,
+                                 root.width, root.height)
             root.posX = place.x - root.home.x
             root.posY = place.y - root.home.y
         }
         onReleased: (mouse) => {
             if (moved) {
                 moved = false
-                root.settle()
+                if (root.windowSystemPlaces)
+                    root.systemMove = false
+                else
+                    root.settle()
                 return
             }
             var row = under(mouse, ["status", "answer", "agent"])
@@ -434,6 +492,8 @@ Window {
                 root.panel.jump(row.key)
         }
         onExited: root.panel.hoverItem = null
+        // The window system took the pointer (a move of the window system): the button is up for this handler.
+        onCanceled: { moved = false; root.systemMove = false }
         onWheel: (wheel) => {
             var list = under(wheel, ["scroll"])
             if (list)

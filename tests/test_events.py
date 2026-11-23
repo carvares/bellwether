@@ -1,6 +1,7 @@
 """The event source and the reads that it starts. No test runs the real herdr-core: the child is a pipe."""
 import logging
 import os
+import sys
 import threading
 import time
 
@@ -378,6 +379,7 @@ def test_an_error_in_the_thread_ends_it_with_the_stream_unhealthy_and_its_class_
     assert SECRET.decode() not in caplog.text
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals; Windows: tests/test_windows.py")
 def test_the_real_child_reads_no_input_and_ends_when_its_parent_is_killed(tmp_path):
     """The real start of a child, with a made-up program in the place of herdr-core."""
     import signal
@@ -386,8 +388,8 @@ def test_the_real_child_reads_no_input_and_ends_when_its_parent_is_killed(tmp_pa
 
     program = (
         "import sys, time\n"
-        "from bellwether.events import _spawn\n"
-        "child = _spawn([sys.executable, '-c', 'import sys, time; print(repr(sys.stdin.read()), flush=True); "
+        "from bellwether.platform import spawn_child\n"
+        "child = spawn_child([sys.executable, '-c', 'import sys, time; print(repr(sys.stdin.read()), flush=True); "
         "time.sleep(30)'])\n"
         "print(child.pid, child.stdout.readline().decode().strip(), flush=True)\n"
         "time.sleep(30)\n"
@@ -403,7 +405,7 @@ def test_the_real_child_reads_no_input_and_ends_when_its_parent_is_killed(tmp_pa
 
         def gone() -> bool:
             try:  # A child that ended has no /proc entry, or it is a zombie that waits for its new parent.
-                with open(f"/proc/{pid}/stat") as stat:
+                with open(f"/proc/{pid}/stat", encoding="utf-8") as stat:
                     return stat.read().rsplit(")", 1)[1].split()[0] == "Z"
             except OSError:
                 return True

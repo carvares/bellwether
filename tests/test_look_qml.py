@@ -1,4 +1,4 @@
-"""The custom look on the screen: the real Main.qml and the real Options.qml with the five real skins, a fake client,
+"""The custom look on the screen: the real panel and the real Options.qml with the five real skins, a fake client,
 and a font scale, a font family and colours of the user."""
 import math
 import re
@@ -85,7 +85,7 @@ def scenes(app, root, backend):
 def test_no_skin_has_a_text_size_of_its_own(skin):
     """Every text size of a skin is a theme token (or a value of the skin that picks one of several tokens), so the
     font scale of the custom look reaches every text. A number after `pixelSize:` fails here."""
-    text = skin.read_text()
+    text = skin.read_text(encoding="utf-8")
     uses = re.findall(r"\bpixelSize\b\s*(:?)\s*([^\n;}]*)", text)
     assert uses, "the skin has no text?"
     names = set()
@@ -269,7 +269,8 @@ def families(backend):
     """A proportional and a monospace family of this system that the user can choose, both not the font of a theme."""
     from PySide6.QtGui import QFontDatabase
     listed = backend.fontFamilies
-    themes = {"Adwaita Sans", "Inter", "Noto Sans", "DejaVu Sans", "Hack", "JetBrains Mono", "DejaVu Sans Mono"}
+    themes = {"Adwaita Sans", "Inter", "Noto Sans", "DejaVu Sans", "Hack", "JetBrains Mono", "DejaVu Sans Mono",
+              "SF Pro", "Helvetica Neue", "SF Mono", "Menlo"}  # (the last four: macOS)
     serif = next((f for f in ("DejaVu Serif", "Liberation Serif", "Noto Serif") if f in listed), None) or next(
         f for f in listed if f not in themes and not QFontDatabase.isFixedPitch(f))
     mono = next((f for f in ("Liberation Mono", "Adwaita Mono", "Noto Sans Mono") if f in listed), None) or next(
@@ -532,7 +533,7 @@ def test_a_glyph_icon_of_a_row_is_drawn_again_in_a_new_text_colour(app, window, 
     from tests.test_skins import GLYPH, marked
     root, backend, messages = window
     (tmp_path / "app" / "icons").mkdir(parents=True)
-    (tmp_path / "app" / "icons" / "pi.svg").write_text(GLYPH)  # a black square: the widget draws it in the text colour
+    (tmp_path / "app" / "icons" / "pi.svg").write_text(GLYPH, encoding="utf-8")  # a black square: the widget draws it in the text colour
     backend.setLayout(letter)
     backend.apply([Agent("t1", "working", "ana", "docs", "pi")])
     root.setProperty("openState", "working")
@@ -558,7 +559,7 @@ def test_a_glyph_icon_of_a_row_is_drawn_again_in_a_new_text_colour(app, window, 
 
 def test_the_controller_has_no_colour_rule_of_its_own_and_the_opening_colour_is_the_accent_in_effect(app, window):
     """The rule "a custom colour, or the colour of the design" is in ThemeBase.qml and in backend.colors only."""
-    text = (layouts.UI_PATH / "PanelModel.qml").read_text()
+    text = (layouts.UI_PATH / "PanelModel.qml").read_text(encoding="utf-8")
     assert "colorOverrides" not in text and not re.search(r'"#[0-9a-fA-F]{6,8}"', text)
     root, backend, messages = window
     panel = root.property("panel")
@@ -614,7 +615,7 @@ def test_a_wanted_colour_with_an_opacity_is_judged_as_it_is_drawn_on_the_plate(a
 
 @pytest.mark.parametrize("skin", ["A.qml", "B.qml", "../controls/LayoutCard.qml"])
 def test_no_file_states_a_dark_ink_of_its_own_for_a_solid_plate(skin):
-    text = (layouts.SKINS_PATH / skin).read_text()
+    text = (layouts.SKINS_PATH / skin).read_text(encoding="utf-8")
     assert "#202124" not in text and "inkOn(" in text
     assert not re.search(r'color: [^\n]*\? "#0b0e11"', text)
 

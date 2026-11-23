@@ -1,7 +1,7 @@
 // Layout E, "Ring": a ring with the share of each status and the total in its centre, and a legend of the four
 // counts at its right; the agents of the open status show below. The visual reference is
 // design/layouts/e-ring.qml. A skin is only drawing: the state and the rules are in PanelModel.qml, the
-// pointer handling is in Main.qml.
+// pointer handling is in PanelShell.qml.
 import QtQuick
 import ".."
 

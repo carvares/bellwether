@@ -1,4 +1,4 @@
-"""Every layout (skin) through the real Main.qml, the real controller and a fake client, with real pointer events:
+"""Every layout (skin) through the real panel (the layer shell), the real controller and a fake client, with real pointer events:
 the same information and the same behaviour in each of them. Then what is special in each skin."""
 import json
 import math
@@ -13,14 +13,16 @@ from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtTest import QTest
 
 from bellwether import layouts
-from bellwether.__main__ import IMPORT_PATH, UI_PATH
+from bellwether.__main__ import UI_PATH
+from bellwether.platform.linux import IMPORT_PATH
 from bellwether.backend import Backend
 from bellwether.state import STATE_COLORS, Agent
+from tests.conftest import needs_layershell
 from tests.test_qml import (  # noqa: F401  (window is a fixture)
-    LAYERSHELL_QMLDIR, OFFSCREEN_NOTE, OFFSET, click, js, many, place, rows, settle, use_screens, visible_texts,
-    walk, window)
+    OFFSCREEN_NOTE, OFFSET, both_shells, click, js, many, place, release, rows, settle, use_screens,
+    visible_texts, walk, window)
 
-pytestmark = pytest.mark.skipif(not LAYERSHELL_QMLDIR.is_file(), reason="org.kde.layershell is not installed")
+# Without the system module of the layer shell only its cases are skipped (tests/conftest.py, `shell`).
 
 LETTERS = [letter for letter, _, _ in layouts.LAYOUTS]
 ORDER = ["blocked", "done", "working", "idle"]
@@ -98,6 +100,7 @@ def spoken(item):
 
 # ----- the shared behaviour, for each skin -----
 
+@both_shells
 def test_the_four_statuses_show_and_one_group_opens_at_a_time(app, shown):
     letter, root, backend, messages = shown
     backend.apply(MIXED)
@@ -153,6 +156,7 @@ def test_a_status_with_no_agents_and_every_status_while_offline_is_inert(app, sh
         assert root.property("openState") == ""
 
 
+@both_shells
 def test_a_click_on_an_agent_jumps_one_time_and_clicks_wait_while_a_jump_runs(app, shown):
     letter, root, backend, messages = shown
     backend.apply(MIXED)
@@ -175,6 +179,7 @@ def test_a_click_on_an_agent_jumps_one_time_and_clicks_wait_while_a_jump_runs(ap
     assert backend._client.focused == ["t2", "t3"] and root.property("openState") == "working"
 
 
+@both_shells
 def test_a_group_of_12_shows_8_rows_and_scrolls_and_the_hint_takes_no_click_and_no_wheel_turn(app, shown):
     letter, root, backend, messages = shown
     backend.apply(many(blocked=1, working=8, idle=12))
@@ -259,6 +264,7 @@ def test_a_failed_jump_shows_its_message_in_the_row_or_in_a_line_and_it_ends_aft
     assert count_text(root, MESSAGE) == 0 and root.height() < offline_with_line
 
 
+@both_shells
 def test_a_drag_from_a_status_item_and_from_an_agent_row_moves_the_panel_and_does_not_click(app, shown):
     letter, root, backend, messages = shown
     backend.apply(MIXED)
@@ -271,10 +277,11 @@ def test_a_drag_from_a_status_item_and_from_an_agent_row_moves_the_panel_and_doe
         start = item.mapToScene(QPointF(item.width() / 2, item.height() / 2)).toPoint()
         QTest.mousePress(root, left, none, start)
         settle(app)
-        for step in (QPoint(-10, 5), QPoint(-20, 12)):  # each move is from the start: the window stays off screen
+        for step in (QPoint(-10, 5), QPoint(-20, 12)):  # the steps add up (tests/test_qml.py, drag_by)
+            at = root.position()
             QTest.mouseMove(root, start + step)
             settle(app)
-        QTest.mouseRelease(root, left, none, start + QPoint(-20, 12))
+        release(root, start + QPoint(-20, 12), at)
         settle(app)
         after = (root.property("posX"), root.property("posY"))
         assert after == (before[0] - 30, before[1] + 17) and backend.saves == [after]
@@ -309,6 +316,7 @@ def test_each_count_shows_and_the_size_is_never_0(app, shown):
 LONG = dict(blocked=1, working=3, idle=12)
 
 
+@both_shells
 @pytest.mark.parametrize("letter", LETTERS)
 def test_the_window_has_the_size_of_the_skin_at_each_scale_and_the_skin_keeps_its_own_size(app, window, letter):
     root, backend, messages = window
@@ -333,6 +341,7 @@ def test_the_window_has_the_size_of_the_skin_at_each_scale_and_the_skin_keeps_it
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
+@both_shells
 @pytest.mark.parametrize("letter", LETTERS)
 def test_one_change_of_the_scale_is_one_new_size_and_the_panel_stays_on_its_screen(app, window, letter):
     root, backend, messages = window
@@ -397,6 +406,7 @@ def test_a_list_gets_fewer_rows_when_8_rows_make_the_panel_taller_than_its_scree
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
+@both_shells
 @pytest.mark.parametrize("letter", LETTERS)
 def test_a_press_that_moves_less_than_6_screen_pixels_is_a_click_at_scale_2_and_6_pixels_is_a_drag(app, window, letter):
     root, backend, messages = window
@@ -415,9 +425,10 @@ def test_a_press_that_moves_less_than_6_screen_pixels_is_a_click_at_scale_2_and_
     settle(app)
     assert root.property("openState") == "working" and place(root) == ("B", 400, 100) and backend.saves == []
     QTest.mousePress(root, left, none, start)
+    at = root.position()
     QTest.mouseMove(root, start + QPoint(4, 2))
     settle(app)
-    QTest.mouseRelease(root, left, none, start + QPoint(4, 2))
+    release(root, start + QPoint(4, 2), at)
     settle(app)
     assert place(root) == ("B", 404, 102) and backend.saves == [(404, 102)]  # as far as the pointer
     assert root.property("openState") == "working" and backend._client.focused == []
@@ -465,7 +476,7 @@ def test_a_program_icon_has_the_pixels_of_its_size_on_the_screen(app, window, tm
     """The window draws the skin larger at a scale above 1: an icon of 16 px then needs more than 16 pixels."""
     root, backend, messages = window
     (tmp_path / "app" / "icons").mkdir(parents=True)
-    (tmp_path / "app" / "icons" / "pi.svg").write_text(GLYPH)
+    (tmp_path / "app" / "icons" / "pi.svg").write_text(GLYPH, encoding="utf-8")
     backend.setLayout(letter)
     backend.apply([Agent("t1", "working", "ana", "docs", "pi")])
     use_screens(root, OFFSET, "B", 0, 0)
@@ -483,6 +494,7 @@ def test_a_program_icon_has_the_pixels_of_its_size_on_the_screen(app, window, tm
 
 # ----- switching -----
 
+@both_shells
 def test_switching_between_every_pair_of_layouts_keeps_the_place_the_screen_and_the_open_group(app, window):
     root, backend, messages = window
     built = sorted(layouts.built_skins())
@@ -878,6 +890,7 @@ def font_of(item):
     return item.property("font").pixelSize(), item.property("color").name()
 
 
+@needs_layershell
 @pytest.mark.parametrize("letter", LETTERS)
 def test_the_texts_of_each_layout_take_their_size_and_colour_from_its_theme_tokens(app, fake_client, tmp_path, letter):
     """A copy of the interface with other token values in the theme of the layout: the status title, the agent label
@@ -886,11 +899,11 @@ def test_the_texts_of_each_layout_take_their_size_and_colour_from_its_theme_toke
     ui = tmp_path / "ui"
     shutil.copytree(UI_PATH, ui)
     theme = ui / "skins" / f"{letter}Theme.qml"
-    text = theme.read_text()
+    text = theme.read_text(encoding="utf-8")
     for token, value in {**DRIFT, **DRIFT_OWN}.items():
         text, n = re.subn(rf"(property \w+ {token}: )[^\n]+", lambda m: m.group(1) + json.dumps(value), text)
         assert n == 1 or (n == 0 and token in DRIFT_OWN), token
-    theme.write_text(text)
+    theme.write_text(text, encoding="utf-8")
     backend = Backend(fake_client, settings_path=tmp_path / "state.json",
                       skins={l: ui / "skins" / f"{l}.qml" for l in layouts.built_skins()})
     backend.setLayout(letter)
@@ -899,7 +912,7 @@ def test_the_texts_of_each_layout_take_their_size_and_colour_from_its_theme_toke
     engine.warnings.connect(lambda errors: messages.extend(e.toString() for e in errors))
     engine.rootContext().setContextProperty("backend", backend)
     engine.addImportPath(str(IMPORT_PATH))
-    engine.load(ui / "Main.qml")
+    engine.load(ui / "shells" / "Layer.qml")
     try:
         root = engine.rootObjects()[0]
         backend.apply(MIXED)

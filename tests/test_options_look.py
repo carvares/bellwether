@@ -3,6 +3,7 @@ state file, and pointer and key events as a person makes them. Off screen."""
 import json
 import re
 import time
+from types import SimpleNamespace
 
 import pytest
 import shiboken6
@@ -12,14 +13,15 @@ from PySide6.QtQml import QQmlApplicationEngine, QQmlExpression, qmlContext
 from PySide6.QtTest import QTest
 
 from bellwether import layouts
-from bellwether.__main__ import IMPORT_PATH, UI_PATH
+from bellwether.__main__ import UI_PATH
+from bellwether.platform.linux import IMPORT_PATH
 from bellwether.backend import Backend
 from bellwether.layouts import built_skins
-from bellwether.options import Options
 from bellwether.state import Agent
 from tests.audit import text_findings, walk
+from tests.conftest import wide_options
 from tests.test_options import LETTERS, SIZE_HINTS_NOTE, cards, settle, spoken
-from tests.test_qml import LAYERSHELL_QMLDIR, OFFSCREEN_NOTE
+from tests.test_qml import LAYER_QML, LAYERSHELL_QMLDIR, OFFSCREEN_NOTE
 
 FAMILIES = ["Made Up Mono", "Made Up Sans", "Other Mono Wide", "Plain Serif"]
 ROLES = ["blocked", "done", "working", "idle", "background", "text", "frame", "accent"]
@@ -46,7 +48,7 @@ def make(app, fake_client, path, families=FAMILIES, room=1080):
     engine = QQmlApplicationEngine()
     engine.warnings.connect(lambda errors: messages.extend(e.toString() for e in errors))
     engine.rootContext().setContextProperty("backend", backend)
-    options = Options(engine)
+    options = wide_options(engine)
     options.open()
     settle(app)
     window = engine.rootObjects()[0]
@@ -131,7 +133,7 @@ def fire(backend):
 
 
 def saved(path):
-    return json.loads(path.read_text()) if path.exists() else None
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
 
 
 def focused(window):
@@ -763,9 +765,21 @@ def test_on_a_low_screen_a_pointer_or_a_finger_scrolls_the_sections_and_a_slider
         drag(app, window, start + QPoint(0, 40), QPoint(start.x(), window.height() - 2))  # past the end: no further
         assert contentY() == lowest
         # A drag of the sections themselves (the empty room at their left), as a pen or a mouse with no wheel.
+        # Measured while the button is down: the release starts a flick, an animation of the clock, so a measure
+        # after the release depends on the speed of the computer.
         place = scroller.mapToScene(QPointF(window.property("pad") / 2, scroller.height() / 2)).toPoint()
-        drag(app, window, place, place + QPoint(0, 120))
-        assert contentY() <= lowest - 100
+        moved = []
+        QTest.mousePress(window, LEFT, NONE, place)
+        settle(app)
+        for n in range(1, 11):
+            QTest.mouseMove(window, place + QPoint(0, 12 * n))
+            settle(app)
+            moved.append(lowest - contentY())
+        # The drag starts within two steps (the drag distance of the system), then the sections follow the pointer.
+        assert [round(b - a, 3) for a, b in zip(moved[2:], moved[3:])] == [12] * 7 and moved[-1] >= 120 - 24
+        QTest.mouseRelease(window, LEFT, NONE, place + QPoint(0, 120))
+        settle(app)
+        assert contentY() <= lowest - moved[-1]  # the release does not take the sections back
         # A finger that moves up: the sections move with it.
         scroller.setProperty("contentY", 0)
         settle(app)
@@ -966,11 +980,11 @@ def both(app, fake_client, state_path):
     engine.warnings.connect(lambda errors: messages.extend(e.toString() for e in errors))
     engine.rootContext().setContextProperty("backend", backend)
     engine.addImportPath(str(IMPORT_PATH))
-    engine.load(UI_PATH / "Main.qml")
+    engine.load(LAYER_QML)
     try:
         (panel,) = engine.rootObjects()
         backend.apply([Agent("t1", "blocked", "rev", "Main"), Agent("t2", "working", "ana", "api / 1")])
-        options = Options(engine)
+        options = wide_options(engine)
         options.open()
         settle(app)
         window = engine.rootObjects()[1]
@@ -1049,7 +1063,7 @@ def test_the_window_opens_with_every_value_custom_a_font_that_is_gone_and_a_role
         app, fake_client, state_path, caplog):
     start = {"layout": "B", "scale": 1.75, "fontScale": 1.3, "fontFamily": "A Font That Is Gone",
              "colors": {**CUSTOM, "sparkle": "#123456"}}
-    state_path.write_text(json.dumps(start))
+    state_path.write_text(json.dumps(start), encoding="utf-8")
     messages = []
     previous = qInstallMessageHandler(lambda mode, context, text: messages.append(text))
     window, backend, warnings, engine = make(app, fake_client, state_path)
@@ -1109,7 +1123,7 @@ SIZE_FORMS = [rf"{SIZE}", rf"Math\.min\({SIZE},\s*{SIZE}\)", rf"\w+\.\w+\s*\?\s*
 def test_no_control_file_has_a_text_size_or_a_look_of_qt_quick_controls():
     assert len(CONTROL_FILES) == 16
     for file in CONTROL_FILES:
-        text = file.read_text()
+        text = file.read_text(encoding="utf-8")
         assert "QtQuick.Controls" not in text, file.name
         uses = re.findall(r"\bpixelSize\b\s*(:?)\s*([^\n;}]*)", text)
         for colon, value in uses:
@@ -1117,13 +1131,13 @@ def test_no_control_file_has_a_text_size_or_a_look_of_qt_quick_controls():
             assert any(re.fullmatch(form, value.strip()) for form in SIZE_FORMS), f"{file.name}: pixelSize: {value}"
         assert "pointSize" not in text, file.name
     # The limits and the steps of the three sliders are those of the backend, not numbers of the window.
-    text = (layouts.UI_PATH / "Options.qml").read_text()
+    text = (layouts.UI_PATH / "Options.qml").read_text(encoding="utf-8")
     for member in ("scaleMin", "scaleMax", "scaleStep", "scaleDefault", "fontScaleMin", "fontScaleMax",
                    "fontScaleStep", "fontScaleDefault", "opacityMin", "opacityMax", "opacityStep", "fontFamilies",
                    "colorRoles", "lookIsCustom"):
         assert f"backend.{member}" in text, member
     for file in CONTROL_FILES:
-        assert not re.search(r"^\s*(from|to|step|defaultValue):\s*[\d.]", file.read_text(), re.M), file.name
+        assert not re.search(r"^\s*(from|to|step|defaultValue):\s*[\d.]", file.read_text(encoding="utf-8"), re.M), file.name
 
 
 # The colours that a control file may state, each with its reason. Every other colour comes from the theme.
@@ -1139,7 +1153,7 @@ COLOUR_LITERALS = {
 
 def test_no_control_file_has_a_colour_of_its_own_except_the_presets_and_the_documented_ones():
     for file in CONTROL_FILES:
-        text = file.read_text()
+        text = file.read_text(encoding="utf-8")
         if file.name == "ColorEditor.qml":  # the palette: 16 presets, its purpose
             (palette,) = re.findall(r"presets: \[([^\]]*)\]", text)
             assert len(re.findall(r'"#[0-9a-f]{6}"', palette)) == 16
@@ -1179,17 +1193,17 @@ def test_the_setting_of_the_model_line_is_in_the_layout_section_and_a_click_chan
     click(app, window, row)
     assert backend.showMeta is False and row.property("checked") is False
     assert check_state(row)[2] is False and focused(window) == "Show model and session time"
-    assert json.loads(state_path.read_text()).get("showMeta") is False
+    assert json.loads(state_path.read_text(encoding="utf-8")).get("showMeta") is False
     for which in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter):  # the keys change it too
         before = backend.showMeta
         key(app, window, which)
         assert backend.showMeta is (not before) and row.property("checked") is backend.showMeta
-    assert backend.showMeta is True and "showMeta" not in json.loads(state_path.read_text())
+    assert backend.showMeta is True and "showMeta" not in json.loads(state_path.read_text(encoding="utf-8"))
     actions = QAccessible.queryAccessibleInterface(row).actionInterface()
     assert "Toggle" in actions.actionNames()
     actions.doAction("Toggle")  # a screen reader changes it
     settle(app)
-    assert backend.showMeta is False and json.loads(state_path.read_text())["showMeta"] is False
+    assert backend.showMeta is False and json.loads(state_path.read_text(encoding="utf-8"))["showMeta"] is False
 
 
 def test_the_setting_of_the_model_line_shows_the_saved_value_when_the_window_opens(app, shown):
@@ -1215,3 +1229,424 @@ def test_the_setting_of_the_model_line_has_its_room_in_each_theme_and_text_size(
     assert right <= window.width() - 20 and row.mapToScene(QPointF(0, 0)).y() >= 44  # below the header
     box = next(i for i in walk(row) if i.property("isCheckBox"))
     assert box.width() == box.height() >= 16
+
+
+# ----- a narrow screen: the window fits, the cards wrap, the sections are one below the other -----
+
+# The free width → the cards in a row, and Size | Text side by side (None: by the text size: they need room for
+# their labels and values, which grow with the text).
+NARROW = {1024: (4, None), 800: (3, False), 640: (2, False)}
+
+
+def right_edges_inside(window):
+    """Each visible item of the window ends inside it (no part is cut at the right)."""
+    found = []
+    for item in walk(window.contentItem()):
+        if not item.isVisible() or item.width() <= 0 or item.property("isScroller") or item.property("isFrame"):
+            continue
+        if item.property("layoutId") or item.property("swatchFor") or item.property("sliderFor") \
+                or item.property("isFontButton") or item.property("isResetAll") or item.property("isColourEditor") \
+                or item.property("isEditorClose") or item.property("isHexField") or item.property("isOpacitySlider"):
+            box = item.mapRectToScene(item.boundingRect())
+            if box.left() < -0.5 or box.right() > window.width() + 0.5:
+                found.append(f"{item.metaObject().className()} {box.left():.0f}..{box.right():.0f}")
+    return found
+
+
+def rows_of_cards(window):
+    rows = {}
+    for card in cards(window):
+        rows.setdefault(round(card.mapToScene(QPointF(0, 0)).y()), []).append(card.property("layoutId"))
+    return [rows[y] for y in sorted(rows)]
+
+
+@pytest.mark.parametrize("scale", [0.8, 1.4])
+@pytest.mark.parametrize("room", NARROW)
+@pytest.mark.parametrize("letter", LETTERS)
+def test_on_a_narrow_screen_the_window_fits_its_cards_wrap_and_every_text_has_its_room(app, shown, letter, room, scale):
+    window, backend, messages = shown
+    window.setProperty("roomWidth", room)
+    window.setProperty("roomHeight", 3000)  # all of it in the window: each control can be clicked (the scroll of a
+    backend.setLayout(letter)               # low screen has tests of its own)
+    backend.setFontScale(scale)
+    settle(app)
+    per_row, two_columns = NARROW[room]
+    assert window.width() == room - 32 and not find(window, "isScroller").property("scrolls")
+    assert [len(row) for row in rows_of_cards(window)] == {4: [4, 1], 3: [3, 2], 2: [2, 2, 1]}[per_row]
+    assert [card for row in rows_of_cards(window) for card in row] == list("ABCDE")
+    size, text = find(window, "sliderFor", "scale"), find(window, "sliderFor", "fontScale")
+    side_by_side = abs(size.mapToScene(QPointF(0, 0)).y() - text.mapToScene(QPointF(0, 0)).y()) < 1
+    assert side_by_side is window.property("twoColumns") is (two_columns if two_columns is not None else scale < 1.4)
+    assert right_edges_inside(window) == [] and text_findings(window) == []
+    # The colour editor of the background (with its opacity), with a message, then the list of fonts.
+    open_everything(app, window, backend)
+    assert editor(window).isVisible() and right_edges_inside(window) == [] and text_findings(window) == []
+    click(app, window, find(window, "isHexField"))
+    replace_text(app, window, "nothing")
+    assert find(window, "isHexMessage").isVisible() and text_findings(window) == []
+    click(app, window, find(window, "isFontButton"))
+    type_text(app, window, "m")
+    assert len(font_rows(window)) == 4 and right_edges_inside(window) == [] and text_findings(window) == []
+    click(app, window, find(window, "isResetAll"))
+    assert window.property("resetArmed") and right_edges_inside(window) == [] and text_findings(window) == []
+
+
+def test_on_a_narrow_screen_the_tab_key_goes_through_the_cards_in_the_order_that_they_show(app, shown):
+    window, backend, messages = shown
+    window.setProperty("roomWidth", 640)
+    settle(app)
+    order = []
+    cards(window)[0].forceActiveFocus()
+    settle(app)
+    for _ in range(5):
+        focused = window.activeFocusItem()
+        order.append((focused.property("layoutId"), focused.mapToScene(QPointF(0, 0))))
+        key(app, window, Qt.Key.Key_Tab)
+    assert [name for name, _ in order] == list("ABCDE")
+    places = [(round(point.y()), point.x()) for _, point in order]
+    assert places == sorted(places)  # row by row, and from the left in a row
+
+
+def test_a_screen_with_room_gives_the_window_of_five_cards_in_one_row(app, shown):
+    window, backend, messages = shown
+    for room in (1920, 1108):
+        window.setProperty("roomWidth", room)
+        settle(app)
+        assert window.width() == 1076 and [len(row) for row in rows_of_cards(window)] == [5]
+    window.setProperty("roomWidth", 1107)
+    settle(app)
+    assert window.width() == 1075 and [len(row) for row in rows_of_cards(window)] == [4, 1]
+
+
+def test_the_window_takes_the_free_width_of_its_screen_before_it_shows_and_stays_inside_it(app, fake_client, state_path):
+    """The program (options.py), not a test: the free part of the screen of the test is 800 px wide."""
+    from bellwether.options import Options
+    backend = Backend(fake_client, settings_path=state_path, skins=built_skins())
+    engine = QQmlApplicationEngine()
+    engine.rootContext().setContextProperty("backend", backend)
+    previous = qInstallMessageHandler(lambda mode, context, text: None)
+    try:
+        Options(engine).open()
+        settle(app)
+        window = engine.rootObjects()[0]
+        free = window.screen().availableGeometry()
+        assert window.property("roomWidth") == free.width() == 800 and window.width() == 768
+        assert free.contains(window.frameGeometry())
+    finally:
+        shiboken6.delete(engine)
+        app.processEvents()
+        qInstallMessageHandler(previous)
+
+
+def test_a_window_that_the_system_put_partly_outside_its_screen_comes_inside_it(app):
+    from PySide6.QtGui import QWindow
+    from bellwether.options import keep_on_screen
+    window = QWindow()
+    window.setGeometry(500, 600, 600, 300)  # the screen of the test is 800 × 800
+    keep_on_screen(window)
+    assert (window.x(), window.y()) == (200, 500)
+    window.setGeometry(10, 20, 600, 300)
+    keep_on_screen(window)
+    assert (window.x(), window.y()) == (10, 20)  # inside: no move
+    window.setGeometry(0, 0, 1000, 300)
+    keep_on_screen(window)
+    assert (window.x(), window.y()) == (0, 0)  # wider than the screen: its left edge stays on it
+
+
+# ----- the first open on a narrow screen starts at the top (review of P4, I1) -----
+
+def fitted_options(engine, width, height):
+    """The options object of the program on a screen whose free part is `width` × `height` (given before each
+    show, as options.py gives the room of the real screen)."""
+    from bellwether.options import Options
+
+    class Fitted(Options):
+        def fit_screen(self):
+            self._window.setProperty("roomWidth", width)
+            self._window.setProperty("roomHeight", height)
+            return self._window.screen()
+
+    return Fitted(engine)
+
+
+def first_title_shows(window):
+    scroller = find(window, "isScroller")
+    title = next(i for i in walk(window.contentItem()) if i.property("isSectionTitle"))
+    top = title.mapToItem(scroller, QPointF(0, 0)).y()
+    return scroller.property("contentY") == 0 and 0 <= top and top + title.height() <= scroller.height()
+
+
+@pytest.mark.parametrize("width, height", [(1024, 768), (800, 720), (640, 720)])
+def test_the_first_and_a_later_open_on_a_narrow_low_screen_start_at_the_top(app, fake_client, state_path, width, height):
+    backend = Backend(fake_client, settings_path=state_path, skins=built_skins())
+    engine = QQmlApplicationEngine()
+    engine.rootContext().setContextProperty("backend", backend)
+    previous = qInstallMessageHandler(lambda mode, context, text: None)
+    try:
+        options = fitted_options(engine, width, height)
+        options.open()
+        settle(app)
+        window = engine.rootObjects()[0]
+        assert window.width() == width - 32 and find(window, "isScroller").property("scrolls")
+        assert first_title_shows(window)
+        window.hide()
+        settle(app)
+        options.open()
+        settle(app)
+        assert first_title_shows(window)
+    finally:
+        shiboken6.delete(engine)
+        app.processEvents()
+        qInstallMessageHandler(previous)
+
+
+# ----- the options and the answer window: clear of the panel when the screen has room (review of P4, m8) -----
+
+@pytest.mark.parametrize("frame, free, avoid, lower, wanted", [
+    ((300, 0, 400, 300), (0, 0, 800, 800), None, None, (300, 0, 300)),  # no panel: only inside the free area
+    ((500, 600, 400, 300), (0, 0, 800, 800), None, None, (400, 500, 300)),
+    ((300, 0, 400, 300), (0, 0, 800, 800), (480, 16, 300, 192), None, (64, 0, 300)),  # left of the panel
+    ((100, 0, 600, 300), (0, 0, 800, 800), (480, 16, 300, 192), None, (100, 224, 300)),  # no room at its left: below
+    ((0, 0, 992, 680), (0, 0, 1024, 720), (688, 16, 320, 192), None, (0, 0, 680)),  # a 1024 px screen: no side
+    ((0, 0, 992, 680), (0, 0, 1024, 720), (688, 16, 320, 192), 240, (0, 224, 496)),  # …lower, below the panel
+    ((0, 0, 992, 680), (0, 0, 1024, 400), (688, 16, 320, 192), 240, (0, 0, 680)),  # no room below for 240 either
+    ((20, 20, 300, 200), (0, 0, 1024, 720), (688, 16, 320, 192), None, (20, 20, 200)),  # clear already: no move
+    ((2700, 0, 400, 300), (1920, 0, 1280, 720), (2864, 16, 320, 192), None, (2448, 0, 300)),  # a screen not at 0
+    ((900, 0, 400, 300), (1920, 0, 1280, 720), (2864, 16, 320, 192), None, (1920, 0, 300)),  # onto it: clear
+])
+def test_a_window_goes_inside_its_screen_and_clear_of_the_panel_when_there_is_room(frame, free, avoid, lower, wanted):
+    from bellwether.options import clear_place
+    assert clear_place(frame, free, avoid, min_height=lower) == wanted
+
+
+class ScreenDouble:
+    """A screen of made-up size for the placement (the screen of the off-screen platform is 800 × 800)."""
+
+    def __init__(self, width, height, free_height):
+        from PySide6.QtCore import QRect
+        self._whole, self._free = QRect(0, 0, width, height), QRect(0, 0, width, free_height)
+
+    def geometry(self):
+        return self._whole
+
+    def availableGeometry(self):
+        return self._free
+
+
+class PanelDouble:
+    def __init__(self, screen, box=(688, 16, 320, 192)):
+        from PySide6.QtCore import QRect
+        self._screen, self._box = screen, QRect(*box)
+
+    def isVisible(self):
+        return True
+
+    def screen(self):
+        return self._screen
+
+    def frameGeometry(self):
+        return self._box
+
+
+def test_on_a_1024_px_screen_the_options_window_goes_below_the_panel_and_its_close_control_is_clear(
+        app, fake_client, state_path):
+    """The runner's screen of 1024 × 768 (free 1024 × 720) with the panel at its default corner: the real
+    keep_on_screen of the program on the real options window."""
+    from bellwether import options as options_module
+    screen = ScreenDouble(1024, 768, 720)
+    backend = Backend(fake_client, settings_path=state_path, skins=built_skins())
+    engine = QQmlApplicationEngine()
+    engine.rootContext().setContextProperty("backend", backend)
+    previous = qInstallMessageHandler(lambda mode, context, text: None)
+    try:
+        options = fitted_options(engine, 1024, 768)
+        options.open()
+        settle(app)
+        window = engine.rootObjects()[0]
+        window.setPosition(0, 0)
+        settle(app)
+        window.screen = lambda: screen  # this window is on the made-up screen
+        options_module.keep_on_screen(window, PanelDouble(screen), lower=True)
+        settle(app)
+        assert window.frameGeometry().height() == 496 and window.frameGeometry().y() == 224
+        corner = find(window, "isClose").mapToScene(QPointF(0, 0))
+        assert window.y() + corner.y() > 16 + 192  # the close control is below the panel
+        assert first_title_shows(window) and find(window, "isScroller").property("scrolls")
+        options_module.keep_on_screen(window, PanelDouble(screen), lower=False)  # the answer window: never lower
+        settle(app)
+        assert window.frameGeometry().height() == 496
+    finally:
+        shiboken6.delete(engine)
+        app.processEvents()
+        qInstallMessageHandler(previous)
+
+
+class WindowDouble:
+    """A window of the program for the glue of options.py and answer.py: it records each call."""
+
+    def __init__(self, screen):
+        self.calls, self.properties, self.visible, self._screen = [], {}, False, screen
+        self.visibleChanged = SimpleNamespace(connect=lambda slot: None)
+        self.screen_slots = []
+        self.screenChanged = SimpleNamespace(connect=self.screen_slots.append)
+
+    def __getattr__(self, name):
+        if name in ("show", "hide", "requestActivate", "raise_", "installEventFilter"):
+            return lambda *args: self.calls.append((name, *args)) or (setattr(self, "visible", name == "show")
+                                                                       if name in ("show", "hide") else None)
+        raise AttributeError(name)
+
+    def setScreen(self, screen):
+        self.calls.append(("setScreen", screen))
+        self._screen = screen
+
+    def screen(self):
+        return self._screen
+
+    def setProperty(self, name, value):
+        self.calls.append(("setProperty", name, value))
+        self.properties[name] = value
+
+    def property(self, name):
+        return self.properties.get(name)
+
+    def isVisible(self):
+        return self.visible
+
+    def isActive(self):
+        return False
+
+    def frameGeometry(self):
+        from PySide6.QtCore import QRect
+        return QRect(0, 0, 100, 100)
+
+    def x(self):
+        return 0
+
+    def y(self):
+        return 0
+
+    def height(self):
+        return 100
+
+    def setPosition(self, x, y):
+        self.calls.append(("setPosition", x, y))
+
+
+class EngineDouble:
+    """An engine whose `load` adds the window double after the panel."""
+
+    def __init__(self, panel, window):
+        self._roots, self._window = [panel], window
+
+    def rootObjects(self):
+        return list(self._roots)
+
+    def load(self, source):
+        self._roots.append(self._window)
+
+
+def panel_double(screen):
+    panel = PanelDouble(screen)
+    panel.property = lambda name: {"posX": 10, "screenName": "B"}.get(name)
+    return panel
+
+
+def test_the_options_window_opens_on_the_screen_of_the_panel_with_the_room_of_that_screen(app):
+    """Mutations M7 (no reset of roomHeight) and M8 (no setScreen) of the final review fail here."""
+    from bellwether.options import Options
+    first, second = ScreenDouble(800, 600, 560), ScreenDouble(1920, 1080, 1040)
+    window = WindowDouble(first)
+    options = Options(EngineDouble(panel_double(second), window))
+    options.open()
+    names = [call[0] for call in window.calls]
+    assert names.index("setScreen") < names.index("show") and ("setScreen", second) in window.calls
+    assert window.properties["roomWidth"] == 1920 and window.properties["roomHeight"] == 1080
+    window.properties["roomHeight"] = 400  # lowered below the panel at the last show
+    window.calls.clear()
+    options.open()
+    assert ("setProperty", "roomHeight", 1080) in window.calls  # given back before the next show
+    assert names.count("setScreen") == 1 and [c[0] for c in window.calls].count("setScreen") == 0  # first show only
+
+
+def test_on_wayland_the_window_takes_the_room_of_the_screen_that_the_compositor_tells_after_the_show(app, monkeypatch):
+    """Review F2: before the show Qt knows only the primary screen (or the last one)."""
+    from bellwether import options as options_module
+    from bellwether.options import Options
+    monkeypatch.setattr(options_module, "can_place_windows", lambda: False)
+    primary, wide = ScreenDouble(1024, 768, 768), ScreenDouble(2560, 1440, 1440)
+    window = WindowDouble(primary)
+    Options(EngineDouble(panel_double(wide), window)).open()
+    assert window.properties["roomWidth"] == 1024
+    window._screen = wide  # the compositor puts it on the wide monitor and Qt tells it
+    for slot in window.screen_slots:
+        slot(wide)
+    assert window.properties["roomWidth"] == 2560 and window.properties["roomHeight"] == 1440
+    window.hide()
+    for slot in window.screen_slots:
+        slot(primary)  # a hidden window: nothing
+    assert window.properties["roomWidth"] == 2560
+
+
+def test_the_place_and_the_lower_height_come_before_the_show(app):
+    """Review F6: on a small screen the first frame is already lower, below the panel (no full height first)."""
+    from bellwether.options import Options
+    small = ScreenDouble(1024, 768, 720)
+    window = WindowDouble(small)
+    window.frameGeometry = lambda: __import__("PySide6.QtCore", fromlist=["QRect"]).QRect(0, 0, 992, 688)
+    window.height = lambda: 688
+    Options(EngineDouble(panel_double(small), window)).open()
+    names = [call[0] if call[0] != "setProperty" else f"setProperty {call[1]}" for call in window.calls]
+    show = names.index("show")
+    assert "setPosition" in names[:show]
+    lowered = [call for call in window.calls[:show] if call[:2] == ("setProperty", "roomHeight")]
+    assert lowered[-1][2] == 496 + 80  # 720 - (16 + 192 + 16) = 496 px high, given before the show
+
+
+def test_the_answer_window_opens_on_the_screen_of_the_panel(app, monkeypatch):
+    from bellwether.answer import Answer
+    second = ScreenDouble(1920, 1080, 1040)
+    window = WindowDouble(ScreenDouble(800, 600, 560))
+    backend = SimpleNamespace(answerRequested=SimpleNamespace(connect=lambda slot: None))
+    Answer(EngineDouble(panel_double(second), window), backend).open()
+    names = [call[0] for call in window.calls]
+    assert ("setScreen", second) in window.calls and names.index("setScreen") < names.index("show")
+
+
+def test_where_the_compositor_places_windows_the_dialogs_get_no_screen_and_no_move(app, monkeypatch):
+    from bellwether import options as options_module
+    from bellwether.options import Options
+    monkeypatch.setattr(options_module, "can_place_windows", lambda: False)
+    window = WindowDouble(ScreenDouble(800, 600, 560))
+    Options(EngineDouble(panel_double(ScreenDouble(1920, 1080, 1040)), window)).open()
+    assert not [call for call in window.calls if call[0] in ("setScreen", "setPosition")]
+    assert window.properties["roomWidth"] == 800  # the room of the screen that Qt knows
+
+
+def test_the_rule_moves_a_real_window_and_leaves_it_where_the_window_system_places_windows(app, monkeypatch):
+    from PySide6.QtGui import QWindow
+    from bellwether import options as options_module
+    panel, window = QWindow(), QWindow()
+    panel.setGeometry(480, 16, 300, 192)
+    panel.show()
+    window.setGeometry(300, 0, 400, 300)
+    try:
+        options_module.keep_on_screen(window, panel)
+        frame = window.frameGeometry()
+        assert frame.x() + frame.width() + 16 == panel.frameGeometry().x() and frame.y() == 0  # 16 px left of it
+        window.setGeometry(300, 0, 400, 300)
+        monkeypatch.setattr(options_module, "can_place_windows", lambda: False)  # Wayland: the compositor places
+        options_module.keep_on_screen(window, panel)
+        assert (window.x(), window.y()) == (300, 0)
+    finally:
+        panel.destroy()
+        window.destroy()
+
+
+def test_the_panel_of_an_engine_is_its_window_with_a_place():
+    from types import SimpleNamespace
+    from bellwether.options import panel_of
+    options = SimpleNamespace(property=lambda name: None)
+    panel = SimpleNamespace(property=lambda name: {"posX": 5, "screenName": "A"}.get(name))
+    assert panel_of(SimpleNamespace(rootObjects=lambda: [options, panel])) is panel
+    assert panel_of(SimpleNamespace(rootObjects=lambda: [options])) is None

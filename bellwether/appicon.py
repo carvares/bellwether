@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
 from pathlib import Path
 from xml.etree import ElementTree
@@ -11,83 +10,18 @@ from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QImageReader, QPainter, QPainterPath
 from PySide6.QtSvg import QSvgRenderer
 
+from . import platform
+
 log = logging.getLogger("bellwether")
 
-DESKTOP_FILE = "herdr-app.desktop"
 SIZES = (16, 22, 24, 32, 44, 48, 64)  # The tray takes the size it needs, at 1x and 2x.
 SOURCE_SIZE = 256  # An SVG is drawn at this size one time and a bigger PNG is scaled down to it.
 CLIP_KEEPS = 0.5  # A clip that keeps less than this part of the drawing is a clip for a detail, not for the tile.
 # A usable mark covers this part of its square: less is nearly empty, more is a plain square.
 MARK_COVER = (0.03, 0.97)
 MARK_HOLE = 0.02  # On a plate, the picture that is cut out is at least this part of the square.
-_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,127}")
 _ARGB = QImage.Format.Format_ARGB32
 _SVG_NS = "{http://www.w3.org/2000/svg}"
-
-
-def default_dirs() -> tuple[list[Path], list[Path]]:
-    """The XDG folders of desktop files and of icons (hicolor theme, then pixmaps)."""
-    home = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
-    system = os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share"
-    data = [Path(home), *(Path(d) for d in system.split(":") if d)]
-    return [d / "applications" for d in data], [d / "icons" / "hicolor" for d in data] + [d / "pixmaps" for d in data]
-
-
-def _is_file(path: Path) -> bool:
-    try:
-        return path.is_file()
-    except OSError:
-        return False
-
-
-def _icon_entry(desktop_dirs) -> str | None:
-    """The Icon= value of the first herdr-app.desktop (the one the desktop uses)."""
-    for folder in desktop_dirs:
-        try:
-            text = (Path(folder) / DESKTOP_FILE).read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            continue
-        group = None
-        for line in map(str.strip, text.splitlines()):
-            if line.startswith("["):
-                group = line
-            elif group == "[Desktop Entry]" and line.startswith("Icon="):
-                return line[len("Icon="):].strip() or None
-        return None
-    return None
-
-
-def find_app_icon(desktop_dirs, icon_dirs) -> Path | None:
-    """The icon file of the Herdr app: an SVG if one exists, else the largest PNG.
-
-    An absolute Icon= path is taken only when it is an existing .svg or .png file.
-    """
-    entry = _icon_entry(desktop_dirs)
-    if entry is None:
-        return None
-    if entry.startswith("/"):
-        path = Path(entry)
-        return path if path.suffix.lower() in (".svg", ".png") and _is_file(path) else None
-    if not _NAME.fullmatch(entry):
-        return None
-    if entry.lower().endswith((".svg", ".png", ".xpm")):
-        entry = entry[:-4]  # Some desktop files give the name with an extension. The desktop ignores it.
-    svgs, pngs = [], []
-    for folder in map(Path, icon_dirs):
-        svgs.append(folder / "scalable" / "apps" / f"{entry}.svg")
-        try:
-            svgs += sorted(folder.glob(f"*/apps/{entry}.svg"))  # An SVG in a size folder, for example 48x48.
-            pngs += sorted(folder.glob(f"*/apps/{entry}.png"))
-        except OSError:
-            pass
-        svgs.append(folder / f"{entry}.svg")
-        pngs.append(folder / f"{entry}.png")
-    for path in svgs:
-        if _is_file(path):
-            return path
-    sized = [(QImageReader(str(path)).size().width(), path) for path in pngs if _is_file(path)]
-    sized = [item for item in sized if item[0] > 0]
-    return max(sized, key=lambda item: item[0])[1] if sized else None
 
 
 def _rect_clips(svg: bytes) -> list[tuple[float, float, float, float, float, float]]:
@@ -159,11 +93,25 @@ def _draw_svg(renderer: QSvgRenderer, clips) -> QImage:
     return image
 
 
+def _largest(path: Path) -> QImage:
+    """The image of the file; of a file with several sizes (the .icns of a macOS app, an .ico), the largest one."""
+    reader = QImageReader(str(path))
+    if reader.imageCount() <= 1:
+        return QImage(str(path))
+    best = QImage()
+    for index in range(reader.imageCount()):
+        if reader.jumpToImage(index):
+            image = reader.read()
+            if not image.isNull() and image.width() * image.height() > best.width() * best.height():
+                best = image
+    return best
+
+
 def load_source(path: Path) -> QImage | None:
     """The icon as a square image with alpha, or None if it cannot be read."""
     if Path(path).suffix.lower() == ".svg":
         return _render_svg(path)
-    picture = QImage(str(path))
+    picture = _largest(path)
     if picture.isNull():
         return None
     if max(picture.width(), picture.height()) > SOURCE_SIZE:
@@ -179,11 +127,10 @@ def load_source(path: Path) -> QImage | None:
     return image
 
 
-def load_app_icon(desktop_dirs=None, icon_dirs=None) -> QImage | None:
-    """The Herdr app icon, read one time at start. Logs one line (no path) when the tray must use the circle."""
-    if desktop_dirs is None or icon_dirs is None:
-        desktop_dirs, icon_dirs = default_dirs()
-    path = find_app_icon(desktop_dirs, icon_dirs)
+def load_app_icon(find=None) -> QImage | None:
+    """The Herdr app icon, read one time at start. Logs one line (no path) when the tray must use the circle.
+    `find` gives the icon file (a test gives its own); None: `platform.app_icon_file`, the places of the system."""
+    path = (find or platform.app_icon_file)()
     if path is None:
         log.info("the Herdr app icon was not found: the tray icon is a circle")
         return None

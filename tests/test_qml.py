@@ -1,5 +1,10 @@
-"""Smoke test of the real Main.qml, loaded the same way as bellwether/__main__.py (off screen)."""
+"""Smoke test of the real panel (the layer shell), loaded the same way as bellwether/__main__.py (off screen)."""
 import json
+import math
+import logging
+import os
+import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -12,13 +17,17 @@ from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent, QQmlExpression, 
 from PySide6.QtQuick import QQuickWindow
 from PySide6.QtTest import QTest
 
-from bellwether.__main__ import IMPORT_PATH, UI_PATH, follow_refresh_rate
+from bellwether.__main__ import UI_PATH, follow_refresh_rate
+from bellwether.platform.linux import IMPORT_PATH
 from bellwether.backend import Backend
 from bellwether.icons import Icons
 from bellwether.layouts import built_skins
 from bellwether.state import STATE_COLORS, Agent
+from tests.conftest import LAYERSHELL_QMLDIR, needs_layershell  # noqa: F401  (other test modules import it here)
 
-LAYERSHELL_QMLDIR = Path("/usr/lib/qt6/qml/org/kde/layershell/qmldir")
+# The panel in each window shell: the layer shell, as the program loads it on KDE Wayland, and the plain shell.
+LAYER_QML = UI_PATH / "shells" / "Layer.qml"
+SHELLS = {"layer": LAYER_QML, "plain": UI_PATH / "shells" / "Plain.qml"}
 # layer-shell-qt says this for every window on a platform that is not Wayland. It is expected off screen.
 OFFSCREEN_NOTE = "is not a wayland window"
 # The sizes of Layout C (design/layouts/c-hud.qml): the panel, a closed panel, an agent row, the space under a list.
@@ -29,10 +38,8 @@ NEUTRAL, FRAME = "#6b747d", "#2b333b"
 SKINS = {**built_skins(), "T": Path(__file__).parent / "skins" / "T.qml", "X": Path(__file__).parent / "skins" / "Broken.qml"}
 T_WIDTH, T_ROW = 240, 20  # the test skin: four status rows and the list of the open group below them
 
-pytestmark = pytest.mark.skipif(
-    not LAYERSHELL_QMLDIR.is_file(),
-    reason=f"the system QML module org.kde.layershell is not installed ({LAYERSHELL_QMLDIR} not found)",
-)
+# The tests of the layer shell are skipped without its system module (the `shell` fixture of tests/conftest.py, and
+# `needs_layershell` on a test that loads the layer shell by itself); the tests of the plain shell run everywhere.
 
 
 def walk(item):
@@ -62,8 +69,9 @@ class RecordingBackend(Backend):
 
 
 @pytest.fixture
-def window(app, fake_client, tmp_path):
-    """Yield (root window, backend, Qt messages). The poll thread is not started."""
+def window(app, fake_client, tmp_path, shell):
+    """Yield (root window, backend, Qt messages) of the panel in the shell of the test (the layer shell unless the
+    test gives one). The poll thread is not started."""
     assert app.platformName() == "offscreen"
     # The icons folder is a made-up one in tmp_path. It does not exist until a test makes it.
     icons = Icons(tmp_path / "app", tmp_path / "cache")
@@ -74,10 +82,10 @@ def window(app, fake_client, tmp_path):
     engine.warnings.connect(lambda errors: messages.extend(e.toString() for e in errors))
     engine.rootContext().setContextProperty("backend", backend)
     engine.addImportPath(str(IMPORT_PATH))
-    engine.load(UI_PATH / "Main.qml")
+    engine.load(SHELLS[shell])
     try:
         roots = engine.rootObjects()
-        assert roots, f"Main.qml did not load: {messages}"
+        assert roots, f"the panel did not load: {messages}"
         assert isinstance(roots[0], QQuickWindow)
         yield roots[0], backend, messages
     finally:
@@ -111,6 +119,29 @@ def click(app, root, item):
     settle(app)
 
 
+# The tests whose result can depend on the window shell run on both. (The layer shell is the default of the window
+# fixture; a test about the layer protocol itself stays on it.)
+both_shells = pytest.mark.parametrize("shell", ["layer", "plain"], indirect=True)
+
+
+def window_follows(app, root, shell):
+    """The plain shell: the window is at the place of the panel (its screen plus posX, posY). The layer shell off
+    screen: no compositor moves the window, so there is nothing to check (the protocol trace checks the margins)."""
+    if shell == "plain":
+        settle(app)
+        wanted = (js(root, "root.home.x + root.posX"), js(root, "root.home.y + root.posY"))
+        assert (root.x(), root.y()) == wanted
+
+
+def release(root, point, at):
+    """Let the left button go where the pointer is: `point` was its place in the window when the window was at `at`
+    (QPoint, the place of the window before the last move). The plain shell moves the window with the panel, so the
+    pointer is now at `point` less that move; a release at a different place of the desktop would be one more move.
+    The layer shell off screen: no compositor moves the window, the place is `point`."""
+    QTest.mouseRelease(root, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+                       point - (root.position() - at))
+
+
 AGENTS = [
     Agent("t1", "blocked", "rev", "Main"),
     Agent("t2", "working", "ana", "api / 1"),
@@ -118,6 +149,7 @@ AGENTS = [
 ]
 
 
+@both_shells
 def test_main_qml_shows_four_status_rows_and_opens_one_group_at_a_time(app, window):
     root, backend, messages = window
     backend.apply(AGENTS)
@@ -145,6 +177,7 @@ def test_main_qml_shows_four_status_rows_and_opens_one_group_at_a_time(app, wind
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
+@both_shells
 def test_a_click_on_an_agent_row_jumps_one_time(app, window):
     root, backend, messages = window
     backend.apply(AGENTS)
@@ -230,6 +263,7 @@ def test_a_failure_message_opens_its_group_one_time_and_then_follows_only_a_stat
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
+@both_shells
 def test_the_scroll_indicator_does_not_take_clicks_or_the_wheel(app, window):
     root, backend, messages = window
     backend.apply([Agent(f"i{n:02d}", "idle", f"helper {n:02d}", "pool") for n in range(12)])
@@ -289,8 +323,8 @@ def test_agent_rows_show_the_icon_of_the_program_and_no_program_word(app, window
     folder = tmp_path / "app" / "icons"
     folder.mkdir(parents=True)
     square = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path %sd="M2 2h20v20H2z"/></svg>'
-    (folder / "pi.svg").write_text(square % "")  # a black glyph: it must show in the text colour
-    (folder / "claude.svg").write_text(square % 'fill="#d97757" ')  # a picture: it shows as it is
+    (folder / "pi.svg").write_text(square % "", encoding="utf-8")  # a black glyph: it must show in the text colour
+    (folder / "claude.svg").write_text(square % 'fill="#d97757" ', encoding="utf-8")  # a picture: it shows as it is
     backend.apply([
         Agent("t1", "working", "rev", "Main", "pi"),
         Agent("t2", "working", "", "Main", "claude-code"),
@@ -331,7 +365,7 @@ def test_an_icon_copy_that_was_deleted_shows_again_with_no_warning(app, window, 
     root, backend, messages = window
     folder = tmp_path / "app" / "icons"
     folder.mkdir(parents=True)
-    (folder / "pi.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M2 2h20v20H2z"/></svg>')
+    (folder / "pi.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M2 2h20v20H2z"/></svg>', encoding="utf-8")
     backend.apply([Agent("t1", "working", "", "Main", "pi")])
     settle(app)
     click(app, root, rows(root, "status")[2])
@@ -470,7 +504,8 @@ def test_with_no_agents_the_bar_is_one_empty_track(app, window, agents):
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
-def test_a_drag_from_a_row_moves_the_widget_and_does_not_click(app, window):
+@both_shells
+def test_a_drag_from_a_row_moves_the_widget_and_does_not_click(app, window, shell):
     root, backend, messages = window
     backend.apply(AGENTS)
     settle(app)
@@ -482,13 +517,17 @@ def test_a_drag_from_a_row_moves_the_widget_and_does_not_click(app, window):
         start = item.mapToScene(QPointF(item.width() / 2, item.height() / 2)).toPoint()
         QTest.mousePress(root, left, none, start)
         settle(app)
-        for step in (QPoint(-10, 5), QPoint(-20, 12)):  # each move is from the start: the window stays off screen
+        # Each event is at the start point in the window, plus the step: with the layer shell off screen the window
+        # stays, so the steps add up; the plain shell moves the window, as under a pointer that moves by each step.
+        for step in (QPoint(-10, 5), QPoint(-20, 12)):
+            at = root.position()
             QTest.mouseMove(root, start + step)
             settle(app)
-        QTest.mouseRelease(root, left, none, start + QPoint(-20, 12))
+        release(root, start + QPoint(-20, 12), at)
         settle(app)
         after = (root.property("posX"), root.property("posY"))
         assert after == (before[0] - 30, before[1] + 17)
+        window_follows(app, root, shell)
         assert backend.saves == [after]  # saved one time, at the release
         assert root.property("openState") == "working" and backend._client.focused == []
     assert root.property("atDefault") is False
@@ -680,6 +719,7 @@ def pointer_area(root):
     return next(i for i in walk(root.contentItem()) if i.property("lastMoveMs") is not None)
 
 
+@both_shells
 def test_a_move_counts_only_when_one_step_passed_after_the_last_move(app, window):
     root, backend, messages = window
     backend.apply(AGENTS)
@@ -702,9 +742,10 @@ def test_a_move_counts_only_when_one_step_passed_after_the_last_move(app, window
     QTest.mouseMove(root, start + QPoint(-12, 0), 0)  # the compositor did not move the window yet: no move
     assert root.property("posX") == before[0] - 10
     area.setProperty("lastMoveMs", time.time() * 1000 - 21)  # one step passed
+    at = root.position()
     QTest.mouseMove(root, start + QPoint(-11, 0), 0)
     assert root.property("posX") == before[0] - 21
-    QTest.mouseRelease(root, left, none, start + QPoint(-11, 0))
+    release(root, start + QPoint(-11, 0), at)
     settle(app)
     assert backend.saves == [(before[0] - 21, before[1])]
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
@@ -721,7 +762,7 @@ STACKED = [("T", 0, 0, 1920, 1080), ("U", 0, 1080, 1920, 1080)]
 
 
 def js(root, text):
-    """The value of a JavaScript expression in Main.qml."""
+    """The value of a JavaScript expression in the panel."""
     expression = QQmlExpression(qmlContext(root), root, text)
     value = expression.evaluate()
     assert not expression.hasError(), expression.error().toString()
@@ -784,7 +825,8 @@ def test_a_drag_goes_across_an_edge_that_two_screens_share_and_stops_at_an_outer
     assert (found["x"], found["y"]) == result
 
 
-def test_the_panel_is_kept_on_the_screen_that_holds_it(app, window):
+@both_shells
+def test_the_panel_is_kept_on_the_screen_that_holds_it(app, window, shell):
     root, backend, messages = window
     assert root.property("screenName") == root.screen().name()  # at start: the screen of the window
     backend.apply([])
@@ -810,15 +852,18 @@ def test_the_panel_is_kept_on_the_screen_that_holds_it(app, window):
     click(app, root, rows(root, "status")[2])
     assert root.height() == CLOSED + 2 * AGENT_ROW + LIST_END
     assert place(root) == ("B", 1920 - WIDTH - 16, 1080 - root.height())
+    window_follows(app, root, shell)
     assert backend.saves == []
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
-def test_move_to_next_screen_keeps_the_distance_to_the_nearer_edges(app, window):
+@both_shells
+def test_move_to_next_screen_keeps_the_distance_to_the_nearer_edges(app, window, shell):
     root, backend, messages = window
     use_screens(root, OFFSET, "A", 2200, 40)  # 40 px from the right edge of A and 40 px from its top
     js(root, "root.moveToNextScreen()")
     assert place(root) == ("B", 1920 - WIDTH - 40, 40)
+    window_follows(app, root, shell)
     assert (backend.saves, backend.screens) == ([(1560, 40)], ["B"])
     js(root, "root.moveToNextScreen()")  # the last screen: the next one is the first
     assert place(root) == ("A", 2200, 40)
@@ -826,6 +871,7 @@ def test_move_to_next_screen_keeps_the_distance_to_the_nearer_edges(app, window)
     root.setProperty("posY", 1440 - CLOSED - 20)  # at the left, 20 px above the bottom edge
     js(root, "root.moveToNextScreen()")
     assert place(root) == ("B", 30, 1080 - CLOSED - 20)
+    window_follows(app, root, shell)
     # A place that does not exist on the smaller screen: the middle of the big one stays at the left and top
     # distance, and the clamp keeps the panel on the screen.
     root.setProperty("screenName", "A")
@@ -842,9 +888,10 @@ def test_move_to_next_screen_keeps_the_distance_to_the_nearer_edges(app, window)
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
+@both_shells
 def test_move_to_next_screen_keeps_the_default_corner_and_saves_only_the_screen(app, window, tmp_path):
     root, backend, messages = window
-    (tmp_path / "state.json").write_text('{"x": 9, "y": 9, "screen": "A", "layout": "C"}')
+    (tmp_path / "state.json").write_text('{"x": 9, "y": 9, "screen": "A", "layout": "C"}', encoding="utf-8")
     use_screens(root, OFFSET, "A", 0, 0)
     root.setProperty("atDefault", True)
     js(root, "root.clampPosition()")
@@ -853,34 +900,39 @@ def test_move_to_next_screen_keeps_the_default_corner_and_saves_only_the_screen(
     # No place in the file: at the next start the panel is at the default corner again, and it follows the
     # width of the screen and of the layout.
     assert (backend.saves, backend.screens) == ([], ["B"])
-    assert json.loads((tmp_path / "state.json").read_text()) == {"screen": "B", "layout": "C"}
+    assert json.loads((tmp_path / "state.json").read_text(encoding="utf-8")) == {"screen": "B", "layout": "C"}
     root.setProperty("atDefault", False)  # a panel that the person moved saves its place
     js(root, "root.moveToNextScreen()")
     assert backend.screens == ["B", "A"] and len(backend.saves) == 1
-    assert json.loads((tmp_path / "state.json").read_text())["x"] == backend.saves[0][0]
+    assert json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))["x"] == backend.saves[0][0]
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
 def drag_by(app, root, steps):
-    """Press in the middle of the header and move to each step from there. The window stays off screen, so the
-    steps add up. Return the function that releases the button."""
+    """Press in the middle of the header and move to each step from there. The steps add up: with the layer shell
+    off screen the window stays; the plain shell moves the window, as under a pointer that moves by each step.
+    Return the function that releases the button."""
     left, none = Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier
     start = QPoint(160, 20)
     QTest.mouseMove(root, start)  # the pointer is there before the press
     settle(app)
     QTest.mousePress(root, left, none, start)
     settle(app)
+    at = root.position()
     for step in steps:
+        at = root.position()
         QTest.mouseMove(root, start + step)
         settle(app)
-    return lambda: (QTest.mouseRelease(root, left, none, start + steps[-1]), settle(app))
+    return lambda: (release(root, start + steps[-1], at), settle(app))
 
 
-def test_a_drag_to_the_other_screen_leaves_the_panel_there(app, window):
+@both_shells
+def test_a_drag_to_the_other_screen_leaves_the_panel_there(app, window, shell):
     root, backend, messages = window
     use_screens(root, OFFSET, "A", 2100, 600)
     release = drag_by(app, root, [QPoint(90, 0), QPoint(110, 0)])
     assert place(root) == ("A", 2300, 600)  # on the two screens: past the edge of A (2240), still a panel of A
+    window_follows(app, root, shell)
     release()
     assert place(root) == ("A", 2240, 600)  # its centre is on A: it stays on A, all of it
     assert (backend.saves, backend.screens) == ([(2240, 600)], ["A"])
@@ -888,6 +940,7 @@ def test_a_drag_to_the_other_screen_leaves_the_panel_there(app, window):
     assert place(root) == ("A", 2540, 630)
     release()
     assert place(root) == ("B", 0, 270)  # its centre is on B: the same place of the desktop, all of it on B
+    window_follows(app, root, shell)
     assert (backend.saves[-1], backend.screens[-1]) == ((0, 270), "B")
     release = drag_by(app, root, [QPoint(-190, 0), QPoint(-210, 0)])  # and back, to the left
     assert place(root) == ("B", -400, 270)
@@ -898,6 +951,69 @@ def test_a_drag_to_the_other_screen_leaves_the_panel_there(app, window):
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
+# A monitor at 150 % (1920 × 1080 pixels) left of one at 100 %, as Qt 6 gives them on Windows and macOS: the area of
+# each screen in Qt's coordinates starts at its place in pixels and has its size in Qt's pixels, so there is a gap from
+# 1280 to 1920 that is on no screen.
+MIXED = [("WIDE", 0, 0, 1280, 720), ("NEAR", 1920, 0, 1280, 720)]
+# Qt's map of a point of the panel to the desktop with these screens: the pixels of the monitor of the window, then
+# the screen under that pixel (QWindow::mapToGlobal, QHighDpi::fromNativeGlobalPosition).
+QT_MIXED_MAP = """root.pointerMap = function(item, x, y) {
+    var p = item.mapToItem(null, x, y)
+    var wide = root.x < 1280
+    var nx = (wide ? root.x * 1.5 : root.x) + p.x * (wide ? 1.5 : 1)
+    var ny = (wide ? root.y * 1.5 : root.y) + p.y * (wide ? 1.5 : 1)
+    return nx < 1920 ? Qt.point(nx / 1.5, ny / 1.5) : Qt.point(nx, ny)
+}"""
+
+
+def at_pixel(root, pixel):
+    """The point of the window under the pointer at `pixel` of the desktop (in pixels of the monitors)."""
+    wide = root.x() < 1280
+    scale = 1.5 if wide else 1.0
+    origin = QPointF(root.x() * scale, root.y() * scale) if wide else QPointF(root.x(), root.y())
+    return ((pixel - origin) / scale).toPoint()
+
+
+@pytest.mark.parametrize("shell", ["plain"], indirect=True)
+def test_a_drag_crosses_the_gap_between_monitors_of_different_scales(app, window):
+    """The pointer moves from the 150 % monitor onto the 100 % one: the panel follows it there (with a move of the
+    pointer in the pixels of the window it would stop at the edge of the gap). At the release it is a panel of the
+    other monitor, with the point of the press under the pointer."""
+    root, backend, messages = window
+    use_screens(root, MIXED, "WIDE", 900, 300)
+    js(root, QT_MIXED_MAP)
+    settle(app)
+    assert (root.x(), root.y()) == (900, 300)
+    left, none = Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier
+    press = QPointF(1350 + 150, 450 + 30)  # the pixel under the point (100, 20) of the panel
+    QTest.mouseMove(root, at_pixel(root, press))
+    QTest.mousePress(root, left, none, at_pixel(root, press))
+    settle(app)
+    seen = []
+    for pixel_x in (1700, 1900, 2000, 2100):
+        time.sleep(0.03)
+        QTest.mouseMove(root, at_pixel(root, QPointF(pixel_x, 480)))
+        settle(app)
+        seen.append(place(root))
+    assert seen[:2] == [("WIDE", 960, 300), ("WIDE", 960, 300)]  # at the edge of the gap: the pointer is on WIDE
+    assert seen[2:] == [("WIDE", 1920, 460), ("WIDE", 2000, 460)]  # on NEAR: under the pointer (2000 - 100, 480 - 20)
+    QTest.mouseRelease(root, left, none, at_pixel(root, QPointF(2100, 480)))
+    settle(app)
+    assert place(root) == ("NEAR", 80, 460) and backend.saves[-1] == (80, 460)
+    assert (root.x(), root.y()) == (2000, 460)
+    # QTest says so of a pointer past the window (the real pointer is held by the window during a drag).
+    assert [m for m in messages if OFFSCREEN_NOTE not in m and "occurs outside target window" not in m] == []
+
+
+@both_shells
+def test_only_the_plain_shell_knows_the_pointer_in_the_desktop(app, window, shell):
+    """The layer shell (a layer surface has no place in a desktop) adds the move of the pointer, as before."""
+    root, _backend, _messages = window
+    known = js(root, "root.desktopPoint(root.contentItem, 5, 6) !== null")
+    assert known is (shell == "plain")
+
+
+@both_shells
 def test_a_drag_stops_at_an_edge_with_no_screen_behind_it(app, window):
     root, backend, messages = window
     use_screens(root, OFFSET, "A", 2100, 50)  # at this height nothing is at the right of A
@@ -909,6 +1025,7 @@ def test_a_drag_stops_at_an_edge_with_no_screen_behind_it(app, window):
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
+@both_shells
 def test_a_group_that_changes_size_does_not_pull_a_drag_back_to_its_screen(app, window):
     root, backend, messages = window
     backend.apply(AGENTS)
@@ -932,7 +1049,8 @@ def wait_until(app, condition, timeout=2.0):
     return condition()
 
 
-def test_a_monitor_that_goes_away_leaves_the_panel_on_a_screen_that_stays(app, window):
+@both_shells
+def test_a_monitor_that_goes_away_leaves_the_panel_on_a_screen_that_stays(app, window, shell):
     root, backend, messages = window
     backend.apply([])
     use_screens(root, OFFSET, "B", 1500, 800)
@@ -947,10 +1065,12 @@ def test_a_monitor_that_goes_away_leaves_the_panel_on_a_screen_that_stays(app, w
     js(root, f"root.screenSource = {screen_list([('C', 4480, 0, 1280, 720)])}")  # and A: only the small one stays
     assert wait_until(app, lambda: root.property("screenName") == "C")
     assert place(root) == ("C", 1280 - WIDTH, 720 - CLOSED)  # kept on the screen
+    window_follows(app, root, shell)
     assert backend.saves == []  # the saved place stays: the panel is on its monitor again at a later start
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
+@both_shells
 def test_a_panel_that_the_compositor_closes_shows_again_and_a_hidden_panel_stays_hidden(app, window):
     root, backend, messages = window
     settle(app)
@@ -968,6 +1088,7 @@ def test_a_panel_that_the_compositor_closes_shows_again_and_a_hidden_panel_stays
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
+@both_shells
 @pytest.mark.parametrize(
     "saved, at_default, x, y",
     [
@@ -978,9 +1099,9 @@ def test_a_panel_that_the_compositor_closes_shows_again_and_a_hidden_panel_stays
         ('{"screen": "%s", "layout": "C"}', True, None, 16),  # only the screen: the default corner of that screen
     ],
 )
-def test_the_start_uses_the_saved_screen_and_place(app, tmp_path, request, saved, at_default, x, y):
+def test_the_start_uses_the_saved_screen_and_place(app, tmp_path, request, shell, saved, at_default, x, y):
     name = app.primaryScreen().name()
-    (tmp_path / "state.json").write_text(saved % name if "%s" in saved else saved)
+    (tmp_path / "state.json").write_text(saved % name if "%s" in saved else saved, encoding="utf-8")
     root, backend, messages = request.getfixturevalue("window")
     settle(app)
     default_x = root.screen().size().width() - WIDTH - 16
@@ -993,6 +1114,7 @@ def test_the_start_uses_the_saved_screen_and_place(app, tmp_path, request, saved
 
 # ----- layouts: the skin changes, the window and its state stay -----
 
+@both_shells
 def test_a_different_layout_shows_in_the_same_window_and_keeps_the_place_the_screen_and_the_open_group(app, window, tmp_path):
     root, backend, messages = window
     backend.apply(many(blocked=1, working=2, idle=12))
@@ -1014,7 +1136,7 @@ def test_a_different_layout_shows_in_the_same_window_and_keeps_the_place_the_scr
     assert place(root) == ("B", 700, 300) and root.property("openState") == "idle"
     assert [r.property("stateName") for r in rows(root, "status")] == ["blocked", "done", "working", "idle"]
     assert len(rows(root, "agent")) == 12
-    assert json.loads((tmp_path / "state.json").read_text()) == {"layout": "T"}
+    assert json.loads((tmp_path / "state.json").read_text(encoding="utf-8")) == {"layout": "T"}
     assert backend.saves == []  # the place did not change: it is not saved again
 
     backend.setLayout("C")
@@ -1063,6 +1185,7 @@ def test_the_window_finds_the_rows_of_a_second_skin_by_their_role(app, window):
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
 
 
+@both_shells
 def test_a_bigger_skin_is_kept_on_the_screen_and_the_default_corner_follows_the_width(app, window):
     root, backend, messages = window
     backend.setLayout("T")
@@ -1083,7 +1206,7 @@ def test_a_bigger_skin_is_kept_on_the_screen_and_the_default_corner_follows_the_
 
 
 def test_a_start_shows_the_saved_layout(app, tmp_path, request):
-    (tmp_path / "state.json").write_text('{"x": 120, "y": 48, "layout": "T"}')
+    (tmp_path / "state.json").write_text('{"x": 120, "y": 48, "layout": "T"}', encoding="utf-8")
     root, backend, messages = request.getfixturevalue("window")
     backend.apply(AGENTS)
     settle(app)
@@ -1101,20 +1224,21 @@ def test_a_skin_that_does_not_load_gives_the_default_layout(app, window, tmp_pat
     settle(app)
     assert backend.layout == "C" and (root.width(), root.height()) == (WIDTH, CLOSED + 2 * AGENT_ROW + LIST_END)
     assert root.isVisible() and root.property("openState") == "working"
-    assert json.loads((tmp_path / "state.json").read_text()) == {"layout": "X"}  # only in memory: the file stays
+    assert json.loads((tmp_path / "state.json").read_text(encoding="utf-8")) == {"layout": "X"}  # only in memory: the file stays
     assert any("Broken.qml" in m for m in messages)  # Qt says why the file did not load
 
 
 def test_a_start_with_a_saved_skin_that_does_not_load_shows_the_default_layout(app, tmp_path, request):
-    (tmp_path / "state.json").write_text('{"layout": "X"}')
+    (tmp_path / "state.json").write_text('{"layout": "X"}', encoding="utf-8")
     root, backend, messages = request.getfixturevalue("window")
     assert not root.isVisible()  # no window without a skin: a layer surface must have a size
     settle(app)
     assert backend.layout == "C" and (root.width(), root.height()) == (WIDTH, OFFLINE)
     assert root.isVisible() and root.property("started") is True
-    assert json.loads((tmp_path / "state.json").read_text()) == {"layout": "X"}
+    assert json.loads((tmp_path / "state.json").read_text(encoding="utf-8")) == {"layout": "X"}
 
 
+@both_shells
 def test_a_skin_that_reports_the_size_0_does_not_change_the_size_of_the_window(app, window):
     """A layer surface must never get the size 0."""
     root, backend, messages = window
@@ -1261,3 +1385,330 @@ def test_a_group_that_opens_again_starts_at_its_first_row(app, window):
         assert flick.property("contentY") == 0, layout
         assert [r.property("key") for r in rows(root, "agent")][:1] == ["i000"]
     assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+# ----- the plain shell: a frameless window above the others, for the systems with no layer shell -----
+
+plain_only = pytest.mark.parametrize("shell", ["plain"], indirect=True)
+TYPE_MASK = Qt.WindowType.WindowType_Mask
+
+
+@plain_only
+def test_the_plain_shell_is_a_frameless_tool_window_above_the_others_with_a_clear_background(app, window):
+    root, backend, messages = window
+    settle(app)
+    flags = root.flags()
+    assert flags & TYPE_MASK == Qt.WindowType.Tool  # no entry in a taskbar
+    for flag in (Qt.WindowType.FramelessWindowHint, Qt.WindowType.WindowStaysOnTopHint,
+                 Qt.WindowType.WindowDoesNotAcceptFocus, Qt.WindowType.NoDropShadowWindowHint):
+        assert flags & flag == flag, flag
+    assert root.color().alpha() == 0 and root.isVisible()
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+@pytest.mark.parametrize("name", ["Layer.qml", "Plain.qml", "../PanelShell.qml"])
+def test_no_shell_asks_for_the_focus(name):
+    """The panel never takes the keyboard: no QML of the panel window asks for the focus or for the front. (The
+    off-screen platform makes every window that shows the active one, so a test of the active window proves
+    nothing here: the flag WindowDoesNotAcceptFocus and this rule are the test; the real runs show the rest.)"""
+    text = (UI_PATH / "shells" / name).read_text(encoding="utf-8")
+    assert [word for word in ("requestActivate", "forceActiveFocus", "raise()", "focus: true") if word in text] == []
+
+
+def geometry_log(root):
+    """A list that gets the geometry of the window (x, y, width, height) at each change of one of them."""
+    seen = []
+    note = lambda *_: seen.append((root.x(), root.y(), root.width(), root.height()))
+    for signal in (root.xChanged, root.yChanged, root.widthChanged, root.heightChanged):
+        signal.connect(note)
+    return seen
+
+
+def requests(root):
+    return root.property("placeRequests")
+
+
+@plain_only
+def test_the_plain_window_is_at_the_place_of_the_panel_and_a_new_size_keeps_its_top_left_corner(app, window):
+    root, backend, messages = window
+    settle(app)
+    real = root.screen().geometry()
+    assert root.property("atDefault") is True
+    assert (root.x(), root.y()) == (real.x() + real.width() - WIDTH - 16, real.y() + 16)  # the default corner
+    use_screens(root, OFFSET, "B", 100, 200)
+    settle(app)
+    assert (root.x(), root.y()) == (2560 + 100, 360 + 200)  # the screen of the panel and the place on it
+    backend.apply(AGENTS)
+    settle(app)
+    size = (root.width(), root.height())
+    seen = geometry_log(root)
+    asked = requests(root)
+    click(app, root, rows(root, "status")[2])  # a group opens: the window is taller
+    assert root.height() > size[1] and root.width() == size[0]
+    assert (root.x(), root.y()) == (2660, 560) and place(root) == ("B", 100, 200)
+    assert {s[:2] for s in seen} == {(2660, 560)} and requests(root) == asked + 1  # one request: the size
+    click(app, root, rows(root, "status")[2])  # and closes
+    assert (root.width(), root.height()) == size and (root.x(), root.y()) == (2660, 560)
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+@both_shells
+def test_the_panel_stays_out_of_the_part_of_the_screen_that_the_system_keeps(app, window, shell):
+    """`reserved` (the program gives it to the plain shell: the macOS menu bar and Dock, X11 panels): the default
+    corner and the clamp use the work area. Without it (the layer shell) the whole screen, as before."""
+    root, backend, messages = window
+    use_screens(root, OFFSET, "B", 100, 200)
+    w, h = root.width(), root.height()
+    js(root, "root.reserved = {B: {top: 31, right: 10, bottom: 70}, A: {top: 25}}")
+    root.setProperty("atDefault", True)
+    js(root, "root.clampPosition()")
+    settle(app)
+    assert place(root) == ("B", 1920 - 10 - w - 16, 31 + 16)  # the default corner of the work area
+    root.setProperty("atDefault", False)
+    for asked, kept in (((100, 5), (100, 31)), ((5000, 5000), (1920 - 10 - w, 1080 - 70 - h)), ((0, 300), (0, 300))):
+        root.setProperty("posX", asked[0])
+        root.setProperty("posY", asked[1])
+        js(root, "root.clampPosition()")
+        assert place(root) == ("B", *kept)
+    root.setProperty("posY", 5)
+    js(root, "root.reserved = ({})")  # nothing kept: the whole screen again
+    settle(app)
+    js(root, "root.clampPosition()")
+    assert place(root) == ("B", 0, 5)
+    window_follows(app, root, shell)
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+@plain_only
+def test_a_place_change_of_the_plain_window_is_one_request_with_both_coordinates(app, window):
+    """x and y go to the window system together: the window never stands at a point between the two places (from
+    B to A that point, 100,560, is on A; from A to B, 2660,200 is on no screen)."""
+    root, backend, messages = window
+    use_screens(root, OFFSET, "B", 100, 200)
+    settle(app)
+    for to, wanted in (("A", (100, 200)), ("B", (2660, 560)), ("A", (100, 200))):
+        seen, asked = geometry_log(root), requests(root)
+        js(root, "root.moveToNextScreen()")
+        settle(app)
+        assert place(root)[0] == to and (root.x(), root.y()) == wanted
+        assert requests(root) == asked + 1 and {s[:2] for s in seen} == {wanted}
+    seen, asked = geometry_log(root), requests(root)
+    root.setProperty("posX", 300)  # two changes in one step: one request
+    root.setProperty("posY", 400)
+    settle(app)
+    assert (root.x(), root.y()) == (300, 400) and requests(root) == asked + 1 and {s[:2] for s in seen} == {(300, 400)}
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+@plain_only
+def test_a_new_size_at_the_default_corner_is_one_request_and_never_past_the_right_edge(app, window):
+    root, backend, messages = window
+    use_screens(root, OFFSET, "B", 0, 0)
+    root.setProperty("atDefault", True)
+    js(root, "root.clampPosition()")
+    settle(app)
+    assert (root.x(), root.y()) == (2560 + 1920 - WIDTH - 16, 360 + 16)
+    for scale in (1.5, 2.0, 0.75, 1.0):
+        seen, asked = geometry_log(root), requests(root)
+        assert backend.setScale(scale) is True
+        settle(app)
+        width = root.width()
+        assert width == math.ceil(WIDTH * scale - 0.000001)
+        assert (root.x(), root.y()) == (2560 + 1920 - width - 16, 360 + 16), scale
+        assert requests(root) == asked + 1, scale
+        assert all(x + w <= 2560 + 1920 - 16 for x, y, w, h in seen), (scale, seen)  # no frame past the edge
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+@plain_only
+def test_a_plain_window_that_the_window_system_moves_goes_back_one_time(app, window):
+    root, backend, messages = window
+    use_screens(root, OFFSET, "A", 300, 400)
+    settle(app)
+    assert (root.x(), root.y()) == (300, 400)
+    asked = requests(root)
+    root.setPosition(QPoint(300, 500))  # the window manager keeps the window inside an area
+    settle(app)
+    assert (root.x(), root.y()) == (300, 400) and requests(root) == asked + 1  # asked again, one time
+    root.setPosition(QPoint(300, 500))  # it does it again: the shell leaves it
+    settle(app)
+    assert (root.x(), root.y()) == (300, 500) and requests(root) == asked + 1
+    assert place(root) == ("A", 300, 400)  # the place of the panel stays
+    root.setProperty("posX", 310)  # a new place: asked, and asked again after one more move by the system
+    settle(app)
+    assert (root.x(), root.y()) == (310, 400) and requests(root) == asked + 2
+    root.setPosition(QPoint(0, 0))
+    settle(app)
+    assert (root.x(), root.y()) == (310, 400) and requests(root) == asked + 3
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+@plain_only
+def test_on_a_window_system_that_places_the_window_a_drag_is_its_move_and_the_place_is_not_saved(app, window):
+    """Wayland with the plain shell: the compositor does not move the window for the program, so the panel asks the
+    compositor to move it (startSystemMove), and does not change or save its place."""
+    root, backend, messages = window
+    backend.apply(AGENTS)
+    use_screens(root, OFFSET, "A", 300, 400)
+    root.setProperty("windowSystemPlaces", True)  # Qt.platform.pluginName "wayland"
+    settle(app)
+    left, none = Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier
+    start = QPoint(160, 20)
+    QTest.mousePress(root, left, none, start)
+    for step in (QPoint(10, 0), QPoint(40, 30), QPoint(90, 60)):
+        QTest.mouseMove(root, start + step)
+        settle(app)
+        assert root.property("systemMove") is True and place(root) == ("A", 300, 400)
+    QTest.mouseRelease(root, left, none, start + QPoint(90, 60))
+    settle(app)
+    assert root.property("systemMove") is False and place(root) == ("A", 300, 400)
+    assert backend.saves == [] and backend._client.focused == [] and root.property("openState") == ""
+    assert (root.x(), root.y()) == (300, 400)
+    assert [m for m in messages if OFFSCREEN_NOTE not in m] == []
+
+
+@pytest.mark.parametrize("name, wanted", [pytest.param("Layer", "layer", marks=needs_layershell), ("Plain", "plain")])
+def test_a_screen_change_of_each_shell_is_in_its_order(tmp_path, name, wanted):
+    """Two real screens (off screen, in a process of its own) and a recording double of the shell. The layer shell
+    hides the window, sets the place, the screen and surfaceScreen, and shows it again (a layer surface gets its
+    output when it is made). The plain shell sets the screen before the geometry, and stays visible."""
+    (tmp_path / "state.json").write_text('{"x": 100, "y": 50, "screen": "RIGHT"}', encoding="utf-8")
+    steps = run_on_two_screens(tmp_path, "tests.shell_order", name, str(tmp_path / "state.json"))
+    assert steps["start"]["qtScreen"] == "RIGHT" and steps["start"]["window"] == [2020, 50]  # the saved screen
+    for step, to, x in (("next screen", "LEFT", 100), ("next screen again", "RIGHT", 2020)):
+        log = steps[step]["log"]
+        assert steps[step]["qtScreen"] == to and steps[step]["window"] == [x, 50] and steps[step]["place"] == [to, 100, 50]
+        if wanted == "layer":
+            order = ["visible false", f"screenName {to}", f"screen {to}", f"surface {to}", "visible true"]
+            assert [w for w in log if w in order] == order, log
+        else:
+            assert "visible false" not in log and f"screen {to}" in log, log
+            assert log.index(f"screen {to}") < log.index(f"x {x}"), log  # the screen before the geometry
+            assert [w for w in log if w.startswith("x ")] == [f"x {x}"], log  # one move
+
+
+def run_on_two_screens(tmp_path, module, *arguments):
+    """Run `python -m <module> <arguments>` with two real off-screen screens: LEFT (1920 x 1080 at 0, 0) and RIGHT
+    (1280 x 720 at 1920, 0). Return its JSON lines by their "step"."""
+    config = tmp_path / "screens.json"
+    config.write_text(json.dumps({"screens": [
+        {"name": "LEFT", "x": 0, "y": 0, "width": 1920, "height": 1080, "logicalDpi": 96, "logicalBaseDpi": 96, "dpr": 1},
+        {"name": "RIGHT", "x": 1920, "y": 0, "width": 1280, "height": 720, "logicalDpi": 96, "logicalBaseDpi": 96, "dpr": 1},
+    ]}), encoding="utf-8")
+    # The arguments of a Qt platform are split at each ":", so a path with a drive letter ("C:\\…") breaks the
+    # option on Windows (the process ended with 0xC0000409 on the runner). The file is named relative to the folder
+    # of the process, and the checkout is found through PYTHONPATH.
+    root = str(Path(__file__).parent.parent)
+    done = subprocess.run(
+        [sys.executable, "-m", module, *arguments], capture_output=True, text=True, timeout=60, cwd=tmp_path,
+        env={**os.environ, "QT_QPA_PLATFORM": f"offscreen:configfile={config.name}",
+             "PYTHONPATH": os.pathsep.join(filter(None, [root, os.environ.get("PYTHONPATH", "")]))})
+    assert done.returncode == 0, done.stderr[-2000:]
+    return {s.pop("step"): s for s in map(json.loads, done.stdout.splitlines())}
+
+
+def test_the_plain_window_goes_to_the_screen_of_the_panel_and_qt_follows_it_during_a_drag(tmp_path):
+    """Two real screens (off screen, in a process of their own): the window is on the screen of the panel; during a
+    drag Qt gives it the screen that holds its centre; at the release the panel belongs to that screen."""
+    steps = run_on_two_screens(tmp_path, "tests.plain_screens", str(tmp_path / "state.json"))
+    assert steps["start"]["screens"] == ["LEFT", "RIGHT"]
+    view = {name: (s["place"], s["window"][:2], s["qtScreen"], s["surfaceScreen"]) for name, s in steps.items()}
+    assert view == {
+        "start": (["LEFT", 1920 - WIDTH - 16, 16], [1920 - WIDTH - 16, 16], "LEFT", "LEFT"),
+        "next screen": (["RIGHT", 1280 - WIDTH - 16, 16], [1920 + 1280 - WIDTH - 16, 16], "RIGHT", "RIGHT"),
+        "next screen again": (["LEFT", 1920 - WIDTH - 16, 16], [1920 - WIDTH - 16, 16], "LEFT", "LEFT"),
+        "placed": (["LEFT", 1500, 300], [1500, 300], "LEFT", "LEFT"),
+        # The panel follows the pointer 1:1; it is a panel of LEFT until the release.
+        "drag 100": (["LEFT", 1600, 300], [1600, 300], "LEFT", "LEFT"),
+        "drag 250": (["LEFT", 1750, 300], [1750, 300], "LEFT", "LEFT"),
+        "drag 300": (["LEFT", 1800, 300], [1800, 300], "RIGHT", "LEFT"),  # its centre is on RIGHT: Qt moves it
+        # The centre is on RIGHT: the panel goes there, all of it.
+        "released": (["RIGHT", 0, 300], [1920, 300], "RIGHT", "RIGHT"),
+    }
+    assert all(s["visible"] for s in steps.values())
+
+
+@pytest.mark.parametrize("variable, chosen", [(None, "plain"), ("plain", "plain"),
+                                               pytest.param("layer", "layer", marks=needs_layershell)])
+def test_the_program_loads_the_panel_in_the_shell_of_the_rule_and_writes_the_shell_in_the_log(
+        app, fake_client, tmp_path, caplog, monkeypatch, variable, chosen):
+    """As bellwether/__main__.py does it. Off screen the platform is not Wayland: the rule gives the plain shell."""
+    from bellwether.__main__ import load_panel
+    if variable is None:
+        monkeypatch.delenv("BELLWETHER_SHELL", raising=False)
+    else:
+        monkeypatch.setenv("BELLWETHER_SHELL", variable)
+    caplog.set_level(logging.INFO, logger="bellwether")
+    backend = Backend(fake_client, settings_path=tmp_path / "state.json", icons=Icons(tmp_path / "app", tmp_path / "cache"))
+    engine = QQmlApplicationEngine()
+    engine.rootContext().setContextProperty("backend", backend)
+    try:
+        assert load_panel(engine) == chosen
+        (root,) = engine.rootObjects()
+        assert bool(root.flags() & Qt.WindowType.WindowStaysOnTopHint) is (chosen == "plain")
+        assert root.property("posX") is not None and root.property("openState") == ""
+        assert [r.getMessage() for r in caplog.records if r.getMessage().startswith("shell:")] == [f"shell: {chosen}"]
+    finally:
+        del engine
+        app.processEvents()
+
+
+@pytest.mark.parametrize("variable, chosen", [("plain", "plain"),
+                                               pytest.param("layer", "layer", marks=needs_layershell)])
+def test_the_start_of_the_panel_gives_the_plain_shell_the_work_area_of_each_screen(
+        app, fake_client, tmp_path, monkeypatch, variable, chosen):
+    """__main__.start_panel: the platform prepares the window, and the plain shell gets the part of each screen that
+    the system keeps (off screen: nothing). The layer shell gets none: the compositor keeps its panels free."""
+    from bellwether import platform
+    from bellwether.__main__ import start_panel
+    monkeypatch.setenv("BELLWETHER_SHELL", variable)
+    prepared = []
+    monkeypatch.setattr(platform, "prepare_window", lambda window, role: prepared.append(role))
+    backend = Backend(fake_client, settings_path=tmp_path / "state.json", icons=Icons(tmp_path / "app", tmp_path / "cache"))
+    engine = QQmlApplicationEngine()
+    engine.rootContext().setContextProperty("backend", backend)
+    try:
+        assert start_panel(engine, app) == chosen
+        (root,) = engine.rootObjects()
+        none = {"left": 0, "top": 0, "right": 0, "bottom": 0}
+        wanted = {screen.name(): none for screen in app.screens()} if chosen == "plain" else {}
+        assert json.loads(js(root, "JSON.stringify(root.reserved)")) == wanted
+        assert prepared == ["panel"] and root.property("refreshRate") > 0
+        # The answer and the options window: opaque where an other app can be behind them (the plain shell).
+        assert backend.opaqueDialogs is (chosen == "plain")
+    finally:
+        del engine
+        app.processEvents()
+
+
+def test_the_part_of_a_screen_that_the_system_keeps_is_the_screen_less_its_available_geometry():
+    from PySide6.QtCore import QRect
+    from types import SimpleNamespace
+    from bellwether.__main__ import reserved_part
+    mac = SimpleNamespace(geometry=lambda: QRect(0, 0, 1024, 768), availableGeometry=lambda: QRect(0, 31, 1024, 674))
+    assert reserved_part(mac) == {"left": 0, "top": 31, "right": 0, "bottom": 63}
+    right = SimpleNamespace(geometry=lambda: QRect(2560, 360, 1920, 1080),
+                            availableGeometry=lambda: QRect(2600, 360, 1830, 1050))
+    assert reserved_part(right) == {"left": 40, "top": 0, "right": 50, "bottom": 30}
+
+
+def test_without_the_layer_shell_module_only_the_layer_cases_are_skipped(tmp_path):
+    from tests.conftest import shell_for
+    missing = tmp_path / "qmldir"
+    assert shell_for("plain", missing) == "plain"
+    with pytest.raises(pytest.skip.Exception):
+        shell_for("layer", missing)
+    (tmp_path / "qmldir").write_text("module org.kde.layershell\n", encoding="utf-8")
+    assert shell_for("layer", missing) == "layer"
+
+
+def test_each_case_of_the_runner_set_is_a_case_of_the_tests():
+    """A renamed test must not drop out of the set of the macOS runner without notice."""
+    import subprocess
+    from tests.conftest import RUNNER
+    done = subprocess.run([sys.executable, "-m", "pytest", "--co", "-q", "-p", "no:cacheprovider", "-m", "runner",
+                           "tests/test_qml.py", "tests/test_skins.py", "tests/test_answer_control.py"],
+                          capture_output=True, text=True, cwd=Path(__file__).parent.parent, timeout=120,
+                          env={**os.environ, "QT_QPA_PLATFORM": "offscreen"})
+    collected = {line for line in done.stdout.splitlines() if "::" in line}
+    assert collected == RUNNER, sorted(RUNNER ^ collected)

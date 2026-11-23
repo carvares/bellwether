@@ -45,10 +45,11 @@ class TrayIcons:
         self._icons: dict[str, QIcon] = {}
 
     @classmethod
-    def load(cls, desktop_dirs=None, icon_dirs=None) -> "TrayIcons":
-        """The icons from the installed Herdr app icon. Any failure gives the circle: the widget must start."""
+    def load(cls, find=None) -> "TrayIcons":
+        """The icons from the installed Herdr app icon (`find`: see `appicon.load_app_icon`). Any failure gives the
+        circle: the widget must start."""
         try:
-            return cls(appicon.load_app_icon(desktop_dirs, icon_dirs))
+            return cls(appicon.load_app_icon(find))
         except Exception as exc:  # The class name only: the text of an error can hold a path.
             log.info("the Herdr app icon cannot be used (%s): the tray icon is a circle", type(exc).__name__)
             return cls(None)

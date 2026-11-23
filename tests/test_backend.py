@@ -165,7 +165,7 @@ def test_the_screen_name_is_saved_with_the_position(app, fake_client, tmp_path):
     first.savePosition(300, 40, "DP-1")
     second = Backend(fake_client, settings_path=path)
     assert (second.savedX, second.savedY, second.savedScreen) == (300, 40, "DP-1")
-    path.write_text('{"x": 7, "y": 8}')  # a file of an older version
+    path.write_text('{"x": 7, "y": 8}', encoding="utf-8")  # a file of an older version
     third = Backend(fake_client, settings_path=path)
     assert (third.savedX, third.savedY, third.savedScreen) == (7, 8, "")
 
@@ -210,7 +210,7 @@ def with_icons(app, fake_client, tmp_path):
     home = tmp_path / "app"
     (home / "icons").mkdir(parents=True)
     for name in ("pi", "agent"):
-        (home / "icons" / f"{name}.svg").write_text(GLYPH)
+        (home / "icons" / f"{name}.svg").write_text(GLYPH, encoding="utf-8")
     return Backend(fake_client, settings_path=tmp_path / "state.json", icons=Icons(home, tmp_path / "cache"))
 
 

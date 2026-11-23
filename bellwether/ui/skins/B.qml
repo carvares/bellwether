@@ -1,6 +1,6 @@
 // Layout B, "Tiles": a 2×2 grid of status tiles with large numerals; the agents of the open status show in a
 // card below the grid. The visual reference is design/layouts/b-tiles.qml. A skin is only drawing: the state
-// and the rules are in PanelModel.qml, the pointer handling is in Main.qml.
+// and the rules are in PanelModel.qml, the pointer handling is in PanelShell.qml.
 import QtQuick
 import ".."
 

@@ -19,7 +19,7 @@ def home(tmp_path):
     folder = tmp_path / "app" / "icons"
     folder.mkdir(parents=True)
     for name, text in {"claude": PICTURE, "pi": WHITE, "codex": TWO, "copilot": BLACK, "agent": STROKE}.items():
-        (folder / f"{name}.svg").write_text(text)
+        (folder / f"{name}.svg").write_text(text, encoding="utf-8")
     return tmp_path / "app"
 
 
@@ -81,16 +81,16 @@ def test_url_of_a_glyph_is_a_copy_in_the_text_colour(home, tmp_path):
     icons = Icons(home, tmp_path / "cache", color="#e8eaed")
     copy = path_of(icons.url("pi"))
     assert copy.startswith(str(tmp_path / "cache")) and copy.endswith(".svg")
-    assert Path(copy).read_text() == tinted(WHITE, "#e8eaed")
-    assert (home / "icons" / "pi.svg").read_text() == WHITE  # the file of the app is not changed
+    assert Path(copy).read_text(encoding="utf-8") == tinted(WHITE, "#e8eaed")
+    assert (home / "icons" / "pi.svg").read_text(encoding="utf-8") == WHITE  # the file of the app is not changed
     assert path_of(icons.url("gemini")) != copy and "agent-" in icons.url("gemini")
 
 
 def test_a_changed_icon_of_the_app_gets_a_new_copy(home, tmp_path):
     first = Icons(home, tmp_path / "cache").url("pi")
-    (home / "icons" / "pi.svg").write_text(BLACK)
+    (home / "icons" / "pi.svg").write_text(BLACK, encoding="utf-8")
     second = Icons(home, tmp_path / "cache").url("pi")
-    assert first != second and Path(path_of(second)).read_text() == tinted(BLACK, "#e8eaed")
+    assert first != second and Path(path_of(second)).read_text(encoding="utf-8") == tinted(BLACK, "#e8eaed")
 
 
 def test_url_is_read_one_time_for_each_word(home, tmp_path):
@@ -120,7 +120,7 @@ def test_no_folder_gives_no_url_and_one_log_line(tmp_path, caplog):
 
 
 def test_a_glyph_shows_as_text_when_the_copy_cannot_be_written(home, tmp_path):
-    (tmp_path / "cache").write_text("a file where the folder must be")
+    (tmp_path / "cache").write_text("a file where the folder must be", encoding="utf-8")
     assert Icons(home, tmp_path / "cache").url("pi") == ""
 
 
@@ -139,9 +139,9 @@ def test_home_follows_the_environment(monkeypatch, tmp_path):
 
 
 def test_find_icon_takes_a_word_of_64_characters_and_no_longer_word(home):
-    (home / "icons" / ("p" * 64 + ".svg")).write_text(BLACK)
+    (home / "icons" / ("p" * 64 + ".svg")).write_text(BLACK, encoding="utf-8")
     assert name_of(find_icon("p" * 64, home / "icons")) == "p" * 64 + ".svg"
-    (home / "icons" / ("p" * 65 + ".svg")).write_text(BLACK)
+    (home / "icons" / ("p" * 65 + ".svg")).write_text(BLACK, encoding="utf-8")
     assert name_of(find_icon("p" * 65, home / "icons")) == "agent.svg"
 
 
@@ -178,7 +178,7 @@ def test_a_copy_that_was_deleted_is_made_again(home, tmp_path, caplog):
     import shutil
 
     shutil.rmtree(tmp_path / "cache")
-    assert icons.url("gemini") == first and Path(path_of(first)).read_text() == tinted(STROKE, "#e8eaed")
+    assert icons.url("gemini") == first and Path(path_of(first)).read_text(encoding="utf-8") == tinted(STROKE, "#e8eaed")
     assert len(caplog.records) == 1  # one log line for the word, also after the new copy
 
 

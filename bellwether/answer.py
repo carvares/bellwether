@@ -7,7 +7,9 @@ from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject
 
+from . import platform
 from .layouts import UI_PATH
+from .options import can_place_windows, keep_on_screen, panel_of
 
 log = logging.getLogger("bellwether")
 
@@ -47,6 +49,10 @@ class Answer:
                 self._backend.closePrompt()  # no window shows the prompt: it does not stay open
                 return
             self._window = roots[-1]
+            platform.prepare_window(self._window, "answer")  # the set-up of the system (macOS: activate at each open)
+            panel = panel_of(self._engine)
+            if panel is not None and panel.screen() is not None and can_place_windows():
+                self._window.setScreen(panel.screen())  # the first show on the screen of the panel
             self._window.installEventFilter(self._keys)
         if self._window.isVisible() and not self._window.isActive():
             # Behind a different window. On Wayland a program cannot raise its window, but a new window comes to
@@ -57,4 +63,6 @@ class Answer:
             self._window.setProperty("raising", False)
         else:
             self._window.show()
+        # Inside the free part of its screen (600 px fit in 640), clear of the panel when there is room.
+        keep_on_screen(self._window, panel_of(self._engine))
         self._window.requestActivate()

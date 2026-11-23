@@ -77,7 +77,7 @@ def test_every_narrow_screen_has_an_expected_result():
 @pytest.mark.parametrize("name", list(EXPECTED))
 def test_a_narrow_screen_gives_the_exact_prompt(name):
     app, title, subtitle, question, labels, lines, first = EXPECTED[name]
-    prompt = parse(app, (FIXTURES / f"{name}.txt").read_text())
+    prompt = parse(app, (FIXTURES / f"{name}.txt").read_text(encoding="utf-8"))
     assert prompt is not None and not prompt.cut and not prompt.blind
     assert (prompt.title, prompt.subtitle, prompt.question) == (title, subtitle, question)
     assert [option.label for option in prompt.options] == labels
@@ -135,16 +135,16 @@ def test_no_prompt_fixture_has_a_name_of_this_machine():
     assert getpass.getuser().lower() in names and len(names) >= 3
     words = private(names)
     for path in FIXTURES.parent.rglob("*.txt"):
-        assert names_in(path.read_text(), words) == [], path.name
+        assert names_in(path.read_text(encoding="utf-8"), words) == [], path.name
 
 
 @pytest.mark.parametrize("name", [name for name in EXPECTED if "claude-bash" in name or "claude-edit" in name])
 def test_every_line_of_the_header_is_in_the_title_or_the_subtitle_as_the_screen_shows_it(name):
     """Between the top rule and the detail: the title, then each line as it is (a tip too). Nothing is left out."""
-    lines = (FIXTURES / f"{name}.txt").read_text().split("\n")
+    lines = (FIXTURES / f"{name}.txt").read_text(encoding="utf-8").split("\n")
     top = max(place for place, line in enumerate(lines) if line.startswith("─" * 20))
     dashes = next(place for place, line in enumerate(lines) if line.startswith("╌" * 20))
-    prompt = parse("claude-code", (FIXTURES / f"{name}.txt").read_text())
+    prompt = parse("claude-code", (FIXTURES / f"{name}.txt").read_text(encoding="utf-8"))
     assert [prompt.title, *prompt.subtitle.split("\n")] == [line[1:] for line in lines[top + 1:dashes]]
 
 
@@ -152,7 +152,7 @@ def test_every_line_of_the_header_is_in_the_title_or_the_subtitle_as_the_screen_
 def test_codex_wraps_a_command_behind_its_two_spaces_and_never_at_the_first_column(name):
     """The measurement behind the rule "a line of Codex at the first column cannot be drawn by a command": a command
     that is wider than the terminal, also one word that is wider, goes on behind two spaces."""
-    lines = (FIXTURES / f"{name}.txt").read_text().split("\n")
+    lines = (FIXTURES / f"{name}.txt").read_text(encoding="utf-8").split("\n")
     start = lines.index("  Would you like to run the following command?")
     end = next(place for place, line in enumerate(lines) if line.startswith("› 1. "))
     assert all(line == "" or line.startswith("  ") for line in lines[start:end])
@@ -161,11 +161,11 @@ def test_codex_wraps_a_command_behind_its_two_spaces_and_never_at_the_first_colu
 
 
 def test_the_detail_of_a_narrow_dialog_has_every_line_of_the_wrapped_command():
-    prompt = parse("codex", (FIXTURES / "50-codex-command.txt").read_text())
+    prompt = parse("codex", (FIXTURES / "50-codex-command.txt").read_text(encoding="utf-8"))
     assert list(prompt.detail)[-4:] == [
         "  $ touch", "  made-up-file-alpha-made-up-file-beta-made-up-f",
         "  ile-gamma-made-up-file-delta-made-up-file-epsi", "  lon.txt made-up-second.txt"]
-    prompt = parse("claude-code", (FIXTURES / "50-claude-bash.txt").read_text())
+    prompt = parse("claude-code", (FIXTURES / "50-claude-bash.txt").read_text(encoding="utf-8"))
     assert list(prompt.detail) == [
         " │ touch made-up-file-alpha-made-up-file-beta-mad", " │ e-up-file-gamma-made-up-file-delta-made-up-fil",
         " │ e-epsilon.txt made-up-second-argument.txt &&", " │ echo made-up-done"]

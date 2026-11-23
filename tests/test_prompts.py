@@ -11,7 +11,7 @@ FIXTURES = Path(__file__).parent / "fixtures" / "prompts"
 
 
 def screen(name: str) -> str:
-    return (FIXTURES / f"{name}.txt").read_text()
+    return (FIXTURES / f"{name}.txt").read_text(encoding="utf-8")
 
 
 EFFECT = {"A": ACCEPT, "D": DECLINE, "O": OTHER}

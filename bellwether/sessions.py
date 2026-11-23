@@ -1,15 +1,15 @@
 """The model that an agent runs and the start of its session, for the second line of an agent row.
 
 Where the facts come from, for a terminal of this machine:
-  the processes   `herdr-core get` names the first process of the terminal and the one that has it now. /proc gives
-                  their child processes. Only these processes are asked.
+  the processes   `herdr-core get` names the first process of the terminal and the one that has it now. The process
+                  host of the system gives their child processes. Only these processes are asked.
   Claude Code     `~/.claude/sessions/<pid>.json` of such a process (it must name that pid, and the start of that
-                  process as /proc has it: a file that an older process with this pid left is not used). It has the
-                  start of the session and the session id. The model is in the transcript of that session
+                  process as the process host has it: a file that an older process with this pid left is not used).
+                  It has the start of the session and the session id. The model is in the transcript of that session
                   (`~/.claude/projects/<folder>/<session id>.jsonl`): the last record of the assistant counts.
-  Codex           a rollout file under `~/.codex/sessions/` that such a process has open (/proc/<pid>/fd). Its first
-                  line has the start, and its last "turn_context" record the model. With no open rollout file there
-                  is no model: a file is never chosen by its folder or its time.
+  Codex           a rollout file under `~/.codex/sessions/` that such a process has open (the process host names
+                  them). Its first line has the start, and its last "turn_context" record the model. With no open
+                  rollout file there is no model: a file is never chosen by its folder or its time.
 A model is a fact only when it was read for that process. With no start of a session, the engine uses the creation
 time of the terminal.
 
@@ -30,8 +30,13 @@ import tomllib
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .client import Failure, Terminal, valid_address
+from .platform import process_host
+
+if TYPE_CHECKING:  # The host of each system is a subclass of this one.
+    from .platform.host import ProcessHost as Host
 
 log = logging.getLogger("bellwether")
 
@@ -40,13 +45,9 @@ BLOCK = 64 * 1024
 SCAN_LIMIT = 4 * 1024 * 1024
 # The largest session file of Claude Code that is read (it has about 1 KB).
 SMALL_FILE = 64 * 1024
-# The most processes of one terminal that are asked.
-MAX_PROCESSES = 32
-# The most threads of one process whose child processes are read.
-MAX_TASKS = 256
 # Seconds between two reads of the files of one agent.
 REFRESH = 30.0
-# Seconds between two checks in /proc that the processes of an agent still live (no command).
+# Seconds between two checks with the process host that the processes of an agent still live (no command).
 CHECK = 5.0
 # Seconds between two `herdr-core get` of one agent whose processes live: a net for a terminal that has an other
 # foreground process while the old one lives on.
@@ -123,72 +124,6 @@ def age_words(seconds: float) -> str:
     return count(minutes, "minute") if minutes else "less than 1 minute"
 
 
-# ----- this machine: the home folder and /proc -----
-
-class Host:
-    """The home folder of the user and /proc. A test gives its own folders. `bytes_read` counts what was read of
-    transcripts and rollout files."""
-
-    def __init__(self, home: Path | None = None, proc: Path = Path("/proc")) -> None:
-        self.home = Path(os.path.realpath(home if home is not None else Path.home()))
-        self.proc = Path(proc)
-        self.bytes_read = 0
-
-    def start_ticks(self, pid: int) -> str | None:
-        """The start of the process as /proc has it (field 22 of `stat`, in clock ticks since the boot)."""
-        try:
-            text = (self.proc / str(pid) / "stat").read_text(errors="replace")
-        except OSError:
-            return None
-        fields = text.rsplit(")", 1)[-1].split()  # the name of a process can have spaces and brackets
-        return fields[19] if len(fields) > 19 and fields[19].isdigit() else None
-
-    def children(self, pid: int) -> list[int]:
-        found: list[int] = []
-        try:
-            tasks = sorted((self.proc / str(pid) / "task").iterdir())
-        except OSError:
-            return found
-        for task in tasks[:MAX_TASKS]:
-            try:
-                found += [int(word) for word in (task / "children").read_text().split() if word.isdigit()]
-            except OSError:
-                continue
-        return found
-
-    def family(self, *pids: int):
-        """These processes and then their child processes, the nearest first, each one time, at most
-        MAX_PROCESSES. One at a time: the child processes are read only when a reader asks for more."""
-        order = [pid for pid in dict.fromkeys(pids) if pid > 0]
-        at = 0
-        while at < len(order) and at < MAX_PROCESSES:
-            yield order[at]
-            order += [child for child in self.children(order[at]) if child not in order]
-            at += 1
-
-    def arguments(self, pid: int) -> list[str]:
-        """The words of the command line of the process. Empty when they cannot be read."""
-        try:
-            data = (self.proc / str(pid) / "cmdline").read_bytes()[:65536]
-        except OSError:
-            return []
-        return [word.decode(errors="replace") for word in data.split(b"\0") if word]
-
-    def open_files(self, pid: int) -> list[str]:
-        """The files that the process has open (the names only)."""
-        found = []
-        try:
-            numbers = list((self.proc / str(pid) / "fd").iterdir())
-        except OSError:
-            return found
-        for number in numbers[:4096]:
-            try:
-                found.append(os.readlink(number))
-            except OSError:
-                continue
-        return found
-
-
 # ----- the facts -----
 
 @dataclass(frozen=True)
@@ -209,11 +144,28 @@ class SessionFacts:
     mark: Mark | None = field(default=None, repr=False)
 
 
+# The open of a file of a session: it does not wait (a pipe has no writer), does not take a terminal, is not given to
+# a child, and reads bytes (Windows opens in text mode without O_BINARY). A flag that a system does not have is 0.
+_OPEN_FLAGS = os.O_RDONLY
+for _name in ("O_NONBLOCK", "O_NOCTTY", "O_CLOEXEC", "O_BINARY", "O_NOINHERIT"):
+    _OPEN_FLAGS |= getattr(os, _name, 0)
+del _name
+
+
+def _seek_read(number: int, size: int, offset: int) -> bytes:
+    """`os.pread` where the system has none (Windows): a seek and a read. Each open file is used by one thread."""
+    os.lseek(number, offset, os.SEEK_SET)
+    return os.read(number, size)
+
+
+_pread = getattr(os, "pread", None) or _seek_read
+
+
 def _open_regular(path: Path) -> int | str:
     """The open file number of a regular file, or a reason code: "no_file", "not_regular". The open does not wait
     (a pipe has no writer) and does not take a terminal; a pipe or a device is closed again and never read."""
     try:
-        number = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOCTTY | os.O_CLOEXEC)
+        number = os.open(path, _OPEN_FLAGS)
     except OSError:
         return "no_file"
     try:
@@ -231,7 +183,7 @@ def _head(path: Path, size: int) -> bytes | str:
     if isinstance(number, str):
         return number
     try:
-        return os.pread(number, size, 0)
+        return _pread(number, size, 0)
     except OSError:
         return "no_file"
     finally:
@@ -277,13 +229,13 @@ def last_model(host: Host, path: Path, needle: bytes, pick, known: SessionFacts 
             return known.model, mark
         floor = 0
         # The older part is not read again when the new part starts at the start of a line.
-        if same and before.size > 0 and os.pread(number, 1, before.size - 1) == b"\n":
+        if same and before.size > 0 and _pread(number, 1, before.size - 1) == b"\n":
             floor = before.size
         stop = max(floor, size - SCAN_LIMIT)
         at, rest = size, b""
         while at > stop:
             start = max(stop, at - BLOCK)
-            data = os.pread(number, at - start, start)
+            data = _pread(number, at - start, start)
             host.bytes_read += len(data)
             lines = (data + rest).split(b"\n")
             # The first piece is the end of a line that starts before this block, but at the start of the file
@@ -493,7 +445,7 @@ class _Entry:
 class SessionWatch:
     """The facts of the agents of the list. `step` does the reads that are due (on a worker thread). For each agent:
     a `herdr-core get` at once when it is new in the list, has an other program word, or when a process that its
-    facts depend on ended or is an other process now (checked in /proc at each step: no command), or when its
+    facts depend on ended or is an other process now (checked with the process host at each step: no command), or when its
     status is an other (a program gives its terminal a new title at such a time); else one in GET_REFRESH seconds,
     as a net. `titles` gives the title of each terminal from these gets: the name of an agent with no name in
     Herdr. A title is never in a log line. The files of its processes are read each `interval` seconds, with the processes
@@ -503,7 +455,7 @@ class SessionWatch:
     def __init__(self, client, host: Host | None = None, readers=None, clock=time.monotonic,
                  interval: float = REFRESH) -> None:
         self._client = client
-        self._host = host or Host()
+        self._host = host or process_host()
         self._readers = READERS if readers is None else readers
         self._clock = clock
         self._interval = interval
@@ -604,7 +556,7 @@ class SessionWatch:
 
     def _lives(self, entry: _Entry) -> bool:
         """Each process of the entry is still there, and is the same process (the same start). One small read of
-        /proc for each; a process that could not be read at the last read counts as the same while it still cannot."""
+        the process host for each; a process that could not be read at the last read counts as the same while it still cannot."""
         return all(self._host.start_ticks(pid) == ticks for pid, ticks in entry.alive)
 
     def _read(self, agent, terminal: Terminal, known: SessionFacts | None) -> SessionFacts:

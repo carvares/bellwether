@@ -54,8 +54,18 @@ Rectangle {
 
     // The width of the titles at the left: they hold text, so they grow with it.
     readonly property int titleWidth: theme.fit(150)
+    // The width of the label of the field and of the opacity in the narrow form.
+    readonly property int shortLabelWidth: theme.fit(84)
+    // The width that the wide form needs: the title, the palette in one row and "Done" in one line; the field and
+    // the opacity in one line. Narrower (a narrow screen): the title and "Done" in a line of their own, the palette
+    // in rows below, the field, and the opacity in a line of its own.
+    readonly property int wideWidth: Math.max(
+        14 + titleWidth + 8 + editor.presets.length * (chips.chip + chips.gap) - chips.gap + 8 + doneButton.width + 14,
+        withOpacity ? 14 + titleWidth + 8 + theme.fit(122) + 40 + theme.fit(84) + 8 + 240 + 8 + theme.fit(56) + 14 : 0)
+    readonly property bool compact: width < wideWidth
 
-    implicitHeight: 12 + chips.height + 10 + fieldBox.height + 4 + message.height + 6
+    implicitHeight: chips.y + chips.height + 10 + fieldBox.height + 4 + message.height + 6
+                    + (compact && withOpacity ? fieldBox.height + 6 : 0)
     height: implicitHeight
     radius: theme.itemRadius
     color: theme.selectedColor
@@ -66,8 +76,8 @@ Rectangle {
         readonly property bool isEditorTitle: true
         x: 14
         y: 12
-        width: editor.titleWidth
-        height: chips.height
+        width: editor.compact ? editor.width - 28 - doneButton.width - 8 : editor.titleWidth
+        height: chips.chip
         verticalAlignment: Text.AlignVCenter
         elide: Text.ElideRight
         text: editor.name + " colour"
@@ -81,11 +91,15 @@ Rectangle {
         readonly property bool isPalette: true
         readonly property int chip: 26
         readonly property int gap: 6
+        // The presets in one row, or in rows of as many as fit (the narrow form).
+        readonly property int perRow: editor.compact
+            ? Math.max(1, Math.floor((editor.width - 28 + gap) / (chip + gap))) : editor.presets.length
+        readonly property int rows: Math.ceil(editor.presets.length / perRow)
         property int current: Math.max(0, editor.presets.indexOf(editor.rgb))
-        x: 14 + editor.titleWidth + 8
-        y: 12
-        width: editor.presets.length * (chip + gap) - gap
-        height: chip
+        x: editor.compact ? 14 : 14 + editor.titleWidth + 8
+        y: editor.compact ? 12 + chip + 10 : 12
+        width: Math.min(perRow, editor.presets.length) * (chip + gap) - gap
+        height: rows * chip + (rows - 1) * gap
         activeFocusOnTab: true
         Accessible.role: Accessible.List
         Accessible.name: "Presets for the " + editor.name + " colour, " + editor.presets[current]
@@ -104,7 +118,8 @@ Rectangle {
                 required property int index
                 readonly property string presetColour: modelData
                 readonly property bool inEffect: editor.rgb === modelData
-                x: index * (chips.chip + chips.gap)
+                x: (index % chips.perRow) * (chips.chip + chips.gap)
+                y: Math.floor(index / chips.perRow) * (chips.chip + chips.gap)
                 width: chips.chip
                 height: chips.chip
                 radius: Math.min(6, editor.theme.itemRadius)
@@ -143,7 +158,7 @@ Rectangle {
         id: fieldLabel
         x: 14
         y: fieldBox.y
-        width: editor.titleWidth
+        width: editor.compact ? editor.shortLabelWidth : editor.titleWidth
         height: fieldBox.height
         verticalAlignment: Text.AlignVCenter
         elide: Text.ElideRight
@@ -153,8 +168,8 @@ Rectangle {
     }
     Rectangle {
         id: fieldBox
-        x: chips.x
-        y: 12 + chips.height + 10
+        x: editor.compact ? 14 + editor.shortLabelWidth + 8 : chips.x
+        y: chips.y + chips.height + 10
         width: editor.theme.fit(122)
         height: editor.theme.fit(28)
         radius: Math.min(6, editor.theme.itemRadius)
@@ -238,8 +253,8 @@ Rectangle {
     Text {
         id: opacityLabel
         visible: editor.withOpacity
-        x: fieldBox.x + fieldBox.width + 40
-        y: fieldBox.y
+        x: editor.compact ? 14 : fieldBox.x + fieldBox.width + 40
+        y: editor.compact ? message.y + message.height + 6 : fieldBox.y
         width: editor.theme.fit(84)
         height: fieldBox.height
         verticalAlignment: Text.AlignVCenter
@@ -255,8 +270,8 @@ Rectangle {
         visible: editor.withOpacity
         enabled: editor.withOpacity
         x: opacityLabel.x + opacityLabel.width + 8
-        y: fieldBox.y + (fieldBox.height - height) / 2
-        width: 240
+        y: opacityLabel.y + (fieldBox.height - height) / 2
+        width: editor.compact ? Math.max(80, Math.min(240, editor.width - x - 8 - editor.theme.fit(56) - 14)) : 240
         label: editor.name + " opacity"
         from: editor.opacityFrom
         to: editor.opacityTo
@@ -268,7 +283,7 @@ Rectangle {
         readonly property bool isOpacityValue: true
         visible: editor.withOpacity
         x: opacitySlider.x + opacitySlider.width + 8
-        y: fieldBox.y
+        y: opacityLabel.y
         width: editor.theme.fit(56)
         height: fieldBox.height
         verticalAlignment: Text.AlignVCenter
@@ -280,11 +295,12 @@ Rectangle {
 
     // The last stop of the Tab key in the editor.
     LookButton {
+        id: doneButton
         readonly property bool isEditorClose: true
         theme: editor.theme
         anchors.right: parent.right
         anchors.rightMargin: 14
-        y: 12 + (chips.height - height) / 2
+        y: 12 + (chips.chip - height) / 2
         text: "Done"
         spoken: "Close the colour editor"
         onActivated: editor.closeRequested()

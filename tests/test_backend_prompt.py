@@ -23,7 +23,7 @@ FOLLOW = (0.0, 0.0, 0.0)  # three reads after a key, with no wait
 
 
 def text_of(name: str) -> str:
-    return (FIXTURES / f"{name}.txt").read_text()
+    return (FIXTURES / f"{name}.txt").read_text(encoding="utf-8")
 
 
 def shown(name: str) -> Screen:
@@ -214,7 +214,7 @@ def test_a_question_has_descriptions_kinds_and_the_free_text_flag(bench):
 def test_the_prompt_has_the_icon_of_the_row(app, tmp_path):
     folder = tmp_path / "app" / "icons"
     folder.mkdir(parents=True)
-    (folder / "claude-code.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg"><path fill="#123456" d="M0 0h1v1z"/></svg>')
+    (folder / "claude-code.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg"><path fill="#123456" d="M0 0h1v1z"/></svg>', encoding="utf-8")
     client = ScreenClient()
     backend = Backend(client, settings_path=tmp_path / "state.json", icons=Icons(tmp_path / "app", tmp_path / "cache"), follow=FOLLOW)
     backend.apply(list(BLOCKED))
@@ -1499,7 +1499,7 @@ def test_only_the_plain_yes_is_not_wide_in_every_dialog_of_the_fixtures():
     from bellwether.prompt_session import wide
     seen = {}
     for path in sorted(FIXTURES.glob("*.txt")) + sorted((FIXTURES / "narrow").glob("*.txt")):
-        prompt = parse("codex" if "codex" in path.name else "claude-code", path.read_text())
+        prompt = parse("codex" if "codex" in path.name else "claude-code", path.read_text(encoding="utf-8"))
         for option in (prompt.options if prompt else ()):
             if option.effect == ACCEPT:
                 seen[option.label] = wide(option)

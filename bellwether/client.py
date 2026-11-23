@@ -16,16 +16,14 @@ from __future__ import annotations
 import json
 import logging
 import re
-import shutil
 import subprocess
 import threading
 import time
 import unicodedata
 from dataclasses import dataclass, field
-from pathlib import Path
 
+from . import platform
 from .state import Agent, parse_app, parse_core, seen_turns
-from .window import raise_app_window
 
 log = logging.getLogger("bellwether")
 
@@ -169,33 +167,37 @@ def _title(value: object) -> str:
     return " ".join("".join(ch if ch.isprintable() else " " for ch in value[:4 * TITLE_LIMIT]).split())[:TITLE_LIMIT]
 
 
-def find_executables() -> tuple[str | None, str | None]:
-    """Return the paths of herdr-app and herdr-core. None means not found."""
-    local_core = Path.home() / ".local" / "bin" / "herdr-core"
-    core = shutil.which("herdr-core") or (str(local_core) if local_core.is_file() else None)
-    return shutil.which("herdr-app"), core
+def _environment(env: dict[str, str] | None) -> dict:
+    """The `env=` option only for a command that the platform gives its own environment (None: this process's), and
+    the options of the system for each program (Windows: no console window; none elsewhere)."""
+    return {**platform.PROCESS_OPTIONS, **({} if env is None else {"env": env})}
 
 
-def _run(argv: list[str], timeout: float = TIMEOUT) -> subprocess.CompletedProcess:
-    return subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout)
+def _run(argv: list[str], timeout: float = TIMEOUT, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout, **_environment(env))
 
 
-def _spawn(argv: list[str]) -> subprocess.Popen:
-    return subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+def _spawn(argv: list[str], env: dict[str, str] | None = None) -> subprocess.Popen:
+    return subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            **_environment(env))
 
 
 class HerdrClient:
     def __init__(self, app: str | None, core: str | None, run=_run, sleep=time.sleep, clock=time.monotonic,
-                 busctl: str = "busctl", systemd_run: str = "systemd-run", env: str = "env", spawn=_spawn) -> None:
+                 spawn=_spawn, **commands: str) -> None:
+        """`commands`: programs of the system, by role, in the place of the ones that the platform names (a test
+        gives fakes); a role that the platform does not have is an error. `run` and `spawn` get `env=` only for a
+        command that the platform gives its own environment (`platform.clean_environment`)."""
+        unknown = sorted(commands.keys() - platform.COMMANDS.keys())
+        if unknown:
+            raise TypeError(f"unknown commands: {', '.join(unknown)}")
         self._app = app
         self._core = core
         self._run = run
         self._spawn = spawn
         self._sleep = sleep
         self._clock = clock
-        self._busctl = busctl
-        self._systemd_run = systemd_run
-        self._env = env
+        self._commands = {**platform.COMMANDS, **commands}
         # The addresses of the last list of agents. A screen call takes no other address.
         self._known: frozenset[str] = frozenset()
         self._source: str | None = None  # "app", "core" or "none": where the last list came from
@@ -329,19 +331,21 @@ class HerdrClient:
             address = None
         if address != terminal:
             return self._failed(action, terminal, "not_this_terminal")
-        argv = [self._core, *args]
+        argv, env = [self._core, *args], None
         if no_caller:
-            argv = [self._env, *(part for name in _CALLER_VARIABLES for part in ("-u", name)), *argv]
+            argv, env = platform.clean_environment(argv, _CALLER_VARIABLES, self._commands)
         if lasting:
             done = self._lasting(argv, timeout, terminal, late)
         else:
-            done = self._command(argv, timeout) if cancel is None else self._watched(argv, timeout, cancel)
+            done = self._command(argv, timeout, env) if cancel is None else self._watched(argv, timeout, cancel, env)
         return self._failed(action, terminal, done.code) if isinstance(done, Failure) else done
 
-    def _command(self, argv: list[str], timeout: float) -> subprocess.CompletedProcess | Failure:
-        """Run one herdr-core command. Its output is not logged and not kept when it fails."""
+    def _command(self, argv: list[str], timeout: float, env: dict[str, str] | None = None
+                 ) -> subprocess.CompletedProcess | Failure:
+        """Run one herdr-core command (in the environment `env`, None: the one of this process). Its output is not
+        logged and not kept when it fails."""
         try:
-            done = self._run(argv, timeout=timeout)
+            done = self._run(argv, timeout=timeout) if env is None else self._run(argv, timeout=timeout, env=env)
         except subprocess.TimeoutExpired:
             return Failure("timeout")
         except (OSError, subprocess.SubprocessError):
@@ -350,14 +354,15 @@ class HerdrClient:
             return Failure(self._error_kind(done.stderr) or f"exit_{done.returncode}")
         return done
 
-    def _watched(self, argv: list[str], timeout: float, cancel: threading.Event
+    def _watched(self, argv: list[str], timeout: float, cancel: threading.Event, env: dict[str, str] | None = None
                  ) -> subprocess.CompletedProcess | Failure:
-        """Run one herdr-core command that `cancel` can end: then it is killed. The call returns only after the
-        process has ended, so a kill is confirmed. Its output is not logged and not kept when it fails."""
+        """Run one herdr-core command (in the environment `env`, None: the one of this process) that `cancel` can
+        end: then it is killed. The call returns only after the process has ended, so a kill is confirmed. Its
+        output is not logged and not kept when it fails."""
         if cancel.is_set():
             return Failure("cancelled")
         try:
-            process = self._spawn(argv)
+            process = self._spawn(argv) if env is None else self._spawn(argv, env=env)
         except (OSError, subprocess.SubprocessError):
             return Failure("no_run")
         deadline = self._clock() + timeout
@@ -460,21 +465,18 @@ class HerdrClient:
                 if gone is None or left() > 0:
                     raise
                 raise gone  # The time ended during one more try: the last answer of the app stands.
-        raised = raise_app_window(run, self._busctl)
+        raised = platform.raise_app(run, self._commands)
         log.info("jump agent=%s step=raise kwin=%s", key, raised)
-        # Without KWin, ask the app: plain `herdr-app` opens or raises its window. KWin is first because
-        # its result is known, and it does not depend on the focus rules of the desktop.
+        # Without the raise of the system, ask the app: plain `herdr-app` opens or raises its window. The raise of
+        # the system is first because its result is known, and it does not depend on the focus rules of the desktop.
         if not raised and self._launch(key, run) != 0:
             raise HerdrError("no_raise", "could not raise the window")
 
     def _launch(self, key: str, run) -> int | str:
-        """Run plain `herdr-app` as the desktop does: a unit of the user's systemd, with the environment of
-        the session and not of this process. The app does not end with the widget and has none of its files.
-        Return the exit code of the launcher (0: accepted), or the name of the error."""
+        """Start plain `herdr-app` outside the process tree of the widget, as the desktop does (see
+        `platform.start_app`). Return the exit code of the launcher (0: accepted), or the name of the error."""
         try:
-            code = run(
-                [self._systemd_run, "--user", "--quiet", "--collect", "--slice=app.slice", "--", self._app]
-            ).returncode
+            code = platform.start_app(run, self._app, self._commands)
         except (OSError, subprocess.SubprocessError) as exc:
             code = type(exc).__name__
         log.info("jump agent=%s step=launch exit=%s", key, code)
